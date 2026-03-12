@@ -1,7 +1,7 @@
 # =========================================
 # 몽글픽 Spring Boot 백엔드 CI/CD 워크플로우
 # =========================================
-# PR/push → Gradle 테스트 + JAR 빌드 확인 (GitHub 호스팅 러너)
+# PR/push → Gradle 테스트 + JAR 빌드 (GitHub 호스팅 러너, H2 인메모리 DB)
 # develop push → 스테이징 맥북에서 직접 배포 (Self-hosted 러너)
 #
 # 사전 준비:
@@ -30,22 +30,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Java 21 설치
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
-      # Gradle 캐시 설정
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # 테스트 실행
+      # 테스트 실행 (H2 인메모리 DB 사용 — src/test/resources/application.yml)
       - name: Test
         run: ./gradlew test --no-daemon
 
-      # JAR 빌드 확인 (테스트 제외)
       - name: Build JAR
         run: ./gradlew bootJar --no-daemon -x test
 
@@ -58,18 +55,21 @@ jobs:
     if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Deploy Backend container
         run: |
           set -e
           echo "========== Backend 배포 시작 =========="
 
           PROJECT_DIR="${PROJECT_DIR:-/Users/yoonhyungjoo/Documents/monglepick}"
-          cd "$PROJECT_DIR"
 
-          # 최신 코드 pull
-          cd monglepick-backend
-          git pull origin develop
-          cd ..
+          # checkout된 코드를 프로젝트 디렉토리에 동기화
+          rsync -a --delete --exclude='.gradle' --exclude='build' --exclude='.env' \
+            "$GITHUB_WORKSPACE/" "$PROJECT_DIR/monglepick-backend/"
+
+          cd "$PROJECT_DIR"
 
           # Backend 컨테이너만 재빌드 + 재시작
           docker compose -f docker-compose.staging.yml up -d --build --no-deps spring-boot

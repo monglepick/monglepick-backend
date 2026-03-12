@@ -1,0 +1,56 @@
+# =========================================
+# 테스트 환경 설정 (H2 인메모리 DB)
+# =========================================
+# CI/CD 환경에서 MySQL 없이 테스트 가능하도록
+# H2 인메모리 데이터베이스 사용
+
+spring:
+  datasource:
+    # H2 인메모리 DB (MySQL 호환 모드)
+    url: jdbc:h2:mem:testdb;MODE=MYSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      # 테스트 시 자동 스키마 생성 후 종료 시 삭제
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  jackson:
+    date-format: yyyy-MM-dd'T'HH:mm:ss
+    time-zone: Asia/Seoul
+
+server:
+  port: 0  # 랜덤 포트 (테스트 간 충돌 방지)
+
+# JWT 테스트용 설정
+jwt:
+  secret: test-secret-key-must-be-at-least-256-bits-long-for-hmac-sha256-algorithm
+  expiration: 3600000
+  refresh-expiration: 604800000
+
+# AI Agent (테스트에서는 사용하지 않음)
+ai:
+  agent:
+    base-url: http://localhost:9999
+    service-key: test-key
+    timeout: 5
+
+# 추천 서비스 (테스트에서는 사용하지 않음)
+recommend-service:
+  base-url: http://localhost:9998
+
+# CORS
+cors:
+  allowed-origins: http://localhost:3000
+  allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+  allowed-headers: "*"
+  allow-credentials: true
+  max-age: 3600
+
+logging:
+  level:
+    root: WARN
