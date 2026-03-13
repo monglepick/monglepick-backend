@@ -1,145 +1,70 @@
 package com.monglepick.monglepickbackend.domain.user.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
-import jakarta.persistence.Table;
-import lombok.AccessLevel;
+
+
+import com.monglepick.monglepickbackend.domain.auth.dto.UserRequestDTO;
+import jakarta.persistence.*;
+
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import org.hibernate.annotations.UuidGenerator;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+
 import java.time.LocalDateTime;
 
-/**
- * 사용자 엔티티
- *
- * <p>MySQL users 테이블과 매핑됩니다.
- * 회원가입, 로그인, 프로필 관리에 사용됩니다.</p>
- *
- * <p>사용자 역할(Role):</p>
- * <ul>
- *   <li>USER: 일반 사용자 (기본값)</li>
- *   <li>ADMIN: 관리자 (커뮤니티 관리, 콘텐츠 관리 권한)</li>
- * </ul>
- */
+
 @Entity
-@Table(name = "users")
+@EntityListeners(AuditingEntityListener.class)
+@Table(name="users")
 @Getter
-@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class User {
-
-    /** 사용자 고유 식별자 (AUTO_INCREMENT) */
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @UuidGenerator(style= UuidGenerator.Style.RANDOM)
+    @Column(name="user_id", nullable = false)
+    private String userId;
 
-    /** 이메일 주소 (로그인 ID로 사용, 유니크) */
-    @Column(nullable = false, unique = true, length = 255)
-    private String email;
+    @Column(name="user_email", nullable = true)
+    private String userEmail;
 
-    /** 닉네임 (커뮤니티 표시명, 유니크) */
-    @Column(nullable = false, unique = true, length = 50)
-    private String nickname;
+    @Column(name="user_password", nullable = false)
+    private String userPassword;
 
-    /** 비밀번호 (BCrypt 해시값 저장) */
-    @Column(nullable = false, length = 255)
-    private String password;
+    @Column(name="is_social", nullable = false)
+    private Boolean isSocial;
 
-    /** 프로필 이미지 URL (선택사항) */
-    @Column(name = "profile_image", length = 500)
-    private String profileImage;
+    @Column(name="user_birth, nullable=false")
+    private String userBirth;
 
-    /** 사용자 역할 (USER 또는 ADMIN) */
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private Role role;
+    @Column(name="social_provider_type")
+    private SocialProviderType socialProviderType;
 
-    /** 계정 생성 시각 */
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    @Column(name ="user_nickname")
+    private String userNickname;
 
-    /** 정보 수정 시각 */
-    @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
+    @Column(name="profile_img")
+    private String profileImg;
 
-    /**
-     * 사용자 역할 열거형
-     */
-    public enum Role {
-        /** 일반 사용자 */
-        USER,
-        /** 관리자 */
-        ADMIN
-    }
+    @CreatedDate
+    @Column(name="created_at",updatable = false)
+    private LocalDateTime createdDate;
 
-    /**
-     * 빌더 패턴을 통한 사용자 생성
-     *
-     * @param email 이메일 주소
-     * @param nickname 닉네임
-     * @param password BCrypt로 암호화된 비밀번호
-     * @param profileImage 프로필 이미지 URL (선택)
-     * @param role 사용자 역할 (기본: USER)
-     */
-    @Builder
-    public User(String email, String nickname, String password,
-                String profileImage, Role role) {
-        this.email = email;
-        this.nickname = nickname;
-        this.password = password;
-        this.profileImage = profileImage;
-        // 역할이 지정되지 않으면 기본값 USER 사용
-        this.role = role != null ? role : Role.USER;
-    }
+    @LastModifiedDate
+    @Column(name="updated_at")
+    private LocalDateTime updateDate;
 
-    /**
-     * 엔티티 저장 전 자동으로 생성/수정 시각을 설정합니다.
-     */
-    @PrePersist
-    protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
-    }
 
-    /**
-     * 엔티티 수정 전 자동으로 수정 시각을 갱신합니다.
-     */
-    @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
-
-    /**
-     * 닉네임을 변경합니다.
-     *
-     * @param nickname 새로운 닉네임
-     */
-    public void updateNickname(String nickname) {
-        this.nickname = nickname;
-    }
-
-    /**
-     * 프로필 이미지를 변경합니다.
-     *
-     * @param profileImage 새로운 프로필 이미지 URL
-     */
-    public void updateProfileImage(String profileImage) {
-        this.profileImage = profileImage;
-    }
-
-    /**
-     * 비밀번호를 변경합니다.
-     *
-     * @param password BCrypt로 암호화된 새 비밀번호
-     */
-    public void updatePassword(String password) {
-        this.password = password;
+    public void updateUser(UserRequestDTO dto) {
+        this.userNickname = dto.getUsernickname();
     }
 }
+
+
