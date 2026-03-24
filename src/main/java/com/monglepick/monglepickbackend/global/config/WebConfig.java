@@ -1,58 +1,87 @@
 package com.monglepick.monglepickbackend.global.config;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * 웹 MVC 설정 클래스
+ * Spring MVC 웹 설정.
  *
- * <p>CORS(Cross-Origin Resource Sharing) 정책을 설정하여
- * 프론트엔드(monglepick-client)에서 백엔드 API에 접근할 수 있도록 허용합니다.</p>
+ * <p>Spring MVC의 추가적인 웹 설정을 정의하는 구성 클래스이다.
+ * {@link WebMvcConfigurer} 인터페이스를 구현하여 필요한 설정만
+ * 오버라이드할 수 있다.</p>
  *
- * <p>application.yml의 cors 섹션에서 설정값을 주입받으며,
- * 설정이 없는 경우 기본값을 사용합니다.</p>
+ * <h3>CORS 설정 관련 주의사항</h3>
+ * <p>CORS 설정은 {@link com.monglepick.monglepickbackend.global.security.SecurityConfig}의
+ * {@code corsConfigurationSource()} 빈에서 처리한다.
+ * {@code addCorsMappings()} 메서드를 여기서 오버라이드하면
+ * Spring Security의 CORS 설정과 <b>충돌</b>할 수 있으므로
+ * 의도적으로 비워두었다.</p>
+ *
+ * <p>Spring Security가 활성화된 환경에서는 Security 필터가
+ * DispatcherServlet보다 먼저 실행되므로, CORS Preflight(OPTIONS) 요청이
+ * SecurityFilterChain에서 먼저 처리된다.
+ * 따라서 CORS 설정은 Security 레이어에서 관리하는 것이 올바르다.</p>
+ *
+ * <h3>확장 포인트</h3>
+ * <p>향후 아래 기능이 필요할 때 이 클래스에 추가한다:</p>
+ * <ul>
+ *   <li>{@code addInterceptors()} — 로깅, 인증, 요청 추적 인터셉터</li>
+ *   <li>{@code configureMessageConverters()} — 커스텀 HTTP 메시지 컨버터</li>
+ *   <li>{@code addResourceHandlers()} — 정적 리소스 핸들러 (이미지 업로드 등)</li>
+ *   <li>{@code addFormatters()} — 커스텀 타입 변환기 (날짜 포맷 등)</li>
+ *   <li>{@code addArgumentResolvers()} — 커스텀 메서드 파라미터 리졸버
+ *       (예: {@code @CurrentUser} 어노테이션 처리)</li>
+ * </ul>
+ *
+ * @see com.monglepick.monglepickbackend.global.security.SecurityConfig#corsConfigurationSource()
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
-    /** 허용할 프론트엔드 오리진 목록 (쉼표 구분, 환경변수로 오버라이드 가능) */
-    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
-    private String[] allowedOrigins;
-
-    /** 허용할 HTTP 메서드 목록 */
-    @Value("${cors.allowed-methods:GET,POST,PUT,PATCH,DELETE,OPTIONS}")
-    private String[] allowedMethods;
-
-    /** 허용할 요청 헤더 */
-    @Value("${cors.allowed-headers:*}")
-    private String allowedHeaders;
-
-    /** 자격증명(쿠키, Authorization) 허용 여부 */
-    @Value("${cors.allow-credentials:true}")
-    private boolean allowCredentials;
-
-    /** preflight 요청 캐시 시간 (초 단위) */
-    @Value("${cors.max-age:3600}")
-    private long maxAge;
-
-    /**
-     * CORS 매핑 설정
+    /*
+     * ── CORS 설정 ──
      *
-     * <p>모든 API 경로(/api/**)에 대해 CORS 정책을 적용합니다.
-     * 프론트엔드에서 JWT 토큰을 Authorization 헤더로 전송하므로
-     * credentials를 허용하고, 모든 헤더를 수락합니다.</p>
+     * addCorsMappings()를 오버라이드하지 않는다.
+     * SecurityConfig.corsConfigurationSource()에서 CORS 정책을 관리하며,
+     * 여기서 중복 설정 시 Spring Security와 Spring MVC 간 CORS 처리 충돌이 발생한다.
      *
-     * @param registry CORS 레지스트리
+     * 참고: Spring Security가 비활성화된 환경에서는 아래와 같이 설정할 수 있다:
+     *
+     * @Override
+     * public void addCorsMappings(CorsRegistry registry) {
+     *     registry.addMapping("/**")
+     *             .allowedOrigins("http://localhost:3000", "http://localhost:5173")
+     *             .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+     *             .allowedHeaders("*")
+     *             .allowCredentials(true)
+     *             .maxAge(3600);
+     * }
      */
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-                .allowedOrigins(allowedOrigins)
-                .allowedMethods(allowedMethods)
-                .allowedHeaders(allowedHeaders)
-                .allowCredentials(allowCredentials)
-                .maxAge(maxAge);
-    }
+
+    /*
+     * ── 인터셉터 등록 예시 (향후 추가) ──
+     *
+     * @Override
+     * public void addInterceptors(InterceptorRegistry registry) {
+     *     // 요청 로깅 인터셉터
+     *     registry.addInterceptor(new RequestLoggingInterceptor())
+     *             .addPathPatterns("/api/**");
+     *
+     *     // API 요청 추적 인터셉터 (X-Request-Id 생성)
+     *     registry.addInterceptor(new RequestTraceInterceptor())
+     *             .addPathPatterns("/api/**");
+     * }
+     */
+
+    /*
+     * ── 커스텀 Argument Resolver 예시 (향후 추가) ──
+     *
+     * JWT 인증 구현 후 @CurrentUser 어노테이션으로
+     * 컨트롤러 메서드 파라미터에 현재 사용자 정보를 주입할 때 사용:
+     *
+     * @Override
+     * public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
+     *     resolvers.add(new CurrentUserArgumentResolver());
+     * }
+     */
 }

@@ -1,176 +1,169 @@
 package com.monglepick.monglepickbackend.global.exception;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindException;
-import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
- * 전역 예외 처리기
+ * 전역 예외 처리기.
  *
- * <p>애플리케이션 전체에서 발생하는 예외를 일괄 처리하여
- * 일관된 ErrorResponse 형식으로 클라이언트에 반환합니다.</p>
+ * <p>모든 컨트롤러에서 발생하는 예외를 가로채어
+ * {@link ErrorResponse} 형식의 일관된 JSON 응답으로 변환한다.</p>
  *
- * <p>처리하는 예외 유형:</p>
- * <ul>
- *   <li>BusinessException: 비즈니스 로직 예외 (커스텀)</li>
- *   <li>MethodArgumentNotValidException: @Valid 검증 실패</li>
- *   <li>BindException: 바인딩 검증 실패</li>
- *   <li>MethodArgumentTypeMismatchException: 타입 불일치</li>
- *   <li>MissingServletRequestParameterException: 필수 파라미터 누락</li>
- *   <li>HttpRequestMethodNotSupportedException: 지원하지 않는 HTTP 메서드</li>
- *   <li>Exception: 예상치 못한 모든 예외 (500)</li>
- * </ul>
+ * <h3>처리 우선순위 (구체적인 예외 → 일반적인 예외)</h3>
+ * <ol>
+ *   <li>{@link InsufficientPointException} — 402 + balance/required details</li>
+ *   <li>{@link BusinessException} — ErrorCode의 httpStatus 사용</li>
+ *   <li>{@link MethodArgumentNotValidException} — 400 + 필드별 검증 에러 목록</li>
+ *   <li>{@link Exception} — 500 catch-all (예상하지 못한 오류)</li>
+ * </ol>
+ *
+ * <h3>AI Agent 연동</h3>
+ * <p>{@link InsufficientPointException} 핸들러는 402 응답 본문에
+ * {@code balance}와 {@code required} 필드를 포함하여,
+ * AI Agent의 {@code point_client.py}가 잔액 부족 정보를 파싱할 수 있도록 한다.</p>
+ *
+ * @see ErrorResponse
+ * @see BusinessException
+ * @see InsufficientPointException
  */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     /**
-     * 비즈니스 로직 예외 처리
+     * 포인트 잔액 부족 예외 처리.
      *
-     * <p>서비스 레이어에서 발생시키는 BusinessException을 처리합니다.
-     * ErrorCode에 정의된 HTTP 상태 코드와 메시지를 그대로 반환합니다.</p>
+     * <p>HTTP 402 Payment Required를 반환하며,
+     * details에 현재 잔액(balance)과 필요 포인트(required)를 포함한다.</p>
      *
-     * @param e BusinessException 인스턴스
-     * @return ErrorResponse를 담은 ResponseEntity
+     * <h4>응답 예시</h4>
+     * <pre>{@code
+     * HTTP 402 Payment Required
+     * {
+     *   "code": "P001",
+     *   "message": "포인트가 부족합니다",
+     *   "details": { "balance": 50, "required": 100 }
+     * }
+     * }</pre>
+     *
+     * @param ex 포인트 잔액 부족 예외
+     * @return 402 응답 (balance, required 상세 포함)
+     */
+    @ExceptionHandler(InsufficientPointException.class)
+    protected ResponseEntity<ErrorResponse> handleInsufficientPoint(InsufficientPointException ex) {
+        log.warn("포인트 잔액 부족: balance={}, required={}", ex.getBalance(), ex.getRequired());
+
+        // AI Agent의 point_client.py가 details.balance, details.required를 파싱한다
+        Map<String, Object> details = new HashMap<>();
+        details.put("balance", ex.getBalance());
+        details.put("required", ex.getRequired());
+
+        ErrorCode errorCode = ex.getErrorCode();
+        ErrorResponse response = ErrorResponse.of(errorCode, details);
+
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(response);
+    }
+
+    /**
+     * 비즈니스 예외 공통 처리.
+     *
+     * <p>{@link BusinessException}의 {@link ErrorCode}에 정의된 HTTP 상태 코드를 사용한다.
+     * {@link InsufficientPointException}은 더 구체적인 핸들러가 우선 처리한다.</p>
+     *
+     * @param ex 비즈니스 예외
+     * @return ErrorCode에 정의된 HTTP 상태 코드 + 에러 응답
      */
     @ExceptionHandler(BusinessException.class)
-    protected ResponseEntity<ErrorResponse> handleBusinessException(BusinessException e) {
-        log.warn("비즈니스 예외 발생 - 코드: {}, 메시지: {}",
-                e.getErrorCode().getCode(), e.getMessage());
+    protected ResponseEntity<ErrorResponse> handleBusiness(BusinessException ex) {
+        log.warn("비즈니스 예외 발생: code={}, message={}", ex.getErrorCode().getCode(), ex.getMessage());
 
-        ErrorCode errorCode = e.getErrorCode();
-        ErrorResponse response = ErrorResponse.of(errorCode, e.getMessage());
-        return new ResponseEntity<>(response, errorCode.getHttpStatus());
+        ErrorCode errorCode = ex.getErrorCode();
+        ErrorResponse response = ErrorResponse.of(errorCode);
+
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(response);
     }
 
     /**
-     * @Valid 검증 실패 예외 처리
+     * Bean Validation 검증 실패 처리 ({@code @Valid} 어노테이션).
      *
-     * <p>@RequestBody에 @Valid를 적용했을 때 검증 실패 시 발생합니다.
-     * 모든 필드 에러 메시지를 수집하여 하나의 문자열로 반환합니다.</p>
+     * <p>요청 DTO의 필드 검증(@NotBlank, @Min, @Email 등)이 실패하면
+     * 필드별 에러 메시지를 details.errors 배열로 반환한다.</p>
      *
-     * @param e MethodArgumentNotValidException 인스턴스
-     * @return 400 Bad Request와 상세 검증 오류 메시지
+     * <h4>응답 예시</h4>
+     * <pre>{@code
+     * HTTP 400 Bad Request
+     * {
+     *   "code": "G002",
+     *   "message": "잘못된 입력입니다",
+     *   "details": {
+     *     "errors": [
+     *       { "field": "email", "message": "이메일 형식이 올바르지 않습니다" },
+     *       { "field": "nickname", "message": "닉네임은 2자 이상이어야 합니다" }
+     *     ]
+     *   }
+     * }
+     * }</pre>
+     *
+     * @param ex 메서드 인자 검증 예외
+     * @return 400 응답 (필드별 검증 에러 목록 포함)
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    protected ResponseEntity<ErrorResponse> handleMethodArgumentNotValid(
-            MethodArgumentNotValidException e) {
+    protected ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
+        log.warn("요청 검증 실패: {}", ex.getMessage());
 
-        // 모든 필드 에러 메시지를 쉼표로 연결
-        String errorMessages = e.getBindingResult().getFieldErrors().stream()
-                .map(error -> error.getField() + ": " + error.getDefaultMessage())
-                .collect(Collectors.joining(", "));
+        // 필드별 에러 메시지를 리스트로 수집
+        List<Map<String, String>> fieldErrors = ex.getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .map(error -> {
+                    Map<String, String> fieldError = new HashMap<>();
+                    fieldError.put("field", error.getField());
+                    fieldError.put("message", error.getDefaultMessage());
+                    return fieldError;
+                })
+                .toList();
 
-        log.warn("요청 검증 실패: {}", errorMessages);
+        Map<String, Object> details = new HashMap<>();
+        details.put("errors", fieldErrors);
 
-        ErrorResponse response = ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE, errorMessages);
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        ErrorCode errorCode = ErrorCode.INVALID_INPUT;
+        ErrorResponse response = ErrorResponse.of(errorCode, details);
+
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(response);
     }
 
     /**
-     * 바인딩 검증 실패 예외 처리
+     * 예상하지 못한 모든 예외의 catch-all 핸들러.
      *
-     * <p>@ModelAttribute 바인딩 시 검증 실패하면 발생합니다.
-     * MethodArgumentNotValidException과 유사하게 처리합니다.</p>
+     * <p>NullPointerException, IllegalStateException 등
+     * 비즈니스 로직에서 잡지 못한 예외가 여기로 도달한다.
+     * 스택 트레이스를 error 레벨로 로깅하여 모니터링 시스템(Loki/Grafana)에서 감지한다.</p>
      *
-     * @param e BindException 인스턴스
-     * @return 400 Bad Request와 검증 오류 메시지
-     */
-    @ExceptionHandler(BindException.class)
-    protected ResponseEntity<ErrorResponse> handleBindException(BindException e) {
-        String errorMessages = e.getBindingResult().getFieldErrors().stream()
-                .map(error -> error.getField() + ": " + error.getDefaultMessage())
-                .collect(Collectors.joining(", "));
-
-        log.warn("바인딩 검증 실패: {}", errorMessages);
-
-        ErrorResponse response = ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE, errorMessages);
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
-    }
-
-    /**
-     * 파라미터 타입 불일치 예외 처리
-     *
-     * <p>경로 변수나 쿼리 파라미터의 타입이 예상과 다를 때 발생합니다.
-     * 예: /api/v1/movies/abc (Long 타입 기대, String 전달)</p>
-     *
-     * @param e MethodArgumentTypeMismatchException 인스턴스
-     * @return 400 Bad Request
-     */
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    protected ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatch(
-            MethodArgumentTypeMismatchException e) {
-
-        String message = String.format("파라미터 '%s'의 값 '%s'이(가) 올바르지 않습니다.",
-                e.getName(), e.getValue());
-
-        log.warn("파라미터 타입 불일치: {}", message);
-
-        ErrorResponse response = ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE, message);
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
-    }
-
-    /**
-     * 필수 쿼리 파라미터 누락 예외 처리
-     *
-     * @param e MissingServletRequestParameterException 인스턴스
-     * @return 400 Bad Request
-     */
-    @ExceptionHandler(MissingServletRequestParameterException.class)
-    protected ResponseEntity<ErrorResponse> handleMissingServletRequestParameter(
-            MissingServletRequestParameterException e) {
-
-        String message = String.format("필수 파라미터 '%s'이(가) 누락되었습니다.", e.getParameterName());
-
-        log.warn("필수 파라미터 누락: {}", message);
-
-        ErrorResponse response = ErrorResponse.of(ErrorCode.INVALID_INPUT_VALUE, message);
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
-    }
-
-    /**
-     * 지원하지 않는 HTTP 메서드 예외 처리
-     *
-     * <p>예: POST 전용 엔드포인트에 GET 요청</p>
-     *
-     * @param e HttpRequestMethodNotSupportedException 인스턴스
-     * @return 405 Method Not Allowed
-     */
-    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    protected ResponseEntity<ErrorResponse> handleHttpRequestMethodNotSupported(
-            HttpRequestMethodNotSupportedException e) {
-
-        log.warn("허용되지 않은 HTTP 메서드: {}", e.getMethod());
-
-        ErrorResponse response = ErrorResponse.of(ErrorCode.METHOD_NOT_ALLOWED);
-        return new ResponseEntity<>(response, HttpStatus.METHOD_NOT_ALLOWED);
-    }
-
-    /**
-     * 기타 모든 예외 처리 (최후의 방어선)
-     *
-     * <p>위에서 처리하지 못한 모든 예외를 500 Internal Server Error로 반환합니다.
-     * 상세한 에러 정보는 로그에만 기록하고, 클라이언트에는 일반적인 메시지만 전달합니다.</p>
-     *
-     * @param e 처리되지 않은 예외
-     * @return 500 Internal Server Error
+     * @param ex 예상하지 못한 예외
+     * @return 500 응답 (내부 오류 메시지, 상세 정보 없음)
      */
     @ExceptionHandler(Exception.class)
-    protected ResponseEntity<ErrorResponse> handleException(Exception e) {
-        // 예상치 못한 예외는 ERROR 레벨로 스택트레이스 포함하여 기록
-        log.error("예상치 못한 서버 오류 발생", e);
+    protected ResponseEntity<ErrorResponse> handleException(Exception ex) {
+        log.error("예상하지 못한 서버 오류 발생", ex);
 
-        ErrorResponse response = ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR);
-        return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
+        ErrorCode errorCode = ErrorCode.INTERNAL_SERVER_ERROR;
+        ErrorResponse response = ErrorResponse.of(errorCode);
+
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(response);
     }
 }

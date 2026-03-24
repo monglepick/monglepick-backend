@@ -3,33 +3,36 @@ package com.monglepick.monglepickbackend.global.exception;
 import lombok.Getter;
 
 /**
- * 비즈니스 로직 커스텀 예외 클래스
+ * 비즈니스 로직에서 발생하는 예외의 공통 부모 클래스.
  *
- * <p>애플리케이션의 비즈니스 규칙 위반 시 발생하는 런타임 예외입니다.
- * ErrorCode 열거형과 연동하여 일관된 에러 응답을 제공합니다.</p>
+ * <p>모든 비즈니스 예외는 {@link ErrorCode}를 반드시 보유하며,
+ * {@link GlobalExceptionHandler}에서 이 클래스를 기준으로 일괄 처리한다.</p>
  *
- * <p>사용 예시:</p>
- * <pre>{@code
- * // 사용자를 찾을 수 없는 경우
- * throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+ * <h3>사용 방법</h3>
+ * <ol>
+ *   <li>기본 메시지 사용: {@code throw new BusinessException(ErrorCode.USER_NOT_FOUND)}</li>
+ *   <li>커스텀 메시지 사용: {@code throw new BusinessException(ErrorCode.INVALID_INPUT, "이메일 형식이 잘못되었습니다")}</li>
+ *   <li>특수 예외 확장: {@link InsufficientPointException} 등 하위 클래스 사용</li>
+ * </ol>
  *
- * // 추가 메시지와 함께
- * throw new BusinessException(ErrorCode.INVALID_INPUT_VALUE, "이메일 형식이 올바르지 않습니다.");
- * }</pre>
- *
- * <p>GlobalExceptionHandler에서 이 예외를 잡아 ErrorResponse로 변환합니다.</p>
+ * @see ErrorCode
+ * @see GlobalExceptionHandler
  */
 @Getter
 public class BusinessException extends RuntimeException {
 
-    /** 에러 코드 (HTTP 상태, 코드 문자열, 기본 메시지 포함) */
+    /**
+     * 이 예외에 대응하는 에러 코드.
+     * HTTP 상태 코드, 에러 코드 문자열, 기본 메시지를 포함한다.
+     */
     private final ErrorCode errorCode;
 
     /**
-     * ErrorCode만으로 예외를 생성합니다.
-     * <p>에러 메시지는 ErrorCode에 정의된 기본 메시지를 사용합니다.</p>
+     * ErrorCode의 기본 메시지를 사용하는 생성자.
      *
-     * @param errorCode 에러 코드 열거형 값
+     * <p>예시: {@code throw new BusinessException(ErrorCode.USER_NOT_FOUND)}</p>
+     *
+     * @param errorCode 에러 코드 (null 불가)
      */
     public BusinessException(ErrorCode errorCode) {
         super(errorCode.getMessage());
@@ -37,26 +40,16 @@ public class BusinessException extends RuntimeException {
     }
 
     /**
-     * ErrorCode와 커스텀 메시지로 예외를 생성합니다.
-     * <p>기본 메시지 대신 상세한 에러 메시지를 전달할 때 사용합니다.</p>
+     * 커스텀 메시지를 지정하는 생성자.
      *
-     * @param errorCode 에러 코드 열거형 값
-     * @param message 커스텀 에러 메시지
-     */
-    public BusinessException(ErrorCode errorCode, String message) {
-        super(message);
-        this.errorCode = errorCode;
-    }
-
-    /**
-     * ErrorCode와 원인 예외로 예외를 생성합니다.
-     * <p>하위 레이어에서 발생한 예외를 래핑할 때 사용합니다.</p>
+     * <p>ErrorCode의 기본 메시지 대신 상황에 맞는 구체적인 메시지를 전달할 때 사용한다.</p>
+     * <p>예시: {@code throw new BusinessException(ErrorCode.INVALID_INPUT, "생년월일은 YYYYMMDD 형식이어야 합니다")}</p>
      *
-     * @param errorCode 에러 코드 열거형 값
-     * @param cause 원인 예외
+     * @param errorCode     에러 코드 (null 불가)
+     * @param customMessage 사용자에게 표시할 커스텀 메시지
      */
-    public BusinessException(ErrorCode errorCode, Throwable cause) {
-        super(errorCode.getMessage(), cause);
+    public BusinessException(ErrorCode errorCode, String customMessage) {
+        super(customMessage);
         this.errorCode = errorCode;
     }
 }

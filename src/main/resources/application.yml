@@ -86,3 +86,50 @@ logging:
     ## SQL 디버깅 시 아래 주석 해제
     # org.hibernate.SQL: DEBUG
     # org.hibernate.orm.jdbc.bind: TRACE
+
+## -------------------------------------------------------------------------
+## 앱 커스텀 설정
+## -------------------------------------------------------------------------
+## 서비스 키, 포인트 시스템, 등급별 일일/월간 이용 제한 등
+## 환경변수로 오버라이드 가능: SERVICE_API_KEY, FREE_POINTS_ON_SIGNUP 등
+app:
+  service:
+    key: ${SERVICE_API_KEY:dev-service-key-change-me}
+  point:
+    free-on-signup: ${FREE_POINTS_ON_SIGNUP:500}
+    cost-per-recommendation: ${POINT_COST_PER_RECOMMENDATION:100}
+  quota:
+    bronze:
+      daily-limit: 3
+      monthly-limit: 30
+      free-daily: 0
+      max-input-length: 200
+    silver:
+      daily-limit: 10
+      monthly-limit: 200
+      free-daily: 2
+      max-input-length: 500
+    gold:
+      daily-limit: 30
+      monthly-limit: 600
+      free-daily: 5
+      max-input-length: 1000
+    platinum:
+      daily-limit: -1
+      monthly-limit: -1
+      free-daily: 10
+      max-input-length: 2000
+
+## -------------------------------------------------------------------------
+## Toss Payments 설정
+## -------------------------------------------------------------------------
+## Toss Payments PG 연동에 필요한 인증 키 및 API URL.
+## - secret-key: 서버 전용 시크릿 키 (외부 노출 금지, Basic Auth에 사용)
+## - client-key: 클라이언트 전용 키 (Toss JS SDK 결제창 호출에 사용, 노출 가능)
+## - base-url: Toss Payments REST API 베이스 URL
+## 운영 환경에서는 환경변수로 오버라이드: TOSS_SECRET_KEY, TOSS_CLIENT_KEY, TOSS_BASE_URL
+toss:
+  payments:
+    secret-key: ${TOSS_SECRET_KEY:test_sk_ep4IGKBJCBJVOxZGnxz8rMyEYxQ0EBnr}
+    client-key: ${TOSS_CLIENT_KEY:test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq}
+    base-url: ${TOSS_BASE_URL:https://api.tosspayments.com/v1}
