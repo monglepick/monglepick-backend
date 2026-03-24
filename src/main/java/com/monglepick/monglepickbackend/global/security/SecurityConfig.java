@@ -1,7 +1,5 @@
 package com.monglepick.monglepickbackend.global.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.monglepick.monglepickbackend.global.exception.ErrorResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -80,8 +78,9 @@ public class SecurityConfig {
     @Value("${cors.max-age:3600}")
     private long maxAge;
 
-    /** 401 응답 시 JSON 직렬화를 위한 ObjectMapper (스레드 안전, 재사용) */
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    /** 401 응답 JSON 템플릿 (ObjectMapper 미사용, jackson 의존성 불필요) */
+    private static final String UNAUTHORIZED_JSON =
+            "{\"code\":\"S002\",\"message\":\"인증이 필요합니다. 로그인 후 다시 시도해주세요.\",\"details\":{}}";
 
     /**
      * Spring Security 필터 체인 설정.
@@ -165,13 +164,8 @@ public class SecurityConfig {
                             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                             response.setContentType("application/json;charset=UTF-8");
 
-                            // ErrorCode.UNAUTHORIZED(S002)와 일치하는 에러 코드 사용
-                            ErrorResponse errorResponse = new ErrorResponse(
-                                    "S002",
-                                    "인증이 필요합니다. 로그인 후 다시 시도해주세요.",
-                                    Map.of()
-                            );
-                            OBJECT_MAPPER.writeValue(response.getWriter(), errorResponse);
+                            // ErrorCode.UNAUTHORIZED(S002) — ObjectMapper 미사용으로 직접 JSON 작성
+                            response.getWriter().write(UNAUTHORIZED_JSON);
                         })
                 );
 

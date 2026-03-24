@@ -1,7 +1,5 @@
 package com.monglepick.monglepickbackend.global.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.monglepick.monglepickbackend.global.exception.ErrorResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,7 +11,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Map;
+
 
 /**
  * 서비스 간 내부 통신용 API 키 인증 필터.
@@ -59,8 +57,9 @@ public class ServiceKeyAuthFilter extends OncePerRequestFilter {
     /** 401 응답 시 사용할 에러 메시지 */
     private static final String ERROR_MESSAGE = "유효하지 않은 서비스 키입니다";
 
-    /** JSON 직렬화를 위한 ObjectMapper (스레드 안전, 클래스 로딩 시 1회 초기화) */
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    /** 401 응답 JSON 템플릿 (ObjectMapper 미사용, jackson 의존성 불필요) */
+    private static final String INVALID_KEY_JSON =
+            "{\"code\":\"" + ERROR_CODE + "\",\"message\":\"" + ERROR_MESSAGE + "\",\"details\":{}}";
 
     /**
      * 환경변수 또는 application.yml에서 주입받은 서비스 키.
@@ -125,13 +124,8 @@ public class ServiceKeyAuthFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json;charset=UTF-8");
 
-        // ErrorResponse 형태의 JSON 응답 작성
-        ErrorResponse errorResponse = new ErrorResponse(
-                ERROR_CODE,
-                ERROR_MESSAGE,
-                Map.of()    // 추가 상세 정보 없음
-        );
-        OBJECT_MAPPER.writeValue(response.getWriter(), errorResponse);
+        // ObjectMapper 미사용으로 직접 JSON 작성 (jackson 의존성 불필요)
+        response.getWriter().write(INVALID_KEY_JSON);
         // filterChain.doFilter()를 호출하지 않으므로 여기서 요청 처리 종료
     }
 }
