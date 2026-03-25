@@ -37,11 +37,16 @@ public class PostService {
 
     /**
      * 게시글을 작성합니다 (바로 게시).
+     *
+     * <p>PostCreateRequest.category()는 이미 Post.Category enum 타입이므로
+     * valueOf() 변환 및 toUpperCase() 호출이 불필요하다.
+     * Jackson의 @JsonCreator(fromValue)가 역직렬화 시 자동 변환한다.</p>
      */
     @Transactional
     public PostResponse createPost(PostCreateRequest request, String userId) {
         User user = findUserById(userId);
-        Post.Category category = Post.Category.valueOf(request.category().toUpperCase());
+        // category 필드가 Post.Category enum 타입이므로 직접 사용
+        Post.Category category = request.category();
 
         Post post = Post.builder()
                 .user(user)
@@ -70,10 +75,19 @@ public class PostService {
 
     /**
      * 카테고리별 게시글 목록을 조회합니다 (게시 완료된 글만).
+     *
+     * <p>@RequestParam은 Jackson을 거치지 않으므로
+     * {@link Post.Category#fromValue(String)}을 직접 호출하여 대소문자 무관 변환한다.
+     * "general" → FREE 별칭 처리도 fromValue() 내부에서 수행된다.</p>
+     *
+     * @param category 카테고리 문자열 (null이면 전체 조회, 소문자 허용)
+     * @param pageable 페이징 정보
+     * @return 게시글 응답 페이지
      */
     public Page<PostResponse> getPosts(String category, Pageable pageable) {
         if (category != null && !category.isBlank()) {
-            Post.Category cat = Post.Category.valueOf(category.toUpperCase());
+            // @RequestParam String은 Jackson을 거치지 않으므로 fromValue()로 직접 변환
+            Post.Category cat = Post.Category.fromValue(category);
             return postRepository.findByCategoryAndStatusWithUser(cat, PostStatus.PUBLISHED, pageable)
                     .map(PostResponse::from);
         }
@@ -83,13 +97,17 @@ public class PostService {
 
     /**
      * 게시글을 수정합니다. 작성자 본인만 수정할 수 있습니다.
+     *
+     * <p>category 필드가 Post.Category enum 타입으로 변경되어
+     * valueOf()/toUpperCase() 호출 없이 직접 사용한다.</p>
      */
     @Transactional
     public PostResponse updatePost(Long postId, PostCreateRequest request, String userId) {
         Post post = findPostById(postId);
         validatePostOwner(post, userId);
 
-        Post.Category category = Post.Category.valueOf(request.category().toUpperCase());
+        // category 필드가 Post.Category enum 타입이므로 직접 사용
+        Post.Category category = request.category();
         post.update(request.title(), request.content(), category);
 
         log.info("게시글 수정 완료 — postId: {}, userId: {}", postId, userId);
@@ -114,11 +132,15 @@ public class PostService {
 
     /**
      * 게시글을 임시저장합니다.
+     *
+     * <p>category 필드가 Post.Category enum 타입으로 변경되어
+     * valueOf()/toUpperCase() 호출 없이 직접 사용한다.</p>
      */
     @Transactional
     public PostResponse createDraft(PostCreateRequest request, String userId) {
         User user = findUserById(userId);
-        Post.Category category = Post.Category.valueOf(request.category().toUpperCase());
+        // category 필드가 Post.Category enum 타입이므로 직접 사용
+        Post.Category category = request.category();
 
         Post draft = Post.builder()
                 .user(user)
@@ -145,6 +167,9 @@ public class PostService {
 
     /**
      * 임시저장 게시글을 수정합니다.
+     *
+     * <p>category 필드가 Post.Category enum 타입으로 변경되어
+     * valueOf()/toUpperCase() 호출 없이 직접 사용한다.</p>
      */
     @Transactional
     public PostResponse updateDraft(Long postId, PostCreateRequest request, String userId) {
@@ -155,7 +180,8 @@ public class PostService {
             throw new BusinessException(ErrorCode.POST_ACCESS_DENIED);
         }
 
-        Post.Category category = Post.Category.valueOf(request.category().toUpperCase());
+        // category 필드가 Post.Category enum 타입이므로 직접 사용
+        Post.Category category = request.category();
         post.update(request.title(), request.content(), category);
 
         return PostResponse.from(post);

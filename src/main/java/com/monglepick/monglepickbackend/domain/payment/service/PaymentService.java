@@ -12,8 +12,9 @@ import com.monglepick.monglepickbackend.domain.payment.repository.PaymentOrderRe
 import com.monglepick.monglepickbackend.domain.payment.repository.SubscriptionPlanRepository;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+// Jackson 3.x: com.fasterxml.jackson → tools.jackson 패키지 경로 변경 (Spring Boot 4.x)
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;

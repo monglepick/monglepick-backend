@@ -2,6 +2,8 @@ package com.monglepick.monglepickbackend.domain.community.entity;
 
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -78,17 +80,68 @@ public class Post extends BaseAuditEntity {
     private PostStatus status;
 
     /**
-     * 게시글 카테고리 열거형
+     * 게시글 카테고리 열거형.
+     *
+     * <p>Jackson 역직렬화 시 대소문자를 무관하게 처리한다.
+     * 프론트엔드가 "general", "FREE", "Discussion" 등 어떤 형태로 전송해도
+     * {@link #fromValue(String)} 팩토리 메서드가 대문자로 정규화하여 매핑한다.</p>
+     *
+     * <p>프론트엔드 호환 별칭: "general" → {@link #FREE} (자유 게시판 대응)</p>
      */
     public enum Category {
-        /** 자유 게시판 */
+        /** 자유 게시판 (프론트 "general" 별칭 포함) */
         FREE,
         /** 영화 토론 */
         DISCUSSION,
         /** 추천 요청/공유 */
         RECOMMENDATION,
         /** 영화 뉴스/소식 */
-        NEWS
+        NEWS;
+
+        /**
+         * JSON 문자열 → Category 변환 팩토리 메서드 (대소문자 무관).
+         *
+         * <p>Jackson이 요청 본문의 category 필드를 역직렬화할 때 호출된다.
+         * 프론트엔드 레거시 값 "general"은 FREE로 매핑하여 하위 호환성을 유지한다.</p>
+         *
+         * @param value JSON에서 전달된 카테고리 문자열 (예: "general", "FREE", "discussion")
+         * @return 매핑된 Category 열거 상수
+         * @throws IllegalArgumentException 알 수 없는 카테고리 값인 경우
+         */
+        @JsonCreator
+        public static Category fromValue(String value) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException("카테고리 값이 비어 있습니다.");
+            }
+            // 대문자로 정규화하여 비교 (소문자/혼합 대소문자 모두 허용)
+            String normalized = value.trim().toUpperCase();
+
+            // 프론트엔드 레거시 별칭 처리: "general" → FREE (자유 게시판)
+            if ("GENERAL".equals(normalized)) {
+                return FREE;
+            }
+
+            try {
+                return Category.valueOf(normalized);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "유효하지 않은 카테고리입니다: '" + value + "'. 허용 값: FREE, DISCUSSION, RECOMMENDATION, NEWS"
+                );
+            }
+        }
+
+        /**
+         * Category → JSON 직렬화 시 소문자로 반환.
+         *
+         * <p>응답 JSON에서 "FREE" 대신 "free"로 내려가므로
+         * 프론트엔드 컨벤션(소문자 enum)과 일치한다.</p>
+         *
+         * @return 소문자 카테고리 문자열
+         */
+        @JsonValue
+        public String toValue() {
+            return this.name().toLowerCase();
+        }
     }
 
     @Builder
