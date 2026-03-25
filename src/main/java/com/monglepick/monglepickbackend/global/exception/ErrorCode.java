@@ -102,6 +102,12 @@ public enum ErrorCode {
     /** 소셜 로그인 시 해당 이메일이 다른 제공자로 이미 가입된 경우. */
     SOCIAL_EMAIL_EXISTS(HttpStatus.CONFLICT, "A007", "해당 이메일로 이미 다른 방식으로 가입되어 있습니다"),
 
+    /** Refresh Token이 DB 화이트리스트에 존재하지 않음 (탈취 의심 또는 이미 사용됨). */
+    REFRESH_TOKEN_NOT_FOUND(HttpStatus.UNAUTHORIZED, "A008", "유효하지 않은 Refresh Token입니다"),
+
+    /** OAuth2 쿠키에 Refresh Token이 없음 (소셜 로그인 토큰 교환 실패). */
+    COOKIE_NOT_FOUND(HttpStatus.BAD_REQUEST, "A009", "쿠키가 존재하지 않습니다"),
+
     // ─────────────────────────────────────────────
     // 공통 (G0xx)
     // ─────────────────────────────────────────────

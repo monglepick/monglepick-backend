@@ -37,14 +37,8 @@ import java.util.UUID;
  * <p>KMG 프로젝트의 UserService 패턴을 적용하여
  * DefaultOAuth2UserService + UserDetailsService를 모두 구현한다.</p>
  *
- * <h3>역할</h3>
- * <ul>
- *   <li><b>DefaultOAuth2UserService</b>: Spring Security OAuth2 흐름에서
- *       소셜 제공자(Google/Kakao/Naver)의 사용자 정보를 처리</li>
- *   <li><b>UserDetailsService</b>: LoginFilter의 AuthenticationManager가
- *       로컬 로그인 시 이메일+비밀번호를 검증할 때 사용</li>
- *   <li><b>signup</b>: 로컬 회원가입 (이메일/비밀번호/닉네임)</li>
- * </ul>
+ * <h3>C-2 수정: signup() 완료 후 Refresh Token을 RefreshRepository에 저장</h3>
+ * <h3>C-3 수정: Kakao loadUser()에서 kakaoAccount/profile null 체크 추가</h3>
  */
 @Slf4j
 @Service
@@ -56,6 +50,9 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final PointService pointService;
+
+    /** C-2: Refresh Token DB 저장을 위한 JwtService 의존성 추가 */
+    private final JwtService jwtService;
 
     /** 가입 보너스 포인트 */
     @Value("${app.point.free-on-signup:500}")
@@ -69,6 +66,9 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
      * 로컬 회원가입을 처리한다.
      *
      * <p>이메일/닉네임 중복 확인 → BCrypt 해싱 → 사용자 생성 → 포인트 초기화 → JWT 발급</p>
+     *
+     * <p>C-2 수정: Refresh Token을 DB 화이트리스트에 저장하여
+     * 회원가입 직후 발급된 토큰이 갱신 가능하도록 한다.</p>
      */
     @Transactional
     public AuthResponse signup(SignupRequest request) {
@@ -96,10 +96,14 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         userRepository.save(user);
         pointService.initializePoint(userId, freePointsOnSignup);
 
+        /* C-2: Refresh Token을 DB 화이트리스트에 저장 */
+        AuthResponse authResponse = buildAuthResponse(user);
+        jwtService.addRefresh(userId, authResponse.refreshToken());
+
         log.info("로컬 회원가입 완료 — userId: {}, email: {}, 가입보너스: {}P",
                 userId, request.email(), freePointsOnSignup);
 
-        return buildAuthResponse(user);
+        return authResponse;
     }
 
     // ──────────────────────────────────────────────
@@ -108,9 +112,6 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
 
     /**
      * 로컬 로그인 시 이메일로 사용자를 조회한다.
-     *
-     * <p>LoginFilter → AuthenticationManager → DaoAuthenticationProvider가
-     * 이 메서드를 호출하여 사용자 정보를 로드하고, 비밀번호를 검증한다.</p>
      *
      * @param email 로그인 이메일 (username 파라미터로 전달됨)
      * @return Spring Security UserDetails
@@ -140,9 +141,8 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     /**
      * Spring Security OAuth2 흐름에서 소셜 제공자의 사용자 정보를 처리한다.
      *
-     * <p>KMG 프로젝트의 UserService.loadUser() 패턴을 적용.
-     * Google/Kakao/Naver 제공자별로 이메일과 닉네임을 추출하고,
-     * DB에서 기존 사용자를 조회하거나 신규 사용자를 생성한다.</p>
+     * <p>C-3 수정: Kakao 제공자 처리 시 kakaoAccount/profile이 null인 경우
+     * 기본값을 사용하여 NPE를 방지한다.</p>
      *
      * @param userRequest OAuth2 사용자 요청 (제공자 정보 + 액세스 토큰)
      * @return CustomOAuth2User (principal = userId)
@@ -181,18 +181,42 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                 providerId = attributes.get("sub") != null ? attributes.get("sub").toString() : "";
             }
             case "KAKAO" -> {
+                /*
+                 * C-3: kakaoAccount, profile null 체크 추가 (NPE 방지).
+                 * Kakao API가 권한 미동의 등으로 kakao_account나 profile을
+                 * 반환하지 않을 수 있으므로 null-safe하게 처리한다.
+                 */
                 @SuppressWarnings("unchecked")
                 Map<String, Object> kakaoAccount = (Map<String, Object>) attributes.get("kakao_account");
-                @SuppressWarnings("unchecked")
-                Map<String, Object> profile = (Map<String, Object>) kakaoAccount.get("profile");
 
-                email = kakaoAccount.get("email") != null
-                        ? kakaoAccount.get("email").toString()
-                        : attributes.get("id").toString() + "@kakao.com";
-                nickname = profile.get("nickname") != null
-                        ? profile.get("nickname").toString()
-                        : (email != null ? email.split("@")[0] : "카카오유저");
-                providerId = attributes.get("id") != null ? attributes.get("id").toString() : "";
+                /* kakaoAccount가 null인 경우 기본값 사용 */
+                if (kakaoAccount == null) {
+                    log.warn("Kakao OAuth2: kakao_account가 null입니다. 기본값 사용");
+                    String kakaoId = attributes.get("id") != null ? attributes.get("id").toString() : UUID.randomUUID().toString();
+                    email = kakaoId + "@kakao.com";
+                    nickname = "카카오사용자";
+                    providerId = kakaoId;
+                } else {
+                    /* profile null 체크 */
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> profile = (Map<String, Object>) kakaoAccount.get("profile");
+
+                    email = kakaoAccount.get("email") != null
+                            ? kakaoAccount.get("email").toString()
+                            : (attributes.get("id") != null
+                                    ? attributes.get("id").toString() + "@kakao.com"
+                                    : UUID.randomUUID().toString() + "@kakao.com");
+
+                    if (profile != null && profile.get("nickname") != null) {
+                        nickname = profile.get("nickname").toString();
+                    } else {
+                        /* C-3: profile 또는 nickname이 null인 경우 기본값 사용 */
+                        log.warn("Kakao OAuth2: profile 또는 nickname이 null입니다. 기본값 사용");
+                        nickname = email.contains("@") ? email.split("@")[0] : "카카오사용자";
+                    }
+
+                    providerId = attributes.get("id") != null ? attributes.get("id").toString() : "";
+                }
             }
             default -> throw new OAuth2AuthenticationException("지원하지 않는 소셜 로그인입니다: " + registrationId);
         }

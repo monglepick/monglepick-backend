@@ -81,7 +81,9 @@ spring:
 
   sql:
     init:
-      mode: always
+      ## C-7: 운영 환경에서 매번 data.sql을 실행하면 중복 삽입 위험이 있으므로
+      ## 환경변수로 제어한다. 기본값 never, 개발 환경에서만 SQL_INIT_MODE=always 설정
+      mode: ${SQL_INIT_MODE:never}
 
     ## Hibernate 속성
     properties:
@@ -100,6 +102,22 @@ spring:
     show-sql: false
     ## Open Session In View 비활성화 (성능 + LazyInitializationException 명시적 처리)
     open-in-view: false
+
+## -------------------------------------------------------------------------
+## Swagger/OpenAPI 설정
+## -------------------------------------------------------------------------
+## springdoc-openapi로 API 문서를 자동 생성한다.
+## 접속: http://localhost:8080/swagger-ui/index.html
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+    display-request-duration: true
+  api-docs:
+    path: /v3/api-docs
+  default-consumes-media-type: application/json
+  default-produces-media-type: application/json
 
 ## -------------------------------------------------------------------------
 ## CORS 설정

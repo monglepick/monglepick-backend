@@ -1,5 +1,7 @@
 package com.monglepick.monglepickbackend.global.exception;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.util.Collections;
 import java.util.Map;
 
@@ -21,12 +23,6 @@ import java.util.Map;
  * }
  * }</pre>
  *
- * <h3>팩토리 메서드</h3>
- * <ul>
- *   <li>{@link #of(ErrorCode)} — 기본 에러 응답 (details 없음)</li>
- *   <li>{@link #of(ErrorCode, Map)} — 상세 정보 포함 에러 응답</li>
- * </ul>
- *
  * @param code    애플리케이션 내부 에러 코드 (예: "P001", "G001")
  * @param message 사용자에게 표시할 에러 메시지 (한국어)
  * @param details 추가 상세 정보 (nullable → 빈 맵으로 정규화됨)
@@ -34,9 +30,15 @@ import java.util.Map;
  * @see ErrorCode
  * @see GlobalExceptionHandler
  */
+@Schema(description = "API 에러 응답")
 public record ErrorResponse(
+        @Schema(description = "에러 코드", example = "P001")
         String code,
+
+        @Schema(description = "에러 메시지", example = "포인트가 부족합니다")
         String message,
+
+        @Schema(description = "추가 상세 정보")
         Map<String, Object> details
 ) {
 
@@ -57,8 +59,6 @@ public record ErrorResponse(
 
     /**
      * ErrorCode와 상세 정보를 포함한 에러 응답을 생성한다.
-     *
-     * <p>details가 null인 경우 빈 맵으로 대체하여 NPE를 방지한다.</p>
      *
      * @param errorCode 에러 코드 (null 불가)
      * @param details   추가 상세 정보 (null 허용 → 빈 맵으로 변환)

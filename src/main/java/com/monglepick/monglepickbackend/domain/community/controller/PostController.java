@@ -3,6 +3,11 @@ package com.monglepick.monglepickbackend.domain.community.controller;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCreateRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
 import com.monglepick.monglepickbackend.domain.community.service.PostService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,23 +31,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 게시글 컨트롤러
  *
- * <p>커뮤니티 게시글의 CRUD + 임시저장(Draft) API를 제공합니다.
- * Downloads POST 파일의 임시저장/게시 엔드포인트를 통합하였습니다.</p>
- *
- * <h3>API 목록</h3>
- * <ul>
- *   <li>GET /api/v1/posts — 게시글 목록 조회 (비로그인 허용)</li>
- *   <li>GET /api/v1/posts/{id} — 게시글 상세 조회 (비로그인 허용)</li>
- *   <li>POST /api/v1/posts — 게시글 작성 (인증 필요)</li>
- *   <li>PUT /api/v1/posts/{id} — 게시글 수정 (작성자만)</li>
- *   <li>DELETE /api/v1/posts/{id} — 게시글 삭제 (작성자만)</li>
- *   <li>POST /api/v1/posts/drafts — 임시저장 작성 (인증 필요)</li>
- *   <li>GET /api/v1/posts/drafts — 임시저장 목록 (인증 필요)</li>
- *   <li>PUT /api/v1/posts/drafts/{id} — 임시저장 수정 (작성자만)</li>
- *   <li>DELETE /api/v1/posts/drafts/{id} — 임시저장 삭제 (작성자만)</li>
- *   <li>POST /api/v1/posts/drafts/{id}/publish — 임시저장 게시 (작성자만)</li>
- * </ul>
+ * <p>커뮤니티 게시글의 CRUD + 임시저장(Draft) API를 제공합니다.</p>
  */
+@Tag(name = "커뮤니티", description = "게시글 CRUD, 임시저장, 좋아요")
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/posts")
@@ -58,6 +49,9 @@ public class PostController {
     /**
      * 게시글 목록 조회 API (비로그인 허용)
      */
+    @Operation(summary = "게시글 목록 조회", description = "PUBLISHED 상태 게시글 목록. 카테고리 필터링 가능 (비로그인 허용)")
+    @ApiResponse(responseCode = "200", description = "게시글 목록 조회 성공")
+    @SecurityRequirement(name = "")
     @GetMapping
     public ResponseEntity<Page<PostResponse>> getPosts(
             @RequestParam(required = false) String category,
@@ -71,6 +65,12 @@ public class PostController {
     /**
      * 게시글 상세 조회 API (조회수 1 증가)
      */
+    @Operation(summary = "게시글 상세 조회", description = "게시글 상세 정보 + 조회수 1 증가 (비로그인 허용)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "게시글 조회 성공"),
+            @ApiResponse(responseCode = "404", description = "게시글 없음")
+    })
+    @SecurityRequirement(name = "")
     @GetMapping("/{id}")
     public ResponseEntity<PostResponse> getPost(@PathVariable Long id) {
         PostResponse post = postService.getPost(id);
@@ -80,6 +80,12 @@ public class PostController {
     /**
      * 게시글 작성 API (인증 필요)
      */
+    @Operation(summary = "게시글 작성", description = "새 게시글 작성 (PUBLISHED 상태로 즉시 게시)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "게시글 작성 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping
     public ResponseEntity<PostResponse> createPost(
             @Valid @RequestBody PostCreateRequest request,
@@ -93,6 +99,13 @@ public class PostController {
     /**
      * 게시글 수정 API (작성자만)
      */
+    @Operation(summary = "게시글 수정", description = "게시글 수정 (작성자 본인만 가능)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "게시글 수정 성공"),
+            @ApiResponse(responseCode = "403", description = "수정 권한 없음"),
+            @ApiResponse(responseCode = "404", description = "게시글 없음")
+    })
+    @SecurityRequirement(name = "BearerAuth")
     @PutMapping("/{id}")
     public ResponseEntity<PostResponse> updatePost(
             @PathVariable Long id,
@@ -107,6 +120,13 @@ public class PostController {
     /**
      * 게시글 삭제 API (작성자만)
      */
+    @Operation(summary = "게시글 삭제", description = "게시글 삭제 (작성자 본인만 가능)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "게시글 삭제 성공"),
+            @ApiResponse(responseCode = "403", description = "삭제 권한 없음"),
+            @ApiResponse(responseCode = "404", description = "게시글 없음")
+    })
+    @SecurityRequirement(name = "BearerAuth")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletePost(
             @PathVariable Long id,
@@ -124,6 +144,9 @@ public class PostController {
     /**
      * 임시저장 작성 API (인증 필요)
      */
+    @Operation(summary = "임시저장 작성", description = "게시글을 DRAFT 상태로 임시 저장")
+    @ApiResponse(responseCode = "201", description = "임시저장 성공")
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/drafts")
     public ResponseEntity<PostResponse> createDraft(
             @Valid @RequestBody PostCreateRequest request,
@@ -137,6 +160,9 @@ public class PostController {
     /**
      * 임시저장 목록 조회 API (인증 필요)
      */
+    @Operation(summary = "임시저장 목록 조회", description = "내 임시저장 게시글 목록 조회")
+    @ApiResponse(responseCode = "200", description = "임시저장 목록 조회 성공")
+    @SecurityRequirement(name = "BearerAuth")
     @GetMapping("/drafts")
     public ResponseEntity<Page<PostResponse>> getDrafts(
             @PageableDefault(size = 15, sort = "createdAt", direction = Sort.Direction.DESC)
@@ -150,6 +176,9 @@ public class PostController {
     /**
      * 임시저장 수정 API (작성자만)
      */
+    @Operation(summary = "임시저장 수정", description = "임시저장 게시글 내용 수정 (작성자만)")
+    @ApiResponse(responseCode = "200", description = "임시저장 수정 성공")
+    @SecurityRequirement(name = "BearerAuth")
     @PutMapping("/drafts/{id}")
     public ResponseEntity<PostResponse> updateDraft(
             @PathVariable Long id,
@@ -163,6 +192,9 @@ public class PostController {
     /**
      * 임시저장 삭제 API (작성자만)
      */
+    @Operation(summary = "임시저장 삭제", description = "임시저장 게시글 삭제 (작성자만)")
+    @ApiResponse(responseCode = "204", description = "임시저장 삭제 성공")
+    @SecurityRequirement(name = "BearerAuth")
     @DeleteMapping("/drafts/{id}")
     public ResponseEntity<Void> deleteDraft(
             @PathVariable Long id,
@@ -175,6 +207,12 @@ public class PostController {
     /**
      * 임시저장 → 게시 API (작성자만)
      */
+    @Operation(summary = "임시저장 게시", description = "DRAFT 상태 게시글을 PUBLISHED로 변경하여 게시")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "게시 성공"),
+            @ApiResponse(responseCode = "404", description = "임시저장 게시글 없음")
+    })
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/drafts/{id}/publish")
     public ResponseEntity<PostResponse> publishDraft(
             @PathVariable Long id,

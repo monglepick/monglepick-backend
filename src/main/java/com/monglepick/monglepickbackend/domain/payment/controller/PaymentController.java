@@ -1,12 +1,20 @@
 package com.monglepick.monglepickbackend.domain.payment.controller;
 
-import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.ConfirmRequest;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.ConfirmResponse;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.CreateOrderRequest;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderHistoryResponse;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderResponse;
 import com.monglepick.monglepickbackend.domain.payment.service.PaymentService;
+import com.monglepick.monglepickbackend.global.exception.BusinessException;
+import com.monglepick.monglepickbackend.global.exception.ErrorCode;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,9 +29,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.monglepick.monglepickbackend.global.exception.BusinessException;
-import com.monglepick.monglepickbackend.global.exception.ErrorCode;
-
 import java.security.Principal;
 
 /**
@@ -34,6 +39,7 @@ import java.security.Principal;
  *
  * @see PaymentService 결제 비즈니스 로직
  */
+@Tag(name = "결제", description = "Toss Payments 연동 결제")
 @RestController
 @RequestMapping("/api/v1/payment")
 @Slf4j
@@ -53,36 +59,24 @@ public class PaymentController {
      * <p>클라이언트가 Toss Payments 결제창을 열기 전에 호출한다.
      * 서버에서 UUID 기반의 orderId를 생성하고, Toss clientKey와 함께 반환한다.</p>
      *
-     * <h4>요청 예시</h4>
-     * <pre>{@code
-     * POST /api/v1/payment/orders
-     * Content-Type: application/json
-     *
-     * {
-     *   "userId": "user_abc123",
-     *   "orderType": "point_pack",
-     *   "amount": 3900,
-     *   "pointsAmount": 5000,
-     *   "planCode": null
-     * }
-     * }</pre>
-     *
-     * <h4>응답 예시</h4>
-     * <pre>{@code
-     * {
-     *   "orderId": "550e8400-e29b-41d4-a716-446655440000",
-     *   "amount": 3900,
-     *   "clientKey": "test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq"
-     * }
-     * }</pre>
-     *
-     * @param request 주문 생성 요청 (userId, orderType, amount, pointsAmount?, planCode?)
+     * @param request        주문 생성 요청 (userId, orderType, amount, pointsAmount?, planCode?)
+     * @param idempotencyKey 멱등키 (중복 주문 방지, 선택)
      * @return 200 OK + OrderResponse (orderId, amount, clientKey)
      */
+    @Operation(
+            summary = "결제 주문 생성",
+            description = "Toss Payments 결제창 호출 전 주문 생성. 멱등키로 중복 방지 가능"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "주문 생성 성공"),
+            @ApiResponse(responseCode = "422", description = "멱등키 재사용 (동일 키, 다른 파라미터)")
+    })
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/orders")
     public ResponseEntity<OrderResponse> createOrder(
             Principal principal,
             @Valid @RequestBody CreateOrderRequest request,
+            @Parameter(name = "Idempotency-Key", description = "멱등키 (UUID, 중복 주문 방지)", in = ParameterIn.HEADER)
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         // JWT에서 userId를 추출하여 사용 (request body의 userId 무시 — BOLA 방지)
         String userId = resolveUserId(principal);
@@ -100,34 +94,19 @@ public class PaymentController {
     /**
      * 결제를 승인하고 포인트를 지급한다.
      *
-     * <p>Toss Payments 결제창에서 사용자가 결제를 완료한 후,
-     * 클라이언트가 리다이렉트 URL에서 받은 paymentKey와 함께 호출한다.
-     * Toss API 승인 → DB 상태 변경 → 포인트 지급이 하나의 트랜잭션으로 처리된다.</p>
-     *
-     * <h4>요청 예시</h4>
-     * <pre>{@code
-     * POST /api/v1/payment/confirm
-     * Content-Type: application/json
-     *
-     * {
-     *   "orderId": "550e8400-e29b-41d4-a716-446655440000",
-     *   "paymentKey": "tgen_20240101abcdef",
-     *   "amount": 3900
-     * }
-     * }</pre>
-     *
-     * <h4>응답 예시</h4>
-     * <pre>{@code
-     * {
-     *   "success": true,
-     *   "pointsGranted": 5000,
-     *   "newBalance": 8500
-     * }
-     * }</pre>
+     * <p>Toss Payments 결제창 완료 후 paymentKey와 함께 호출한다.</p>
      *
      * @param request 결제 승인 요청 (orderId, paymentKey, amount)
      * @return 200 OK + ConfirmResponse (success, pointsGranted, newBalance)
      */
+    @Operation(summary = "결제 승인", description = "Toss 결제 승인 → DB 상태 변경 → 포인트 지급 (원자적 처리)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "결제 승인 성공"),
+            @ApiResponse(responseCode = "400", description = "금액 불일치 또는 PG 승인 실패"),
+            @ApiResponse(responseCode = "404", description = "주문 미존재"),
+            @ApiResponse(responseCode = "409", description = "이미 처리된 주문")
+    })
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/confirm")
     public ResponseEntity<ConfirmResponse> confirmPayment(
             Principal principal,
@@ -147,20 +126,13 @@ public class PaymentController {
     /**
      * 사용자의 결제 내역을 페이징으로 조회한다.
      *
-     * <p>클라이언트의 "결제 내역" 화면에서 사용한다.
-     * 모든 상태(PENDING, COMPLETED, FAILED, REFUNDED)의 주문이 포함되며,
-     * 최신순으로 정렬된다.</p>
-     *
-     * <h4>요청 예시</h4>
-     * <pre>{@code
-     * GET /api/v1/payment/orders?userId=user_abc123&page=0&size=20
-     * }</pre>
-     *
-     * @param userId 사용자 ID (필수)
-     * @param page   페이지 번호 (0부터 시작, 기본값: 0)
-     * @param size   페이지 크기 (기본값: 20)
+     * @param page 페이지 번호 (0부터 시작, 기본값: 0)
+     * @param size 페이지 크기 (기본값: 20)
      * @return 200 OK + Page<OrderHistoryResponse>
      */
+    @Operation(summary = "결제 내역 조회", description = "사용자의 전체 결제 주문 내역 페이징 조회")
+    @ApiResponse(responseCode = "200", description = "결제 내역 조회 성공")
+    @SecurityRequirement(name = "BearerAuth")
     @GetMapping("/orders")
     public ResponseEntity<Page<OrderHistoryResponse>> getOrders(
             Principal principal,
@@ -183,22 +155,16 @@ public class PaymentController {
     /**
      * Toss Payments 웹훅을 수신한다.
      *
-     * <p>Toss Payments가 결제 상태 변경 시 이 엔드포인트로 POST 요청을 전송한다.
-     * 현재는 로깅용으로만 수신하며, 향후 결제 확인 자동화에 활용할 예정이다.</p>
-     *
-     * <h4>주요 eventType</h4>
-     * <ul>
-     *   <li>{@code PAYMENT_STATUS_CHANGED} — 결제 상태 변경 (승인/취소/환불)</li>
-     *   <li>{@code PAYOUT_STATUS_CHANGED} — 정산 상태 변경</li>
-     * </ul>
-     *
-     * <h4>보안 고려사항</h4>
-     * <p>운영 환경에서는 Toss 웹훅 서명(Webhook Signature) 검증을 추가해야 한다.
-     * 현재는 로깅만 수행하므로 서명 검증을 생략한다.</p>
-     *
-     * @param payload Toss 웹훅 페이로드 (eventType, data)
-     * @return 200 OK (Toss가 200 응답을 받아야 웹훅을 재전송하지 않음)
+     * @param rawBody   Toss 웹훅 페이로드 원문
+     * @param signature TossPayments-Signature 헤더
+     * @return 200 OK
      */
+    @Operation(summary = "Toss 웹훅", description = "Toss Payments 결제 상태 변경 웹훅 수신 + 서명 검증")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "웹훅 수신 성공"),
+            @ApiResponse(responseCode = "403", description = "서명 검증 실패")
+    })
+    @SecurityRequirement(name = "")
     @PostMapping("/webhook")
     public ResponseEntity<Void> handleWebhook(
             @RequestBody String rawBody,

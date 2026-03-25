@@ -3,6 +3,11 @@ package com.monglepick.monglepickbackend.domain.auth.controller;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.AuthResponse;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.SignupRequest;
 import com.monglepick.monglepickbackend.domain.auth.service.AuthService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>POST /api/v1/auth/signup — 로컬 회원가입</li>
  * </ul>
  */
+@Tag(name = "인증", description = "회원가입 API")
 @RestController
 @RequestMapping("/api/v1/auth")
 @Slf4j
@@ -49,6 +55,15 @@ public class AuthController {
      * @param request 회원가입 요청
      * @return 201 Created + AuthResponse (토큰 쌍 + 사용자 정보)
      */
+    @Operation(
+            summary = "로컬 회원가입",
+            description = "이메일/비밀번호/닉네임으로 계정 생성, JWT 토큰 반환"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "회원가입 성공"),
+            @ApiResponse(responseCode = "409", description = "이미 사용 중인 이메일")
+    })
+    @SecurityRequirement(name = "")
     @PostMapping("/signup")
     public ResponseEntity<AuthResponse> signup(@Valid @RequestBody SignupRequest request) {
         log.info("POST /api/v1/auth/signup — email: {}", request.email());

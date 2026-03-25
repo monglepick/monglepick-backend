@@ -2,6 +2,11 @@ package com.monglepick.monglepickbackend.domain.auth.controller;
 
 import com.monglepick.monglepickbackend.domain.auth.dto.JwtResponseDto;
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -26,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>POST /jwt/refresh — Refresh Token으로 새 토큰 쌍 발급 (토큰 로테이션)</li>
  * </ul>
  */
+@Tag(name = "JWT 토큰", description = "쿠키→헤더 교환, Refresh Token 갱신")
 @Slf4j
 @RestController
 @RequestMapping("/jwt")
@@ -43,6 +49,15 @@ public class JwtController {
      *
      * @return 200 OK + JwtResponseDto (accessToken, refreshToken, userNickname)
      */
+    @Operation(
+            summary = "소셜 로그인 토큰 교환",
+            description = "OAuth2 성공 후 HttpOnly 쿠키의 Refresh Token을 JSON 기반 JWT로 교환"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "토큰 교환 성공"),
+            @ApiResponse(responseCode = "400", description = "쿠키 없음 또는 유효하지 않은 토큰")
+    })
+    @SecurityRequirement(name = "")
     @PostMapping("/exchange")
     public ResponseEntity<JwtResponseDto> exchange(HttpServletRequest request, HttpServletResponse response) {
         log.info("POST /jwt/exchange — OAuth2 쿠키→헤더 교환");
@@ -60,6 +75,15 @@ public class JwtController {
      * @param request refreshToken이 포함된 요청 Body
      * @return 200 OK + JwtResponseDto (새로운 accessToken, refreshToken, userNickname)
      */
+    @Operation(
+            summary = "Access Token 갱신 (Rotation)",
+            description = "기존 Refresh Token으로 새 Access/Refresh Token 쌍 발급. 기존 토큰은 무효화됨"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "토큰 갱신 성공"),
+            @ApiResponse(responseCode = "401", description = "유효하지 않은 Refresh Token")
+    })
+    @SecurityRequirement(name = "")
     @PostMapping("/refresh")
     public ResponseEntity<JwtResponseDto> refresh(@Valid @RequestBody RefreshRequest request) {
         log.info("POST /jwt/refresh — Refresh Token 갱신");

@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.auth.handler;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
@@ -20,6 +21,9 @@ import java.io.IOException;
  * <p>KMG 프로젝트의 LoginSuccessHandler 패턴을 적용.
  * 로그인 성공 시 Access Token + Refresh Token을 생성하고,
  * Refresh Token을 DB 화이트리스트에 저장한 후 JSON 응답으로 반환한다.</p>
+ *
+ * <p>C-1 수정: String.format() JSON 수동 조합 → ObjectMapper 직렬화로 교체
+ * (JSON Injection 취약점 방지)</p>
  */
 @Slf4j
 @Component
@@ -29,6 +33,33 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtService jwtService;
     private final UserRepository userRepository;
+
+    /** JSON 직렬화용 ObjectMapper (Spring Bean 주입) */
+    private final ObjectMapper objectMapper;
+
+    /**
+     * 로그인 성공 응답 DTO.
+     *
+     * <p>C-1: String.format() 대신 ObjectMapper로 직렬화하여
+     * 닉네임/프로필 이미지 등 사용자 입력값에 의한 JSON Injection을 방지한다.</p>
+     */
+    private record LoginResponse(
+            String accessToken,
+            String refreshToken,
+            UserInfo user
+    ) {
+    }
+
+    /** 로그인 응답에 포함될 사용자 정보 */
+    private record UserInfo(
+            String id,
+            String email,
+            String nickname,
+            String profileImage,
+            String provider,
+            String role
+    ) {
+    }
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
@@ -48,17 +79,22 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
         /* Refresh Token을 DB 화이트리스트에 저장 */
         jwtService.addRefresh(user.getUserId(), refreshToken);
 
-        /* JSON 응답 반환 */
-        response.setContentType("application/json;charset=UTF-8");
-        String json = String.format(
-                "{\"accessToken\":\"%s\",\"refreshToken\":\"%s\",\"user\":{\"id\":\"%s\",\"email\":\"%s\",\"nickname\":\"%s\",\"profileImage\":%s,\"provider\":\"%s\",\"role\":\"%s\"}}",
-                accessToken, refreshToken,
-                user.getUserId(), user.getEmail(), user.getNickname(),
-                user.getProfileImage() != null ? "\"" + user.getProfileImage() + "\"" : "null",
-                user.getProvider().name(), user.getUserRole()
+        /* C-1: ObjectMapper로 안전한 JSON 직렬화 (JSON Injection 방지) */
+        LoginResponse loginResponse = new LoginResponse(
+                accessToken,
+                refreshToken,
+                new UserInfo(
+                        user.getUserId(),
+                        user.getEmail(),
+                        user.getNickname(),
+                        user.getProfileImage(),
+                        user.getProvider().name(),
+                        user.getUserRole()
+                )
         );
-        response.getWriter().write(json);
-        response.getWriter().flush();
+
+        response.setContentType("application/json;charset=UTF-8");
+        objectMapper.writeValue(response.getWriter(), loginResponse);
 
         log.info("로컬 로그인 성공 — userId: {}, email: {}", user.getUserId(), email);
     }

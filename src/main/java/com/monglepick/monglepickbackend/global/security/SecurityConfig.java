@@ -137,6 +137,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/**").permitAll()
 
+                        /* Swagger/OpenAPI UI 및 API 문서 경로 */
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**").permitAll()
+
                         /* 인증 API (회원가입, 로그인 등) */
                         .requestMatchers("/api/v1/auth/**").permitAll()
 

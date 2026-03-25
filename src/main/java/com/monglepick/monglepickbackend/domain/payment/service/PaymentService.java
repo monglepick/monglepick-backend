@@ -300,9 +300,20 @@ public class PaymentService {
 
             return new ConfirmResponse(true, pointsToGrant, newBalance);
         } catch (Exception e) {
-            // DB 저장 실패 → Toss 결제를 취소하여 보상 (사용자가 돈을 냈는데 포인트를 못 받는 상황 방지)
+            /*
+             * C-5: DB 저장 실패 → Toss 결제를 취소하여 보상 트랜잭션 실행.
+             * cancelPayment 내부 예외 시에도 로그를 남기고 원래 예외를 재전파하여
+             * 보상 실패를 추적할 수 있도록 한다.
+             */
             log.error("DB 저장 실패, Toss 결제 보상 취소 시도: orderId={}, error={}", request.orderId(), e.getMessage());
-            tossClient.cancelPayment(request.paymentKey(), "서버 내부 오류로 인한 자동 취소");
+            try {
+                tossClient.cancelPayment(request.paymentKey(), "서버 내부 오류로 인한 자동 취소");
+                log.info("Toss 보상 취소 성공: orderId={}", request.orderId());
+            } catch (Exception cancelEx) {
+                /* C-5: 보상 취소도 실패한 경우 — 수동 조치 필요 */
+                log.error("Toss 보상 취소 실패 (수동 조치 필요): orderId={}, paymentKey={}, 취소에러={}",
+                        request.orderId(), request.paymentKey(), cancelEx.getMessage(), cancelEx);
+            }
             throw e;
         }
     }
