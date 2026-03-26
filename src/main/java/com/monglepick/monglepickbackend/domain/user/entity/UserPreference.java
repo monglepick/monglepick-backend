@@ -74,16 +74,35 @@ public class UserPreference extends BaseAuditEntity {
     @Column(name = "excluded_keywords", columnDefinition = "JSON")
     private String excludedKeywords;
 
+    /**
+     * 비선호 장르 목록 (REQ_067: 온보딩 시 비선호 장르 선택, JSON 배열)
+     * <p>예: ["호러", "다큐멘터리"]</p>
+     * <p>추천 엔진에서 이 장르들을 필터링하여 제외한다.</p>
+     */
+    @Column(name = "disliked_genres", columnDefinition = "JSON")
+    private String dislikedGenres;
+
+    /**
+     * 최애 영화 목록 (REQ_069: 영화 월드컵 결과 저장, JSON 배열, 최대 6개)
+     * <p>예: ["movie_12345", "movie_67890", ...]</p>
+     * <p>온보딩 월드컵 결과에서 선정된 영화 ID를 저장하며, CBF 기반 추천의 시드 데이터로 활용된다.</p>
+     */
+    @Column(name = "favorite_movies", columnDefinition = "JSON")
+    private String favoriteMovies;
+
     /* created_at, updated_at은 BaseAuditEntity(→BaseTimeEntity)에서 자동 관리 — 수동 필드 제거됨 */
 
     @Builder
     public UserPreference(User user, String preferredGenres, String preferredMoods,
-                          String preferredPlatforms, String excludedKeywords) {
+                          String preferredPlatforms, String excludedKeywords,
+                          String dislikedGenres, String favoriteMovies) {
         this.user = user;
         this.preferredGenres = preferredGenres;
         this.preferredMoods = preferredMoods;
         this.preferredPlatforms = preferredPlatforms;
         this.excludedKeywords = excludedKeywords;
+        this.dislikedGenres = dislikedGenres;
+        this.favoriteMovies = favoriteMovies;
     }
 
     /* @PrePersist/@PreUpdate 제거됨 — BaseTimeEntity의 @CreationTimestamp/@UpdateTimestamp로 자동 관리 */
@@ -106,5 +125,15 @@ public class UserPreference extends BaseAuditEntity {
     /** 제외 키워드 업데이트 */
     public void updateExcludedKeywords(String excludedKeywords) {
         this.excludedKeywords = excludedKeywords;
+    }
+
+    /** 비선호 장르 업데이트 (REQ_067) */
+    public void updateDislikedGenres(String dislikedGenres) {
+        this.dislikedGenres = dislikedGenres;
+    }
+
+    /** 최애 영화 업데이트 (REQ_069: 월드컵 결과 저장) */
+    public void updateFavoriteMovies(String favoriteMovies) {
+        this.favoriteMovies = favoriteMovies;
     }
 }

@@ -119,6 +119,27 @@ public class ChatSessionArchive extends BaseAuditEntity {
     @Column(name = "ended_at")
     private LocalDateTime endedAt;
 
+    /** 소프트 삭제 여부 (REQ_054: 이전 채팅 내역 삭제) */
+    @Column(name = "is_deleted", nullable = false)
+    @Builder.Default
+    private Boolean isDeleted = false;
+
+    /** 소프트 삭제 시각 (30일 후 물리삭제 스케줄링 기준) */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     /* created_at, updated_at → BaseTimeEntity에서 상속 (아카이빙 시각) */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
+
+    /** 채팅 세션 소프트 삭제 (REQ_054) */
+    public void softDelete() {
+        this.isDeleted = true;
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    /** 소프트 삭제 복원 (관리자 기능) */
+    public void restore() {
+        this.isDeleted = false;
+        this.deletedAt = null;
+    }
 }

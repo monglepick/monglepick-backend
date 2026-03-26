@@ -12,9 +12,11 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -41,7 +43,12 @@ import lombok.NoArgsConstructor;
  * </ul>
  */
 @Entity
-@Table(name = "posts")
+@Table(name = "posts", indexes = {
+        @Index(name = "idx_posts_category", columnList = "category"),
+        @Index(name = "idx_posts_user", columnList = "user_id"),
+        @Index(name = "idx_posts_status", columnList = "status"),
+        @Index(name = "idx_posts_created_at", columnList = "created_at")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Post extends BaseAuditEntity {
@@ -78,6 +85,26 @@ public class Post extends BaseAuditEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private PostStatus status;
+
+    /** 좋아요 수 비정규화 (목록 조회 성능 최적화, 매번 COUNT 쿼리 방지) */
+    @Column(name = "like_count", nullable = false)
+    private int likeCount = 0;
+
+    /** 댓글 수 비정규화 (목록 조회 성능 최적화, 매번 COUNT 쿼리 방지) */
+    @Column(name = "comment_count", nullable = false)
+    private int commentCount = 0;
+
+    /** 소프트 삭제 여부 (REQ_043,045: 유저/관리자 게시글 삭제) */
+    @Column(name = "is_deleted", nullable = false)
+    private boolean isDeleted = false;
+
+    /** 소프트 삭제 시각 (30일 후 물리삭제 스케줄링 기준) */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    /** 신고 누적 블라인드 여부 (REQ_046: 누적 5회 이상 신고 시 자동 true) */
+    @Column(name = "is_blinded", nullable = false)
+    private boolean isBlinded = false;
 
     /**
      * 게시글 카테고리 열거형.
@@ -152,6 +179,10 @@ public class Post extends BaseAuditEntity {
         this.category = category;
         this.status = status != null ? status : PostStatus.PUBLISHED;
         this.viewCount = 0;
+        this.likeCount = 0;
+        this.commentCount = 0;
+        this.isDeleted = false;
+        this.isBlinded = false;
     }
 
     /** 게시글 내용 수정 */
@@ -169,5 +200,51 @@ public class Post extends BaseAuditEntity {
     /** 임시저장 → 게시글 업로드 */
     public void publish() {
         this.status = PostStatus.PUBLISHED;
+    }
+
+    /** 소프트 삭제 처리 (REQ_043: 유저 삭제, REQ_045: 관리자 삭제) */
+    public void softDelete() {
+        this.isDeleted = true;
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    /** 소프트 삭제 복원 (관리자 기능) */
+    public void restore() {
+        this.isDeleted = false;
+        this.deletedAt = null;
+    }
+
+    /** 신고 블라인드 처리 (REQ_046: 누적 5회 이상 신고 시 호출) */
+    public void blind() {
+        this.isBlinded = true;
+    }
+
+    /** 블라인드 해제 (관리자 기능) */
+    public void unblind() {
+        this.isBlinded = false;
+    }
+
+    /** 좋아요 수 증가 (PostLike 생성 시 호출) */
+    public void incrementLikeCount() {
+        this.likeCount++;
+    }
+
+    /** 좋아요 수 감소 (PostLike 삭제 시 호출) */
+    public void decrementLikeCount() {
+        if (this.likeCount > 0) {
+            this.likeCount--;
+        }
+    }
+
+    /** 댓글 수 증가 (PostComment 생성 시 호출) */
+    public void incrementCommentCount() {
+        this.commentCount++;
+    }
+
+    /** 댓글 수 감소 (PostComment 삭제 시 호출) */
+    public void decrementCommentCount() {
+        if (this.commentCount > 0) {
+            this.commentCount--;
+        }
     }
 }

@@ -70,13 +70,49 @@ public class User extends BaseAuditEntity {
     @Column(name = "user_birth", length = 20)
     private String userBirth;
 
-    /** 선택 약관 동의 */
+    /** 사용자 이름 (REQ_012: 회원가입 시 이름 입력) */
+    @Column(name = "name", length = 100)
+    private String name;
+
+    /** 필수 약관 동의 (이용약관 + 개인정보) */
+    @Column(name = "required_term")
+    private Boolean requiredTerm;
+
+    /** 선택 약관 동의 (기타 선택 사항) */
     @Column(name = "option_term")
     private Boolean optionTerm;
 
-    /** 필수 약관 동의 */
-    @Column(name = "required_term")
-    private Boolean requiredTerm;
+    /** 마케팅 수신 동의 (REQ_015: 개인정보/마케팅 동의 구분 관리) */
+    @Column(name = "marketing_agreed")
+    private Boolean marketingAgreed;
+
+    /**
+     * 계정 상태 (REQ_029: 잠금, 관리자: 정지/활성화).
+     * ACTIVE: 정상, SUSPENDED: 정지, LOCKED: 로그인 실패 잠금
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", length = 20, nullable = false)
+    private UserStatus status;
+
+    /** 계정 정지 시각 (관리자 사용자 관리: 정지 시 기록) */
+    @Column(name = "suspended_at")
+    private LocalDateTime suspendedAt;
+
+    /** 계정 정지 사유 (관리자 사용자 관리: 정지 사유 기록) */
+    @Column(name = "suspend_reason", length = 500)
+    private String suspendReason;
+
+    /** 소프트 삭제 여부 (회원 탈퇴 시 true, 30일 후 물리삭제) */
+    @Column(name = "is_deleted", nullable = false)
+    private boolean isDeleted = false;
+
+    /** 소프트 삭제 시각 (탈퇴 시 기록, 30일 후 물리삭제 스케줄링 기준) */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    /** 최종 로그인 시각 (관리자 대시보드 활동 추적) */
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
 
     /* created_at, updated_at은 BaseAuditEntity(→BaseTimeEntity)에서 자동 관리 — 수동 필드 제거됨 */
 
@@ -85,10 +121,23 @@ public class User extends BaseAuditEntity {
         LOCAL, NAVER, KAKAO, GOOGLE
     }
 
+    /**
+     * 사용자 계정 상태 열거형.
+     * <ul>
+     *   <li>ACTIVE — 정상 사용 가능</li>
+     *   <li>SUSPENDED — 관리자에 의해 정지됨</li>
+     *   <li>LOCKED — 로그인 5회 실패로 잠금 (REQ_029)</li>
+     * </ul>
+     */
+    public enum UserStatus {
+        ACTIVE, SUSPENDED, LOCKED
+    }
+
     @Builder
     public User(String userId, String email, String nickname, String passwordHash,
                 String profileImage, Provider provider, String providerId,
-                UserRole userRole, String userBirth, Boolean optionTerm, Boolean requiredTerm) {
+                UserRole userRole, String userBirth, String name,
+                Boolean optionTerm, Boolean requiredTerm, Boolean marketingAgreed) {
         this.userId = userId;
         this.email = email;
         this.nickname = nickname;
@@ -98,8 +147,12 @@ public class User extends BaseAuditEntity {
         this.providerId = providerId;
         this.userRole = userRole != null ? userRole : UserRole.USER;
         this.userBirth = userBirth;
+        this.name = name;
         this.optionTerm = optionTerm != null ? optionTerm : false;
         this.requiredTerm = requiredTerm != null ? requiredTerm : false;
+        this.marketingAgreed = marketingAgreed != null ? marketingAgreed : false;
+        this.status = UserStatus.ACTIVE;
+        this.isDeleted = false;
     }
 
     /* @PrePersist/@PreUpdate 제거됨 — BaseTimeEntity의 @CreationTimestamp/@UpdateTimestamp로 자동 관리 */
@@ -117,5 +170,35 @@ public class User extends BaseAuditEntity {
     /** 비밀번호 변경 */
     public void updatePassword(String passwordHash) {
         this.passwordHash = passwordHash;
+    }
+
+    /** 계정 정지 (관리자 기능) */
+    public void suspend(String reason) {
+        this.status = UserStatus.SUSPENDED;
+        this.suspendedAt = LocalDateTime.now();
+        this.suspendReason = reason;
+    }
+
+    /** 계정 정지 해제 (관리자 기능) */
+    public void activate() {
+        this.status = UserStatus.ACTIVE;
+        this.suspendedAt = null;
+        this.suspendReason = null;
+    }
+
+    /** 로그인 실패 잠금 (REQ_029: 5회 오류 시) */
+    public void lock() {
+        this.status = UserStatus.LOCKED;
+    }
+
+    /** 회원 탈퇴 — 소프트 삭제 (30일 후 물리삭제) */
+    public void softDelete() {
+        this.isDeleted = true;
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    /** 최종 로그인 시각 갱신 */
+    public void updateLastLoginAt() {
+        this.lastLoginAt = LocalDateTime.now();
     }
 }

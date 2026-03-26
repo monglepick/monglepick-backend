@@ -66,6 +66,14 @@ public class Review extends BaseAuditEntity {
     @Column(columnDefinition = "TEXT")
     private String content;
 
+    /** 소프트 삭제 여부 (관리자 콘텐츠 관리: 리뷰 삭제) */
+    @Column(name = "is_deleted", nullable = false)
+    private boolean isDeleted = false;
+
+    /** 신고 블라인드 여부 (관리자 콘텐츠 관리: 신고 처리 시 블라인드) */
+    @Column(name = "is_blinded", nullable = false)
+    private boolean isBlinded = false;
+
     /* created_at, updated_at → BaseTimeEntity에서 상속 (수동 createdAt 및 @PrePersist 제거) */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
 
@@ -75,6 +83,8 @@ public class Review extends BaseAuditEntity {
         this.movieId = movieId;
         this.rating = rating;
         this.content = content;
+        this.isDeleted = false;
+        this.isBlinded = false;
     }
 
     /* @PrePersist onCreate() 제거 — BaseTimeEntity의 @CreationTimestamp가 created_at 자동 설정 */
@@ -83,5 +93,25 @@ public class Review extends BaseAuditEntity {
     public void update(Double rating, String content) {
         this.rating = rating;
         this.content = content;
+    }
+
+    /** 소프트 삭제 처리 (관리자 콘텐츠 관리) */
+    public void softDelete() {
+        this.isDeleted = true;
+    }
+
+    /** 소프트 삭제 복원 (관리자 기능) */
+    public void restore() {
+        this.isDeleted = false;
+    }
+
+    /** 신고 블라인드 처리 (관리자 콘텐츠 관리) */
+    public void blind() {
+        this.isBlinded = true;
+    }
+
+    /** 블라인드 해제 (관리자 기능) */
+    public void unblind() {
+        this.isBlinded = false;
     }
 }

@@ -20,11 +20,16 @@ import lombok.NoArgsConstructor;
  * <p>커뮤니티 게시글에 달린 댓글을 저장한다.
  * 소프트 삭제(is_deleted)를 지원하여, 삭제된 댓글은 "삭제된 댓글입니다"로 표시한다.</p>
  *
+ * <h3>대댓글 구조</h3>
+ * <p>{@code parentCommentId}가 null이면 최상위 댓글, 값이 있으면 해당 댓글에 대한 답글이다.
+ * 1단계 대댓글만 지원한다 (대댓글의 대댓글은 원본 댓글에 대한 답글로 처리).</p>
+ *
  * <h3>주요 필드</h3>
  * <ul>
  *   <li>{@code postId} — 게시글 ID (FK → posts.id)</li>
  *   <li>{@code categoryId} — 카테고리 ID (nullable)</li>
  *   <li>{@code userId} — 작성자 ID</li>
+ *   <li>{@code parentCommentId} — 부모 댓글 ID (null=최상위, FK → post_comment.post_comment_id)</li>
  *   <li>{@code content} — 댓글 내용 (TEXT)</li>
  *   <li>{@code isDeleted} — 소프트 삭제 여부 (기본값: false)</li>
  * </ul>
@@ -33,6 +38,7 @@ import lombok.NoArgsConstructor;
  * <ul>
  *   <li>PK 필드명: commentId → postCommentId (컬럼명: post_comment_id)</li>
  *   <li>BaseTimeEntity → BaseAuditEntity로 변경 (created_by/updated_by 추가)</li>
+ *   <li>parent_comment_id 추가 — 대댓글 지원</li>
  * </ul>
  */
 @Entity
@@ -72,6 +78,14 @@ public class PostComment extends BaseAuditEntity {
      */
     @Column(name = "user_id", length = 50, nullable = false)
     private String userId;
+
+    /**
+     * 부모 댓글 ID (BIGINT, nullable) — 대댓글 지원용 Self FK.
+     * null이면 최상위 댓글, 값이 있으면 해당 댓글에 대한 답글이다.
+     * post_comment.post_comment_id를 참조한다.
+     */
+    @Column(name = "parent_comment_id")
+    private Long parentCommentId;
 
     /** 댓글 내용 (TEXT 타입, NOT NULL) */
     @Column(name = "content", columnDefinition = "TEXT", nullable = false)
