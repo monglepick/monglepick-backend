@@ -167,6 +167,29 @@ app:
       max-input-length: 2000
 
 ## ---------------------------------------------------------------------------
+## Swagger UI 접근 제어
+## ---------------------------------------------------------------------------
+## SWAGGER_ENABLED=false 설정 시 Swagger UI 및 OpenAPI 문서 완전 비활성화
+## 로컬/스테이징: true (기본값), 운영: false 필수
+springdoc:
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+
+## ---------------------------------------------------------------------------
+## 개발 전용 인증 설정 (Swagger UI 테스트용)
+## ---------------------------------------------------------------------------
+## DEV_AUTH_ENABLED=true 로 설정 시 /api/v1/dev/token 엔드포인트가 활성화되어
+## Swagger UI에서 간편하게 JWT 토큰을 발급받아 API 테스트 가능
+## ⚠ 운영 환경에서는 반드시 false(기본값)로 유지
+dev:
+  auth:
+    enabled: ${DEV_AUTH_ENABLED:false}
+  ## 마스터키: Swagger UI에서 Authorize → DevMasterKeyAuth에 이 값을 입력하면 ADMIN 인증 통과
+  master-key: ${DEV_MASTER_KEY:monglepick-dev-master-2026}
+
+## ---------------------------------------------------------------------------
 ## Toss Payments 설정
 ## ---------------------------------------------------------------------------
 toss:

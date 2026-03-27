@@ -91,6 +91,18 @@ public class SecurityConfig {
     @Value("${app.service.key:dev-service-key-change-me}")
     private String serviceKey;
 
+    /** Dev Master Key 활성화 여부 (DEV_AUTH_ENABLED 환경변수) */
+    @Value("${dev.auth.enabled:false}")
+    private boolean devAuthEnabled;
+
+    /** Dev Master Key 값 (DEV_MASTER_KEY 환경변수) */
+    @Value("${dev.master-key:monglepick-dev-master-2026}")
+    private String devMasterKey;
+
+    /** Swagger UI 접근 허용 여부 (SWAGGER_ENABLED 환경변수, 운영=false) */
+    @Value("${springdoc.swagger-ui.enabled:true}")
+    private boolean swaggerEnabled;
+
     @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
     private String allowedOrigins;
 
@@ -279,8 +291,17 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/health").permitAll()
                 .requestMatchers(HttpMethod.GET, "/actuator/**").permitAll()
 
-                /* Swagger/OpenAPI UI 및 API 문서 경로 */
-                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**").permitAll()
+                /*
+                 * Swagger/OpenAPI UI 및 API 문서 경로.
+                 * SWAGGER_ENABLED=false(운영)이면 denyAll로 차단 (springdoc 비활성화와 이중 방어).
+                 * SWAGGER_ENABLED=true(로컬/스테이징)이면 permitAll로 공개.
+                 */
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**")
+                    .access((authentication, context) ->
+                        new org.springframework.security.authorization.AuthorizationDecision(swaggerEnabled))
+
+                /* Dev Auth — 개발 전용 토큰 발급 (DEV_AUTH_ENABLED=true 일 때만 컨트롤러 빈 등록) */
+                .requestMatchers("/api/v1/dev/**").permitAll()
 
                 /* 인증 API (회원가입, 로그인, 소셜 로그인 등) */
                 .requestMatchers("/api/v1/auth/**").permitAll()
@@ -337,7 +358,22 @@ public class SecurityConfig {
             .addFilterBefore(
                 new ServiceKeyAuthFilter(serviceKey),
                 UsernamePasswordAuthenticationFilter.class
-            )
+            );
+
+            /*
+             * 4. DevMasterKeyFilter → JwtAuthenticationFilter 앞에 배치 (개발 전용).
+             * DEV_AUTH_ENABLED=true 일 때만 등록된다.
+             * X-Dev-Master-Key 헤더로 간편하게 ADMIN 인증을 우회할 수 있다.
+             * Swagger UI에서 Authorize → DevMasterKeyAuth에 키를 입력하면 모든 API 인증 통과.
+             */
+            if (devAuthEnabled) {
+                http.addFilterBefore(
+                    new DevMasterKeyFilter(devMasterKey),
+                    JwtAuthenticationFilter.class
+                );
+            }
+
+            http
 
             /*
              * 인증/인가 예외 처리 핸들러.

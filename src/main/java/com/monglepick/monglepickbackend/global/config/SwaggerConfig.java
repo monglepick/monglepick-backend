@@ -41,11 +41,21 @@ public class SwaggerConfig {
                         .description("AI 영화 추천 서비스 몽글픽의 REST API 명세서.\n\n" +
                                 "## 인증 방식\n" +
                                 "- **JWT Bearer**: 사용자 API (Authorization: Bearer {token})\n" +
-                                "- **X-Service-Key**: AI Agent 내부 통신")
+                                "- **X-Service-Key**: AI Agent 내부 통신\n\n" +
+                                "## 🔧 개발 환경 간편 테스트 (DEV_AUTH_ENABLED=true 일 때)\n" +
+                                "### 방법 1: 마스터키 (가장 간편)\n" +
+                                "1. 상단 🔓 **Authorize** 버튼 클릭\n" +
+                                "2. **DevMasterKeyAuth** 필드에 마스터키 입력 (기본: `monglepick-dev-master-2026`)\n" +
+                                "3. **Authorize** 클릭 → 끝! 모든 API 인증 통과\n\n" +
+                                "### 방법 2: JWT 토큰 발급 (특정 userId/role 필요 시)\n" +
+                                "1. **[🔧 Dev Auth] GET /api/v1/dev/token** 호출\n" +
+                                "2. 응답의 `access_token` → **BearerAuth** 필드에 붙여넣기")
                         .version("v1.0.0")
                         .contact(new Contact().name("몽글픽 팀")))
-                /* 전역 기본 인증: JWT Bearer */
-                .addSecurityItem(new SecurityRequirement().addList("BearerAuth"))
+                /* 전역 기본 인증: DevMasterKey 또는 JWT Bearer (Swagger UI에서 둘 중 하나만 입력하면 됨) */
+                .addSecurityItem(new SecurityRequirement()
+                        .addList("DevMasterKeyAuth")
+                        .addList("BearerAuth"))
                 .components(new Components()
                         /* JWT Bearer 인증 스키마 */
                         .addSecuritySchemes("BearerAuth", new SecurityScheme()
@@ -58,6 +68,12 @@ public class SwaggerConfig {
                         .addSecuritySchemes("ServiceKeyAuth", new SecurityScheme()
                                 .type(SecurityScheme.Type.APIKEY)
                                 .in(SecurityScheme.In.HEADER)
-                                .name("X-Service-Key")));
+                                .name("X-Service-Key"))
+                        /* 개발 전용 마스터키 인증 스키마 (DEV_AUTH_ENABLED=true 일 때 활성화) */
+                        .addSecuritySchemes("DevMasterKeyAuth", new SecurityScheme()
+                                .type(SecurityScheme.Type.APIKEY)
+                                .in(SecurityScheme.In.HEADER)
+                                .name("X-Dev-Master-Key")
+                                .description("개발 전용 마스터키 (기본값: monglepick-dev-master-2026)")));
     }
 }
