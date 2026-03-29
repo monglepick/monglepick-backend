@@ -9,6 +9,9 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,6 +34,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class MovieController {
 
     private final MovieService movieService;
+
+    /**
+     * 인기 영화 목록 조회 API (평점순)
+     *
+     * <p>홈 페이지 "인기 영화" 섹션에서 호출됩니다.
+     * 평점이 있는 영화만 평점 내림차순으로 반환합니다.</p>
+     *
+     * @param pageable 페이징 (기본 page=0, size=8)
+     * @return 200 OK + 영화 목록 (Page)
+     */
+    @Operation(summary = "인기 영화 목록", description = "평점순 인기 영화 목록 조회 (비로그인 가능)")
+    @ApiResponse(responseCode = "200", description = "조회 성공")
+    @SecurityRequirement(name = "")
+    @GetMapping("/popular")
+    public ResponseEntity<Page<MovieResponse>> getPopularMovies(
+            @PageableDefault(size = 8) Pageable pageable) {
+        log.debug("인기 영화 조회 - page: {}, size: {}", pageable.getPageNumber(), pageable.getPageSize());
+        Page<MovieResponse> movies = movieService.getPopularMovies(pageable);
+        return ResponseEntity.ok(movies);
+    }
 
     /**
      * 영화 상세 조회 API

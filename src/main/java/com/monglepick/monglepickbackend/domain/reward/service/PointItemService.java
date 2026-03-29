@@ -63,7 +63,7 @@ public class PointItemService {
      *
      * @return 활성 아이템 목록 (가격 오름차순, 없으면 빈 리스트)
      */
-    @Cacheable(value = "pointItems", key = "'all'")
+    /* @Cacheable 제거: Redis JDK 직렬화 ↔ DevTools 클래스 리로드 충돌 방지 (V5 테스트) */
     public List<PointItemResponse> getActiveItems() {
         log.debug("전체 활성 아이템 목록 조회");
 
@@ -85,7 +85,7 @@ public class PointItemService {
      * @param category 아이템 카테고리 (예: "general", "coupon", "avatar", "ai")
      * @return 해당 카테고리의 활성 아이템 목록 (가격 오름차순, 없으면 빈 리스트)
      */
-    @Cacheable(value = "pointItems", key = "#category")
+    /* @Cacheable 제거: Redis JDK 직렬화 ↔ DevTools 클래스 리로드 충돌 방지 (V5 테스트) */
     public List<PointItemResponse> getItemsByCategory(String category) {
         log.debug("카테고리별 아이템 목록 조회: category={}", category);
 

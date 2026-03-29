@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.reward.dto;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
+import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -277,13 +278,14 @@ public final class PointDto {
      * @param price       필요 포인트
      * @param category    아이템 카테고리 (general, coupon, avatar, ai 등)
      */
+    /** Serializable 필수: @Cacheable Redis 직렬화에 필요 (V5 테스트에서 발견) */
     public record PointItemResponse(
             Long itemId,
             String name,
             String description,
             int price,
             String category
-    ) {
+    ) implements Serializable {
     }
 
     /**

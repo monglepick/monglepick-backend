@@ -325,6 +325,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/support/faq").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/support/help").permitAll()
 
+                /* 영화 조회 — 비로그인 허용 (상세, TMDB, 인기) */
+                .requestMatchers(HttpMethod.GET, "/api/v1/movies/**").permitAll()
+
                 /* 나머지 모든 요청: 인증 필요 */
                 .anyRequest().authenticated()
             )

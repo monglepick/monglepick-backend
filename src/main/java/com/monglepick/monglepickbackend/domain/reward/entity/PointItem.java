@@ -78,7 +78,8 @@ public class PointItem extends BaseAuditEntity {
      * 기본값: true.
      * false로 설정하면 사용자에게 노출되지 않는다.
      */
-    @Column(name = "is_active")
+    /** DDL 기본값 true — NULL 방지 (V5 테스트에서 발견: @Builder.Default만으로는 DB 컬럼에 NULL 저장됨) */
+    @Column(name = "is_active", nullable = false, columnDefinition = "BOOLEAN DEFAULT TRUE")
     @Builder.Default
     private Boolean isActive = true;
 }

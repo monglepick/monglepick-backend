@@ -42,4 +42,13 @@ public interface MovieRepository extends JpaRepository<Movie, String> {
      */
     @Query("SELECT m FROM Movie m WHERE m.title LIKE %:keyword% OR m.titleEn LIKE %:keyword%")
     Page<Movie> searchByTitle(@Param("keyword") String keyword, Pageable pageable);
+
+    /**
+     * 인기 영화 조회 (평점 내림차순, 평점 NULL 제외).
+     * <p>홈 페이지 "인기 영화" 섹션에서 사용됩니다.</p>
+     *
+     * @param pageable 페이징 정보
+     * @return 평점순 정렬된 영화 페이지
+     */
+    Page<Movie> findByRatingIsNotNullOrderByRatingDesc(Pageable pageable);
 }

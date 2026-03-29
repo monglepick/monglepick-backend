@@ -7,6 +7,8 @@ import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -63,8 +65,18 @@ public class MovieService {
         return MovieResponse.from(movie);
     }
 
-    // ※ searchMovies 메서드는 삭제되었습니다.
-    // 영화 검색 기능은 monglepick-recommend(FastAPI) 프로젝트에서 담당합니다.
-    // - 키워드 검색: Elasticsearch Nori 한국어 분석기 기반
-    // - 하이브리드 검색: Qdrant(벡터) + ES(BM25) + Neo4j(그래프) → RRF 합산
+    /**
+     * 인기 영화 목록을 조회합니다 (평점 내림차순).
+     *
+     * <p>홈 페이지 "인기 영화" 섹션에서 사용됩니다.
+     * 평점이 NULL인 영화는 제외하고, 평점 높은 순으로 반환합니다.</p>
+     *
+     * @param pageable 페이징 정보 (기본 size=8)
+     * @return 평점순 영화 페이지
+     */
+    public Page<MovieResponse> getPopularMovies(Pageable pageable) {
+        log.debug("인기 영화 조회 - page: {}, size: {}", pageable.getPageNumber(), pageable.getPageSize());
+        return movieRepository.findByRatingIsNotNullOrderByRatingDesc(pageable)
+                .map(MovieResponse::from);
+    }
 }
