@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.user.controller;
 
+import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.UserPreference;
 import com.monglepick.monglepickbackend.domain.watchhistory.dto.WatchHistoryResponse;
@@ -19,10 +20,13 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -56,6 +60,34 @@ public class UserController {
 
         UserResponse profile = userService.getProfile(userId);
         return ResponseEntity.ok(profile);
+    }
+
+    /**
+     * 프로필 수정 API
+     *
+     * <p>닉네임, 프로필 이미지 URL 중 변경할 필드만 보내면 됩니다.
+     * null인 필드는 수정하지 않습니다.</p>
+     *
+     * @param userId  JWT에서 추출한 사용자 ID
+     * @param request 수정 요청 (nickname, profileImageUrl)
+     * @return 200 OK + 수정된 프로필 정보
+     */
+    @Operation(summary = "프로필 수정", description = "닉네임, 프로필 이미지 URL, 비밀번호 변경. null 필드는 수정하지 않음. 비밀번호 변경 시 currentPassword + newPassword 함께 전달")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "프로필 수정 성공"),
+            @ApiResponse(responseCode = "400", description = "현재 비밀번호 불일치"),
+            @ApiResponse(responseCode = "403", description = "소셜 로그인 사용자는 비밀번호 변경 불가"),
+            @ApiResponse(responseCode = "409", description = "이미 사용 중인 닉네임")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PatchMapping("/profile")
+    public ResponseEntity<UserResponse> updateProfile(
+            @AuthenticationPrincipal String userId,
+            @Valid @RequestBody UpdateProfileRequest request) {
+
+        log.info("프로필 수정 요청 - userId: {}", userId);
+        UserResponse updated = userService.updateProfile(userId, request);
+        return ResponseEntity.ok(updated);
     }
 
     /**

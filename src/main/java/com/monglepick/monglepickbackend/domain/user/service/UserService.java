@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.user.service;
 
+import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.entity.UserPreference;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +39,7 @@ public class UserService {
     private final WatchHistoryRepository watchHistoryRepository;
     private final UserWishlistRepository userWishlistRepository;
     private final UserPreferenceRepository userPreferenceRepository;
+    private final PasswordEncoder passwordEncoder;
 
     /**
      * 사용자 프로필 정보를 조회합니다.
@@ -48,6 +51,47 @@ public class UserService {
     public UserResponse getProfile(String userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        return UserResponse.from(user);
+    }
+
+    /**
+     * 프로필(닉네임, 프로필 이미지 URL)을 수정합니다.
+     *
+     * <p>null인 필드는 수정하지 않습니다 (Partial Update).
+     * 닉네임 변경 시 다른 사용자와 중복 여부를 검증합니다.</p>
+     *
+     * @param userId  사용자 ID
+     * @param request 수정 요청 DTO
+     * @return 수정된 사용자 프로필
+     * @throws BusinessException 사용자를 찾을 수 없거나 닉네임이 이미 사용 중인 경우
+     */
+    @Transactional
+    public UserResponse updateProfile(String userId, UpdateProfileRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        if (request.nickname() != null && !request.nickname().equals(user.getNickname())) {
+            if (userRepository.existsByNickname(request.nickname())) {
+                throw new BusinessException(ErrorCode.NICKNAME_ALREADY_EXISTS);
+            }
+            user.updateNickname(request.nickname());
+        }
+
+        if (request.profileImageUrl() != null) {
+            user.updateProfileImage(request.profileImageUrl());
+        }
+
+        if (request.newPassword() != null) {
+            if (user.getProvider() != User.Provider.LOCAL) {
+                throw new BusinessException(ErrorCode.SOCIAL_USER_CANNOT_CHANGE_PASSWORD);
+            }
+            if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+                throw new BusinessException(ErrorCode.INVALID_CURRENT_PASSWORD);
+            }
+            user.updatePassword(passwordEncoder.encode(request.newPassword()));
+            log.info("비밀번호 변경 완료 - userId: {}", userId);
+        }
+
         return UserResponse.from(user);
     }
 

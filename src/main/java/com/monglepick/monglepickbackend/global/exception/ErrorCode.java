@@ -125,6 +125,12 @@ public enum ErrorCode {
     /** user_id에 해당하는 사용자를 찾을 수 없음. */
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "U001", "사용자를 찾을 수 없습니다"),
 
+    /** 소셜 로그인 사용자는 비밀번호 변경 불가. */
+    SOCIAL_USER_CANNOT_CHANGE_PASSWORD(HttpStatus.FORBIDDEN, "U002", "소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다"),
+
+    /** 현재 비밀번호가 일치하지 않음. */
+    INVALID_CURRENT_PASSWORD(HttpStatus.BAD_REQUEST, "U003", "현재 비밀번호가 올바르지 않습니다"),
+
     // ─────────────────────────────────────────────
     // 결제 (PAY0xx)
     // ─────────────────────────────────────────────
@@ -202,7 +208,17 @@ public enum ErrorCode {
     TICKET_NOT_FOUND(HttpStatus.NOT_FOUND, "SUPPORT003", "상담 티켓을 찾을 수 없습니다"),
 
     /** 동일 사용자가 같은 FAQ에 피드백을 이미 제출한 경우 (faq_id + user_id UK 위반). */
-    FAQ_FEEDBACK_DUPLICATE(HttpStatus.CONFLICT, "SUPPORT005", "이미 피드백을 제출했습니다");
+    FAQ_FEEDBACK_DUPLICATE(HttpStatus.CONFLICT, "SUPPORT005", "이미 피드백을 제출했습니다"),
+
+    // ─────────────────────────────────────────────
+    // 업적 (ACH0xx)
+    // ─────────────────────────────────────────────
+
+    /** user_achievement_id에 해당하는 달성 업적을 찾을 수 없음. */
+    ACHIEVEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "ACH001", "업적을 찾을 수 없습니다"),
+
+    /** 본인 업적이 아닌 경우 접근 거부. */
+    ACHIEVEMENT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "ACH002", "업적 조회 권한이 없습니다");
 
     // ─────────────────────────────────────────────
     // 필드

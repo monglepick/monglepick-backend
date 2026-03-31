@@ -53,7 +53,7 @@ import java.time.LocalDateTime;
  *   <li>@CreationTimestamp 제거 (achievedAt) — 도메인 필드로 전환, 별도 설정 필요</li>
  * </ul>
  */
-@Entity
+@Entity(name = "RoadmapUserAchievement")
 @Table(name = "user_achievements", uniqueConstraints = {
         @UniqueConstraint(name = "uk_achievement", columnNames = {"user_id", "achievement_type", "achievement_key"})
 })

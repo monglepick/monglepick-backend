@@ -1,8 +1,10 @@
 package com.monglepick.monglepickbackend.domain.auth.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -33,12 +35,16 @@ public final class AuthDto {
     /**
      * 로컬 회원가입 요청.
      *
-     * @param email    이메일 주소 (필수, 이메일 형식)
-     * @param password 비밀번호 (필수, 8~128자, 영문+숫자 필수)
-     * @param nickname 닉네임 (필수, 2~20자)
+     * <h3>필수 항목</h3>
+     * email, password, nickname, requiredTerm(true여야 함)
+     *
+     * <h3>선택 항목</h3>
+     * name, userBirth, profileImage, optionTerm, marketingAgreed
      */
     @Schema(description = "로컬 회원가입 요청")
     public record SignupRequest(
+
+            // ── 필수 항목 ──────────────────────────────────
             @Schema(description = "이메일 주소", example = "user@example.com")
             @NotBlank(message = "이메일은 필수입니다")
             @Email(message = "올바른 이메일 형식이 아닙니다")
@@ -56,7 +62,34 @@ public final class AuthDto {
             @Schema(description = "닉네임 (2~20자)", example = "몽글유저")
             @NotBlank(message = "닉네임은 필수입니다")
             @Size(min = 2, max = 20, message = "닉네임은 2~20자여야 합니다")
-            String nickname
+            String nickname,
+
+            @Schema(description = "필수 약관 동의 (이용약관 + 개인정보처리방침, 반드시 true)", example = "true")
+            @NotNull(message = "필수 약관 동의는 필수입니다")
+            @AssertTrue(message = "필수 약관에 동의해야 합니다")
+            Boolean requiredTerm,
+
+            // ── 선택 항목 ──────────────────────────────────
+            @Schema(description = "이름 (선택)", example = "홍길동", nullable = true)
+            @Size(max = 100, message = "이름은 100자를 초과할 수 없습니다")
+            String name,
+
+            @Schema(description = "생년월일 YYYYMMDD (선택)", example = "19990101", nullable = true)
+            @Pattern(
+                    regexp = "^\\d{8}$|^$",
+                    message = "생년월일은 YYYYMMDD 형식이어야 합니다"
+            )
+            String userBirth,
+
+            @Schema(description = "프로필 이미지 URL (선택)", example = "https://example.com/img.jpg", nullable = true)
+            @Size(max = 500, message = "프로필 이미지 URL은 500자를 초과할 수 없습니다")
+            String profileImage,
+
+            @Schema(description = "선택 약관 동의 (선택, 기본값 false)", example = "false", nullable = true)
+            Boolean optionTerm,
+
+            @Schema(description = "마케팅 수신 동의 (선택, 기본값 false)", example = "false", nullable = true)
+            Boolean marketingAgreed
     ) {
     }
 

@@ -90,7 +90,12 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                 .nickname(request.nickname())
                 .passwordHash(passwordHash)
                 .provider(User.Provider.LOCAL)
-                .requiredTerm(true)
+                .requiredTerm(request.requiredTerm())
+                .name(request.name())
+                .userBirth(request.userBirth())
+                .profileImage(request.profileImage())
+                .optionTerm(request.optionTerm() != null ? request.optionTerm() : false)
+                .marketingAgreed(request.marketingAgreed() != null ? request.marketingAgreed() : false)
                 .build();
 
         userRepository.save(user);
