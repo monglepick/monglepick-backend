@@ -41,6 +41,9 @@ out/
 .env.*
 !.env.example
 
+### Application config ###
+src/main/resources/application.yml
+
 ### OS files ###
 .DS_Store
 Thumbs.db
