@@ -193,6 +193,26 @@ public class PaymentOrder extends BaseAuditEntity {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    /** Toss 결제 영수증 URL (결제 완료 시 PG사에서 제공) */
+    @Column(name = "receipt_url", length = 500)
+    private String receiptUrl;
+
+    /** 카드 정보 (마지막 4자리 + 카드사, 예: "1234 / 신한카드") */
+    @Column(name = "card_info", length = 100)
+    private String cardInfo;
+
+    /** 환불 사유 (부분/전체 환불 시 관리자 또는 사용자가 입력) */
+    @Column(name = "refund_reason", length = 500)
+    private String refundReason;
+
+    /** 환불 금액 (부분 환불 시 실제 환불 금액, 전체 환불 시 amount와 동일) */
+    @Column(name = "refund_amount")
+    private Integer refundAmount;
+
+    /** 환불 일시 (환불 처리 완료 시 기록) */
+    @Column(name = "refunded_at")
+    private LocalDateTime refundedAt;
+
     // ──────────────────────────────────────────────
     // 도메인 메서드 (Lombok @Getter only, setter 대신 사용)
     // ──────────────────────────────────────────────
@@ -249,15 +269,17 @@ public class PaymentOrder extends BaseAuditEntity {
      * 환불 처리.
      *
      * <p>결제 완료된 주문에 대해 환불을 처리한다.
-     * 주문 상태를 {@code REFUNDED}로 변경한다.
+     * 주문 상태를 {@code REFUNDED}로 변경하고 환불 관련 정보를 기록한다.
      * 실제 PG 환불 API 호출은 서비스 레이어에서 수행하며,
      * 이 메서드는 엔티티 상태만 변경한다.</p>
      *
      * <p>COMPLETED 상태에서만 호출 가능하다.</p>
      *
+     * @param reason       환불 사유 (nullable)
+     * @param refundAmount 환불 금액 (부분 환불 시 실제 금액, 전체 환불 시 amount와 동일)
      * @throws IllegalStateException COMPLETED가 아닌 상태에서 호출한 경우
      */
-    public void refund() {
+    public void refund(String reason, Integer refundAmount) {
         if (this.status != OrderStatus.COMPLETED) {
             throw new IllegalStateException(
                     "환불할 수 없는 주문 상태: " + this.status
@@ -265,6 +287,18 @@ public class PaymentOrder extends BaseAuditEntity {
             );
         }
         this.status = OrderStatus.REFUNDED;
+        this.refundReason = reason;
+        this.refundAmount = refundAmount;
+        this.refundedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 환불 처리 (전체 환불 — 사유 없음 오버로드).
+     *
+     * <p>전체 환불 시 환불 금액을 주문 금액(amount)으로 자동 설정한다.</p>
+     */
+    public void refund() {
+        refund(null, this.amount);
     }
 
     /**

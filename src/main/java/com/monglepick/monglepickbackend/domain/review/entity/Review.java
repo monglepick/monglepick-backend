@@ -9,9 +9,11 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -35,7 +37,16 @@ import lombok.NoArgsConstructor;
  * </ul>
  */
 @Entity
-@Table(name = "reviews")
+@Table(
+        name = "reviews",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_review_user_movie", columnNames = {"user_id", "movie_id"}
+        ),
+        indexes = {
+                @Index(name = "idx_reviews_movie", columnList = "movie_id"),
+                @Index(name = "idx_reviews_user", columnList = "user_id")
+        }
+)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Review extends BaseAuditEntity {
@@ -74,17 +85,28 @@ public class Review extends BaseAuditEntity {
     @Column(name = "is_blinded", nullable = false)
     private boolean isBlinded = false;
 
+    /** 스포일러 포함 여부 (기본값: false) */
+    @Column(name = "spoiler", nullable = false)
+    private boolean spoiler = false;
+
+    /** 좋아요 수 (비정규화, 기본값: 0) */
+    @Column(name = "like_count", nullable = false)
+    private int likeCount = 0;
+
     /* created_at, updated_at → BaseTimeEntity에서 상속 (수동 createdAt 및 @PrePersist 제거) */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
 
     @Builder
-    public Review(User user, String movieId, Double rating, String content) {
+    public Review(User user, String movieId, Double rating, String content,
+                  Boolean spoiler, Integer likeCount) {
         this.user = user;
         this.movieId = movieId;
         this.rating = rating;
         this.content = content;
         this.isDeleted = false;
         this.isBlinded = false;
+        this.spoiler = spoiler != null ? spoiler : false;
+        this.likeCount = likeCount != null ? likeCount : 0;
     }
 
     /* @PrePersist onCreate() 제거 — BaseTimeEntity의 @CreationTimestamp가 created_at 자동 설정 */

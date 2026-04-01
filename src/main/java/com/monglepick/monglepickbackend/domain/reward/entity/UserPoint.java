@@ -1,15 +1,15 @@
 package com.monglepick.monglepickbackend.domain.reward.entity;
 
 /* BaseAuditEntity: created_at, updated_at, created_by, updated_by 자동 관리 */
-import com.monglepick.monglepickbackend.global.constants.UserGrade;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
@@ -30,6 +30,8 @@ import java.time.LocalDate;
  * <ul>
  *   <li>2026-03-24: BaseTimeEntity → BaseAuditEntity 변경 (created_by/updated_by 추가)</li>
  *   <li>2026-03-24: PK 필드명 pointId → userPointId 로 변경, @Column(name = "user_point_id") 추가</li>
+ *   <li>2026-03-31: userGrade 필드를 등급 문자열 컬럼에서 {@code Grade} 엔티티 FK로 전환.
+ *       컬럼명 {@code user_grade}(VARCHAR) → {@code grade_id}(BIGINT FK).</li>
  * </ul>
  *
  * <h3>주요 필드</h3>
@@ -39,7 +41,7 @@ import java.time.LocalDate;
  *   <li>{@code totalEarned} — 누적 획득 포인트</li>
  *   <li>{@code dailyEarned} — 오늘 획득 포인트 (일일 한도 관리용)</li>
  *   <li>{@code dailyReset} — 일일 리셋 기준일 (DATE)</li>
- *   <li>{@code userGrade} — 사용자 등급 (BRONZE, SILVER, GOLD, PLATINUM)</li>
+ *   <li>{@code grade} — 사용자 등급 (FK → grades.grade_id, LAZY)</li>
  * </ul>
  */
 @Entity
@@ -115,14 +117,46 @@ public class UserPoint extends BaseAuditEntity {
     private LocalDate dailyReset;
 
     /**
-     * 사용자 등급.
-     * 기본값: BRONZE.
-     * 누적 포인트에 따라 BRONZE → SILVER → GOLD → PLATINUM 으로 승급.
+     * 사용자 등급 (FK → grades.grade_id, LAZY).
+     *
+     * <p>기존 Enum 문자열 컬럼(user_grade VARCHAR)에서 {@code Grade} 엔티티 FK(grade_id BIGINT)로
+     * 전환하였다. 이를 통해 관리자 페이지에서 등급 기준/쿼터를 동적으로 관리할 수 있다.</p>
+     *
+     * <p>LAZY 로딩을 사용하므로 등급 정보가 필요한 시점(트랜잭션 내)에만 조인 쿼리가 발생한다.
+     * null이 허용되며, null인 경우 서비스 레이어에서 BRONZE 등급으로 fallback 처리한다.</p>
      */
-    @Enumerated(EnumType.STRING)
-    @Column(name = "user_grade", length = 20)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "grade_id")
+    private Grade grade;
+
+    /**
+     * 일일 AI 질문 사용 횟수.
+     * 기본값: 0.
+     * 매일 자정에 스케줄러가 0으로 리셋한다.
+     * 등급별 일일 쿼터(BRONZE 3회, SILVER 10회, GOLD 30회, PLATINUM 무제한) 초과 여부 판단에 사용.
+     */
+    @Column(name = "daily_ai_used")
     @Builder.Default
-    private UserGrade userGrade = UserGrade.BRONZE;
+    private Integer dailyAiUsed = 0;
+
+    /**
+     * 월간 AI 질문 사용 횟수.
+     * 기본값: 0.
+     * 매월 1일 자정에 스케줄러가 0으로 리셋한다.
+     * 등급별 월간 쿼터(BRONZE 30회, SILVER 200회, GOLD 600회, PLATINUM 무제한) 초과 여부 판단에 사용.
+     */
+    @Column(name = "monthly_ai_used")
+    @Builder.Default
+    private Integer monthlyAiUsed = 0;
+
+    /**
+     * 총 사용 포인트 (누적).
+     * 기본값: 0.
+     * 포인트 차감 시마다 증가하며, 관리자 통계 및 사용자 활동 지표로 활용된다.
+     */
+    @Column(name = "total_spent")
+    @Builder.Default
+    private Integer totalSpent = 0;
 
     // ──────────────────────────────────────────────
     // 도메인 메서드 (Lombok @Getter only, setter 대신 사용)
@@ -146,6 +180,8 @@ public class UserPoint extends BaseAuditEntity {
             );
         }
         this.balance -= amount;
+        // 총 사용 포인트 누적 갱신
+        this.totalSpent += amount;
     }
 
     /**
@@ -180,14 +216,58 @@ public class UserPoint extends BaseAuditEntity {
     }
 
     /**
+     * AI 질문 사용 횟수 증가.
+     *
+     * <p>AI 채팅 요청 시 호출한다. 일일/월간 사용 횟수를 각각 1씩 증가시킨다.
+     * 쿼터 초과 여부 사전 검증은 서비스 레이어(QuotaService)에서 수행한다.</p>
+     */
+    public void incrementAiUsage() {
+        this.dailyAiUsed += 1;
+        this.monthlyAiUsed += 1;
+    }
+
+    /**
+     * 일일 AI 사용 횟수 리셋 (스케줄러 — 매일 자정 호출).
+     */
+    public void resetDailyAiUsed() {
+        this.dailyAiUsed = 0;
+    }
+
+    /**
+     * 월간 AI 사용 횟수 리셋 (스케줄러 — 매월 1일 자정 호출).
+     */
+    public void resetMonthlyAiUsed() {
+        this.monthlyAiUsed = 0;
+    }
+
+    /**
      * 등급 갱신.
      *
-     * <p>사용자 등급을 새로운 값으로 변경한다.
-     * 등급 계산 로직은 서비스 레이어에서 수행하며, 이 메서드는 단순히 값을 설정한다.</p>
+     * <p>사용자 등급을 새로운 {@link Grade} 엔티티로 변경한다.
+     * 등급 계산 로직(누적 포인트 기반 Grade 조회)은 서비스 레이어에서 수행하며,
+     * 이 메서드는 단순히 참조를 교체한다.</p>
      *
-     * @param newGrade 새 등급
+     * <h4>변경 이력</h4>
+     * <ul>
+     *   <li>2026-03-31: {@code updateGrade(Grade)} 방식으로 변경 —
+     *       외부에서 {@link Grade} 엔티티 객체를 주입받아 FK를 교체하는 방식으로 전환.</li>
+     * </ul>
+     *
+     * @param newGrade 새 등급 엔티티 (null 허용 — 서비스에서 BRONZE fallback 처리)
      */
-    public void updateGrade(UserGrade newGrade) {
-        this.userGrade = newGrade;
+    public void updateGrade(Grade newGrade) {
+        this.grade = newGrade;
+    }
+
+    /**
+     * 현재 등급 코드 문자열을 반환한다 (null-safe).
+     *
+     * <p>grade 참조가 null이거나 LAZY 로딩 전이면 "BRONZE"를 반환한다.
+     * 서비스 레이어에서 등급 코드 문자열이 필요할 때 사용한다.</p>
+     *
+     * @return 등급 코드 (예: "BRONZE", "SILVER", "GOLD", "PLATINUM")
+     */
+    public String getGradeCode() {
+        return this.grade != null ? this.grade.getGradeCode() : "BRONZE";
     }
 }

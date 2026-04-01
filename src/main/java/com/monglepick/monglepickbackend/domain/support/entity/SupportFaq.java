@@ -86,23 +86,35 @@ public class SupportFaq extends BaseAuditEntity {
     @Column(name = "not_helpful_count", nullable = false)
     private int notHelpfulCount = 0;
 
+    /** 표시 순서 (관리자 제어용, 낮은 값이 상위에 노출) */
+    @Column(name = "sort_order")
+    private Integer sortOrder;
+
+    /** 공개 여부 (기본값: true, false이면 사용자에게 노출되지 않음) */
+    @Column(name = "is_published", nullable = false)
+    private boolean isPublished = true;
+
     /**
      * 생성자 (빌더 패턴).
      *
      * <p>helpfulCount / notHelpfulCount는 항상 0으로 초기화된다.
      * 피드백 카운터는 비즈니스 메서드를 통해서만 변경 가능하다.</p>
      *
-     * @param category 카테고리
-     * @param question 질문 내용
-     * @param answer   답변 내용
+     * @param category  카테고리
+     * @param question  질문 내용
+     * @param answer    답변 내용
+     * @param sortOrder 표시 순서 (nullable)
      */
     @Builder
-    public SupportFaq(SupportCategory category, String question, String answer) {
+    public SupportFaq(SupportCategory category, String question, String answer,
+                      Integer sortOrder) {
         this.category = category;
         this.question = question;
         this.answer = answer;
         this.helpfulCount = 0;
         this.notHelpfulCount = 0;
+        this.sortOrder = sortOrder;
+        this.isPublished = true; // 생성 시 기본 공개 상태
     }
 
     // ─────────────────────────────────────────────
@@ -120,6 +132,25 @@ public class SupportFaq extends BaseAuditEntity {
         this.category = category;
         this.question = question;
         this.answer = answer;
+    }
+
+    /**
+     * 표시 순서 변경 (관리자 제어용).
+     *
+     * @param sortOrder 새 표시 순서 (낮은 값이 상위 노출)
+     */
+    public void updateSortOrder(Integer sortOrder) {
+        this.sortOrder = sortOrder;
+    }
+
+    /**
+     * 공개/비공개 전환.
+     * 관리자가 FAQ를 임시 비공개 처리하거나 다시 공개할 때 호출한다.
+     *
+     * @param published true이면 공개, false이면 비공개
+     */
+    public void setPublished(boolean published) {
+        this.isPublished = published;
     }
 
     /**

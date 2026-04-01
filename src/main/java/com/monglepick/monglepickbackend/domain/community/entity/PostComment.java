@@ -100,6 +100,11 @@ public class PostComment extends BaseAuditEntity {
     @Builder.Default
     private Boolean isDeleted = false;
 
+    /** 좋아요 수 (비정규화, 기본값: 0) */
+    @Column(name = "like_count", nullable = false)
+    @Builder.Default
+    private Integer likeCount = 0;
+
     /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
 }

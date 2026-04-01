@@ -19,6 +19,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 /**
  * 고객센터 상담 티켓 엔티티.
  *
@@ -101,6 +103,22 @@ public class SupportTicket extends BaseAuditEntity {
     @Column(nullable = false, length = 20)
     private TicketStatus status;
 
+    /** 우선순위 (LOW/NORMAL/HIGH/URGENT, 기본값: NORMAL) */
+    @Column(name = "priority", length = 20)
+    private String priority = "NORMAL";
+
+    /** 담당 관리자 ID (FK → users.user_id) */
+    @Column(name = "assigned_to", length = 50)
+    private String assignedTo;
+
+    /** 해결 일시 (RESOLVED 상태 전환 시 기록) */
+    @Column(name = "resolved_at")
+    private LocalDateTime resolvedAt;
+
+    /** 종료 일시 (CLOSED 상태 전환 시 기록) */
+    @Column(name = "closed_at")
+    private LocalDateTime closedAt;
+
     /**
      * 생성자 (빌더 패턴).
      *
@@ -119,6 +137,7 @@ public class SupportTicket extends BaseAuditEntity {
         this.title = title;
         this.content = content;
         this.status = TicketStatus.OPEN; // 티켓 생성 시 항상 OPEN 상태
+        this.priority = "NORMAL";         // 티켓 생성 시 기본 우선순위
     }
 
     // ─────────────────────────────────────────────
@@ -136,16 +155,40 @@ public class SupportTicket extends BaseAuditEntity {
     /**
      * 처리 완료 — IN_PROGRESS → RESOLVED.
      * 관리자가 답변을 완료하고 해결 처리할 때 호출한다.
+     * resolvedAt을 현재 시각으로 기록한다.
      */
     public void resolve() {
         this.status = TicketStatus.RESOLVED;
+        this.resolvedAt = LocalDateTime.now();
     }
 
     /**
      * 티켓 종결 — RESOLVED 또는 OPEN → CLOSED.
      * 사용자가 해결 확인하거나 관리자가 직접 종결 처리할 때 호출한다.
+     * closedAt을 현재 시각으로 기록한다.
      */
     public void close() {
         this.status = TicketStatus.CLOSED;
+        this.closedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 담당 관리자 배정.
+     * 관리자가 티켓을 특정 담당자에게 배정할 때 호출한다.
+     *
+     * @param adminUserId 담당 관리자 ID (users.user_id)
+     */
+    public void assignTo(String adminUserId) {
+        this.assignedTo = adminUserId;
+    }
+
+    /**
+     * 우선순위 변경.
+     * 관리자가 티켓 긴급도에 따라 우선순위를 조정할 때 호출한다.
+     *
+     * @param priority 우선순위 문자열 (LOW/NORMAL/HIGH/URGENT)
+     */
+    public void updatePriority(String priority) {
+        this.priority = priority;
     }
 }
