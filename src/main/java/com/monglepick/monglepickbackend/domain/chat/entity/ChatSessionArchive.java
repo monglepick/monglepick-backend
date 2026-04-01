@@ -9,6 +9,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -54,7 +55,15 @@ import java.time.LocalDateTime;
  * </ul>
  */
 @Entity
-@Table(name = "chat_session_archive")
+@Table(
+        name = "chat_session_archive",
+        indexes = {
+                // 사용자별 채팅 세션 목록 조회 시 사용 (user_id + 최신순 정렬)
+                @Index(name = "idx_chat_session_user", columnList = "user_id"),
+                // 세션 시작 시각 기준 정렬/필터 시 사용
+                @Index(name = "idx_chat_session_started", columnList = "started_at")
+        }
+)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
@@ -118,6 +127,18 @@ public class ChatSessionArchive extends BaseAuditEntity {
      */
     @Column(name = "ended_at")
     private LocalDateTime endedAt;
+
+    /** 채팅 제목 (목록 표시용, 첫 메시지 요약 또는 사용자 설정) */
+    @Column(name = "title", length = 200)
+    private String title;
+
+    /**
+     * 마지막 메시지 시각 (정렬용).
+     * 채팅 세션 목록을 최신 대화 순으로 정렬할 때 사용한다.
+     * 각 메시지 추가 시 갱신된다.
+     */
+    @Column(name = "last_message_at")
+    private LocalDateTime lastMessageAt;
 
     /** 소프트 삭제 여부 (REQ_054: 이전 채팅 내역 삭제) */
     @Column(name = "is_deleted", nullable = false)

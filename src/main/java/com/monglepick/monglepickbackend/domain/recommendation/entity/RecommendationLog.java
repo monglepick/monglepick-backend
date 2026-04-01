@@ -9,6 +9,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -37,7 +38,15 @@ import lombok.NoArgsConstructor;
  * </ul>
  */
 @Entity
-@Table(name = "recommendation_log")
+@Table(
+        name = "recommendation_log",
+        indexes = {
+                // 사용자별 추천 이력 조회 시 사용 (user_id + 최신순 정렬)
+                @Index(name = "idx_recommendation_user", columnList = "user_id"),
+                // 기간별 추천 통계 집계 시 사용
+                @Index(name = "idx_recommendation_created", columnList = "created_at")
+        }
+)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
@@ -109,6 +118,39 @@ public class RecommendationLog extends BaseAuditEntity {
     /** 추천 목록 내 순위 (1부터 시작, 상위일수록 작은 값) */
     @Column(name = "rank_position")
     private Integer rankPosition;
+
+    /**
+     * 사용자 추천 의도 요약 (TEXT, nullable).
+     * Intent-First 아키텍처에서 LLM이 추출한 user_intent 자연어 요약.
+     * 추천 품질 분석 및 A/B 테스트에 활용된다.
+     */
+    @Column(name = "user_intent", columnDefinition = "TEXT")
+    private String userIntent;
+
+    /**
+     * 추천 응답 소요 시간 (ms, nullable).
+     * context_loader → response_formatter 전체 파이프라인 처리 시간.
+     * 성능 모니터링 및 병목 분석에 활용된다.
+     */
+    @Column(name = "response_time_ms")
+    private Integer responseTimeMs;
+
+    /**
+     * 사용 LLM/알고리즘 버전 (VARCHAR(50), nullable).
+     * 예: "exaone-4.0-32b", "solar-pro", "hybrid-v2".
+     * 모델 버전별 추천 품질 비교에 활용된다.
+     */
+    @Column(name = "model_version", length = 50)
+    private String modelVersion;
+
+    /**
+     * 사용자 클릭 여부 (기본값: false).
+     * 추천된 영화를 사용자가 실제로 클릭/상세 조회했는지 기록.
+     * CTR(Click-Through Rate) 분석 및 추천 품질 평가에 활용된다.
+     */
+    @Column(name = "clicked", nullable = false)
+    @Builder.Default
+    private Boolean clicked = false;
 
     /* created_at은 BaseAuditEntity(→BaseTimeEntity)에서 자동 관리 — 수동 @CreationTimestamp 필드 제거됨 */
 }

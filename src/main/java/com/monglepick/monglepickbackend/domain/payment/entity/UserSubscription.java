@@ -20,6 +20,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -162,6 +163,24 @@ public class UserSubscription extends BaseAuditEntity {
     @Column(name = "auto_renew")
     @Builder.Default
     private Boolean autoRenew = true;
+
+    /**
+     * Toss 빌링키 (자동 결제용, VARCHAR(200), nullable).
+     * Toss Payments 빌링 인증 완료 후 발급되는 키.
+     * 자동 갱신 결제 시 이 키로 PG 결제를 요청한다.
+     * 보안상 암호화 저장을 권장한다.
+     */
+    @Column(name = "billing_key", length = 200)
+    private String billingKey;
+
+    /**
+     * 다음 결제일 (DATE, nullable).
+     * 자동 갱신 구독의 다음 결제 예정일.
+     * 갱신 성공 시 다음 주기로 연장된다.
+     * 취소/만료 시 null로 처리한다.
+     */
+    @Column(name = "next_billing_date")
+    private LocalDate nextBillingDate;
 
     // ──────────────────────────────────────────────
     // 도메인 메서드 (Lombok @Getter only, setter 대신 사용)

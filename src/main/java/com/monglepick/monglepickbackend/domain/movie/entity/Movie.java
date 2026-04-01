@@ -4,7 +4,9 @@ import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import java.time.LocalDate;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,7 +30,13 @@ import lombok.NoArgsConstructor;
  * 저장되어 있으며, 이 테이블은 RDB 기반의 기본 조회에 사용됩니다.</p>
  */
 @Entity
-@Table(name = "movies")
+@Table(name = "movies", indexes = {
+        @Index(name = "idx_movies_tmdb", columnList = "tmdb_id"),
+        @Index(name = "idx_movies_release_year", columnList = "release_year"),
+        @Index(name = "idx_movies_rating", columnList = "rating"),
+        @Index(name = "idx_movies_popularity", columnList = "popularity_score"),
+        @Index(name = "idx_movies_source", columnList = "source")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 /**
@@ -97,11 +105,95 @@ public class Movie extends BaseAuditEntity {
     @Column(length = 50)
     private String source;
 
+    // ========== v5 설계서 기준 추가 컬럼 (17개) ==========
+
+    /** 개봉일 (DATE) — 운영 서버 다운 원인이었던 필수 컬럼 */
+    @Column(name = "release_date")
+    private LocalDate releaseDate;
+
+    /** 상영 시간 (분 단위) */
+    @Column(name = "runtime")
+    private Integer runtime;
+
+    /** 투표/평점 참여 수 (TMDB 기준) */
+    @Column(name = "vote_count")
+    private Long voteCount;
+
+    /** 인기도 점수 (TMDB 기준, 높을수록 인기) */
+    @Column(name = "popularity_score")
+    private Double popularityScore;
+
+    /** 관람등급 (예: 15세이상관람가, R, PG-13) */
+    @Column(name = "certification", length = 50)
+    private String certification;
+
+    /** 예고편 URL (YouTube 등) */
+    @Column(name = "trailer_url", length = 500)
+    private String trailerUrl;
+
+    /** 영화 태그라인 (짧은 홍보 문구) */
+    @Column(name = "tagline", length = 500)
+    private String tagline;
+
+    /** IMDb 영화 ID (외부 연동용, 예: tt1375666) */
+    @Column(name = "imdb_id", length = 50)
+    private String imdbId;
+
+    /** 원어 (예: en, ko, ja) */
+    @Column(name = "original_language", length = 10)
+    private String originalLanguage;
+
+    /** 소속 컬렉션/시리즈명 (예: 마블 시네마틱 유니버스) */
+    @Column(name = "collection_name", length = 200)
+    private String collectionName;
+
+    /** KOBIS 영화 코드 (영화진흥위원회 고유 코드) */
+    @Column(name = "kobis_movie_cd", length = 50)
+    private String kobisMovieCd;
+
+    /** 누적 매출액 (원 단위, KOBIS 기준) */
+    @Column(name = "sales_acc")
+    private Long salesAcc;
+
+    /** 누적 관객수 (KOBIS 기준) */
+    @Column(name = "audience_count")
+    private Long audienceCount;
+
+    /** 스크린 수 (KOBIS 기준) */
+    @Column(name = "screen_count")
+    private Integer screenCount;
+
+    /** KOBIS 관람등급 (예: 전체관람가, 15세이상관람가) */
+    @Column(name = "kobis_watch_grade", length = 100)
+    private String kobisWatchGrade;
+
+    /** KOBIS 개봉일 */
+    @Column(name = "kobis_open_dt")
+    private LocalDate kobisOpenDt;
+
+    /** KMDb 영화 ID (한국영화데이터베이스 고유 코드) */
+    @Column(name = "kmdb_id", length = 50)
+    private String kmdbId;
+
+    /** 배경 이미지 경로 (TMDB backdrop) */
+    @Column(name = "backdrop_path", length = 500)
+    private String backdropPath;
+
+    /** 성인 영화 여부 */
+    @Column(name = "adult")
+    private Boolean adult;
+
     @Builder
     public Movie(String movieId, Long tmdbId, String title, String titleEn, String overview,
                  String genres, Integer releaseYear, Double rating, String posterPath,
                  String castMembers, String director, String keywords,
-                 String ottPlatforms, String moodTags, String source) {
+                 String ottPlatforms, String moodTags, String source,
+                 LocalDate releaseDate, Integer runtime, Long voteCount,
+                 Double popularityScore, String certification, String trailerUrl,
+                 String tagline, String imdbId, String originalLanguage,
+                 String collectionName, String kobisMovieCd, Long salesAcc,
+                 Long audienceCount, Integer screenCount, String kobisWatchGrade,
+                 LocalDate kobisOpenDt, String kmdbId, String backdropPath, Boolean adult) {
         this.movieId = movieId;
         this.tmdbId = tmdbId;
         this.title = title;
@@ -117,5 +209,24 @@ public class Movie extends BaseAuditEntity {
         this.ottPlatforms = ottPlatforms;
         this.moodTags = moodTags;
         this.source = source;
+        this.releaseDate = releaseDate;
+        this.runtime = runtime;
+        this.voteCount = voteCount;
+        this.popularityScore = popularityScore;
+        this.certification = certification;
+        this.trailerUrl = trailerUrl;
+        this.tagline = tagline;
+        this.imdbId = imdbId;
+        this.originalLanguage = originalLanguage;
+        this.collectionName = collectionName;
+        this.kobisMovieCd = kobisMovieCd;
+        this.salesAcc = salesAcc;
+        this.audienceCount = audienceCount;
+        this.screenCount = screenCount;
+        this.kobisWatchGrade = kobisWatchGrade;
+        this.kobisOpenDt = kobisOpenDt;
+        this.kmdbId = kmdbId;
+        this.backdropPath = backdropPath;
+        this.adult = adult != null ? adult : false;
     }
 }

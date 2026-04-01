@@ -6,9 +6,10 @@ import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.DeductRespons
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.EarnResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.HistoryResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.QuotaDto.QuotaCheckResult;
-import com.monglepick.monglepickbackend.global.constants.UserGrade;
+import com.monglepick.monglepickbackend.domain.reward.entity.Grade;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
 import com.monglepick.monglepickbackend.domain.reward.entity.UserPoint;
+import com.monglepick.monglepickbackend.domain.reward.repository.GradeRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserPointRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -74,8 +75,8 @@ public class PointService {
      */
     private final QuotaService quotaService;
 
-    // 등급별 상수는 UserGrade enum으로 이전됨 (global/constants/UserGrade.java)
-    // maxInputLength 상수는 Phase R-3에서 QuotaService로 이전됨
+    /** 등급 마스터 리포지토리 (누적 포인트 기반 등급 조회) */
+    private final GradeRepository gradeRepository;
 
     // ──────────────────────────────────────────────
     // 입력 검증 헬퍼
@@ -138,12 +139,13 @@ public class PointService {
         if (userPointOpt.isPresent()) {
             UserPoint userPoint = userPointOpt.get();
             balance = userPoint.getBalance();
-            grade = userPoint.getUserGrade() != null ? userPoint.getUserGrade().name() : UserGrade.BRONZE.name();
+            // getGradeCode(): grade FK 참조 null 시 "BRONZE" fallback
+            grade = userPoint.getGradeCode();
         } else {
             // 포인트 레코드 미존재: 잔액 0, BRONZE 등급
             log.warn("포인트 레코드 없음: userId={}", userId);
             balance = 0;
-            grade = UserGrade.BRONZE.name();
+            grade = "BRONZE";
 
             // cost > 0이면 무조건 사용 불가 (레코드 없으므로 쿼터 검사도 의미 없음)
             if (cost > 0) {
@@ -325,12 +327,13 @@ public class PointService {
         return userPointRepository.findByUserId(userId)
                 .map(userPoint -> new BalanceResponse(
                         userPoint.getBalance(),
-                        userPoint.getUserGrade() != null ? userPoint.getUserGrade().name() : UserGrade.BRONZE.name(),
+                        // getGradeCode(): grade FK 참조 null 시 "BRONZE" fallback
+                        userPoint.getGradeCode(),
                         userPoint.getTotalEarned()
                 ))
                 .orElseGet(() -> {
                     log.debug("포인트 레코드 없음 (기본값 반환): userId={}", userId);
-                    return new BalanceResponse(0, UserGrade.BRONZE.name(), 0);
+                    return new BalanceResponse(0, "BRONZE", 0);
                 });
     }
 
@@ -375,14 +378,15 @@ public class PointService {
             return;
         }
 
-        // 신규 UserPoint 레코드 구성
+        // 신규 UserPoint 레코드 구성 (BRONZE 등급 조회 후 FK 설정)
+        Grade bronzeGrade = gradeRepository.findByGradeCode("BRONZE").orElse(null);
         UserPoint userPoint = UserPoint.builder()
                 .userId(userId)
                 .balance(freePoints)
                 .totalEarned(freePoints)
                 .dailyEarned(0)
                 .dailyReset(LocalDate.now())
-                .userGrade(UserGrade.BRONZE)
+                .grade(bronzeGrade)
                 .build();
 
         try {
@@ -465,12 +469,15 @@ public class PointService {
         userPoint.addPoints(amount, LocalDate.now());
         int newBalance = userPoint.getBalance();
 
-        // 3. 등급 재계산 (누적 포인트 기반, UserGrade enum 사용)
-        UserGrade newGrade = UserGrade.fromTotalEarned(userPoint.getTotalEarned());
-        UserGrade oldGrade = userPoint.getUserGrade();
-        if (newGrade != oldGrade) {
+        // 3. 등급 재계산 (누적 포인트 기반, grades 마스터 테이블 조회)
+        String oldGradeCode = userPoint.getGradeCode();
+        Grade newGrade = gradeRepository
+                .findTopByMinPointsLessThanEqualAndIsActiveTrueOrderByMinPointsDesc(userPoint.getTotalEarned())
+                .orElse(null);
+        String newGradeCode = (newGrade != null) ? newGrade.getGradeCode() : "BRONZE";
+        if (!newGradeCode.equals(oldGradeCode)) {
             userPoint.updateGrade(newGrade);
-            log.info("등급 변경: userId={}, {} → {}", userId, oldGrade, newGrade);
+            log.info("등급 변경: userId={}, {} → {}", userId, oldGradeCode, newGradeCode);
         }
 
         // 4. 변동 이력 기록
@@ -485,10 +492,10 @@ public class PointService {
         pointsHistoryRepository.save(history);
 
         log.info("포인트 획득 완료: userId={}, 획득={}, 잔액={}, 등급={}",
-                userId, amount, newBalance, newGrade);
+                userId, amount, newBalance, newGradeCode);
 
         // 5. 응답 반환
-        return new EarnResponse(newBalance, newGrade.name());
+        return new EarnResponse(newBalance, newGradeCode);
     }
 
     // ──────────────────────────────────────────────
@@ -519,7 +526,7 @@ public class PointService {
     // private 헬퍼 메서드
     // ──────────────────────────────────────────────
 
-    // calculateGrade()는 UserGrade.fromTotalEarned()로 이전됨 (global/constants/UserGrade.java)
+    // 등급 계산은 gradeRepository.findTopByMinPoints...() 쿼리로 전환됨 (grades 마스터 테이블 기반)
     // calculateMaxInputLength()는 Phase R-3에서 QuotaService.getMaxInputLength()로 이전됨
 
     /**
