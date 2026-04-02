@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    사용자 선호도(user_preferences) Mapper XML.
+    테이블: user_preferences
+    담당: 김민규 (user 도메인)
+-->
+<mapper namespace="com.monglepick.monglepickbackend.domain.user.mapper.UserPreferenceMapper">
+
+    <!-- ═══ ResultMap ═══ -->
+    <resultMap id="preferenceResultMap" type="com.monglepick.monglepickbackend.domain.user.entity.UserPreference">
+        <id property="preferenceId" column="preference_id"/>
+        <!-- user 필드는 MyBatis에서 직접 매핑하지 않음 (userId만 사용) -->
+        <result property="preferredGenres" column="preferred_genres"/>
+        <result property="preferredMoods" column="preferred_moods"/>
+        <result property="preferredPlatforms" column="preferred_platforms"/>
+        <result property="excludedKeywords" column="excluded_keywords"/>
+        <result property="dislikedGenres" column="disliked_genres"/>
+        <result property="favoriteMovies" column="favorite_movies"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <!-- ═══ SELECT ═══ -->
+
+    <!-- PK로 조회 -->
+    <select id="findById" resultMap="preferenceResultMap">
+        SELECT preference_id, user_id, preferred_genres, preferred_moods,
+               preferred_platforms, excluded_keywords, disliked_genres,
+               favorite_movies, created_at, updated_at
+        FROM user_preferences
+        WHERE preference_id = #{preferenceId}
+    </select>
+
+    <!-- 사용자 ID로 조회 -->
+    <select id="findByUserId" resultMap="preferenceResultMap">
+        SELECT preference_id, user_id, preferred_genres, preferred_moods,
+               preferred_platforms, excluded_keywords, disliked_genres,
+               favorite_movies, created_at, updated_at
+        FROM user_preferences
+        WHERE user_id = #{userId}
+    </select>
+
+    <!-- ═══ INSERT ═══ -->
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="preferenceId">
+        INSERT INTO user_preferences (
+            user_id, preferred_genres, preferred_moods, preferred_platforms,
+            excluded_keywords, disliked_genres, favorite_movies,
+            created_at, updated_at
+        ) VALUES (
+            #{user.userId}, #{preferredGenres}, #{preferredMoods}, #{preferredPlatforms},
+            #{excludedKeywords}, #{dislikedGenres}, #{favoriteMovies},
+            NOW(), NOW()
+        )
+    </insert>
+
+    <!-- ═══ UPDATE ═══ -->
+
+    <update id="update">
+        UPDATE user_preferences
+        SET preferred_genres    = #{preferredGenres},
+            preferred_moods     = #{preferredMoods},
+            preferred_platforms = #{preferredPlatforms},
+            excluded_keywords   = #{excludedKeywords},
+            disliked_genres     = #{dislikedGenres},
+            favorite_movies     = #{favoriteMovies},
+            updated_at          = NOW()
+        WHERE preference_id = #{preferenceId}
+    </update>
+
+    <!-- ═══ DELETE ═══ -->
+
+    <delete id="deleteById">
+        DELETE FROM user_preferences
+        WHERE preference_id = #{preferenceId}
+    </delete>
+
+</mapper>

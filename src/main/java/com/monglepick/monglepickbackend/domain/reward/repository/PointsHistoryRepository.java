@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 /**
  * 포인트 변동 이력 리포지토리 — points_history 테이블 접근 계층.
@@ -100,5 +101,28 @@ public interface PointsHistoryRepository extends JpaRepository<PointsHistory, Lo
             @Param("dayStart") LocalDateTime dayStart,
             @Param("monthStart") LocalDateTime monthStart,
             @Param("end") LocalDateTime end
+    );
+
+    /**
+     * 특정 사용자의 활동 유형 + 참조 ID로 포인트 이력 단건을 조회한다.
+     *
+     * <p>revokeReward()에서 회수 대상 지급 이력을 조회하여 정확한 point_change 값을
+     * 가져올 때 사용한다. points_history 테이블의 UNIQUE 인덱스
+     * (uk_history_user_action_ref: user_id + action_type + reference_id)로
+     * 중복 지급이 방지되므로 결과는 항상 0건 또는 1건이다.</p>
+     *
+     * <p>MySQL UNIQUE 인덱스는 NULL을 중복 허용하므로 action_type=NULL인 기존 레코드는
+     * 이 인덱스의 영향을 받지 않는다. 이 메서드는 action_type이 NOT NULL인 활동 리워드
+     * 이력 조회에만 사용한다.</p>
+     *
+     * @param userId      사용자 ID (VARCHAR(50))
+     * @param actionType  활동 유형 코드 (reward_policy.action_type)
+     * @param referenceId 참조 ID (예: "movie_123", "post_456", "comment_789")
+     * @return 조건에 맞는 포인트 이력 (없으면 Optional.empty)
+     */
+    Optional<PointsHistory> findByUserIdAndActionTypeAndReferenceId(
+            String userId,
+            String actionType,
+            String referenceId
     );
 }

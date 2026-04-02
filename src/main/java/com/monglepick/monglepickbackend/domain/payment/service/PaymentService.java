@@ -7,8 +7,10 @@ import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.CreateOrde
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderHistoryResponse;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderResponse;
 import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
+import com.monglepick.monglepickbackend.domain.payment.entity.PointPackPrice;
 import com.monglepick.monglepickbackend.domain.payment.entity.SubscriptionPlan;
 import com.monglepick.monglepickbackend.domain.payment.repository.PaymentOrderRepository;
+import com.monglepick.monglepickbackend.domain.payment.repository.PointPackPriceRepository;
 import com.monglepick.monglepickbackend.domain.payment.repository.SubscriptionPlanRepository;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
@@ -25,6 +27,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.scheduling.annotation.Scheduled;
+
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -44,12 +50,21 @@ import java.util.UUID;
  * <ul>
  *   <li>클래스 레벨: {@code @Transactional(readOnly = true)} — 기본 읽기 전용</li>
  *   <li>변경 메서드: 개별 {@code @Transactional} 오버라이드 — 쓰기 트랜잭션</li>
- *   <li>결제 승인 시 Toss API 호출과 DB 상태 변경이 하나의 트랜잭션에 포함됨</li>
+ *   <li>결제 승인({@link #confirmPayment})은 <b>2-Phase 분리</b>:
+ *     <ol>
+ *       <li>Phase 1 ({@code confirmPayment}, 트랜잭션 없음):
+ *           주문 사전 검증 + Toss API 호출. DB 커넥션 미점유.
+ *           동시 결제 N건 시 HikariCP 풀 고갈 방지 (설계서 §8.4).</li>
+ *       <li>Phase 2 ({@link #processConfirmedPayment}, {@code @Transactional}):
+ *           FOR UPDATE 재조회 → 멱등 확인 → order.complete() + earnPoint() + createSubscription()
+ *           원자적 처리. 실패 시 보상(Toss 환불) 패턴 수행.</li>
+ *     </ol>
+ *   </li>
  * </ul>
  *
  * <h3>멱등성 보장</h3>
- * <p>같은 orderId로 중복 승인을 시도하면 {@code DUPLICATE_ORDER} 에러가 반환된다.
- * PENDING이 아닌 주문에 대한 승인 시도를 차단하여 이중 결제를 방지한다.</p>
+ * <p>Phase 1에서 PENDING이 아닌 주문은 즉시 {@code DUPLICATE_ORDER}로 거부한다.
+ * Phase 2에서 FOR UPDATE 재조회 후 COMPLETED 상태이면 기존 결과를 반환한다 (새로고침 방어).</p>
  *
  * @see TossPaymentsClient Toss Payments REST API 클라이언트
  * @see SubscriptionService 구독 관련 비즈니스 로직
@@ -66,6 +81,9 @@ public class PaymentService {
 
     /** 구독 상품 리포지토리 (구독 결제 시 plan 조회) */
     private final SubscriptionPlanRepository planRepository;
+
+    /** 포인트팩 가격 마스터 리포지토리 (포인트팩 결제 시 가격 검증 — 설계서 v2.3 §13.1 보안 필수) */
+    private final PointPackPriceRepository pointPackPriceRepository;
 
     /** Toss Payments REST API 클라이언트 (결제 승인/취소) */
     private final TossPaymentsClient tossClient;
@@ -172,6 +190,25 @@ public class PaymentService {
                 .idempotencyKey(idempotencyKey != null && !idempotencyKey.isBlank() ? idempotencyKey : null)
                 .status(PaymentOrder.OrderStatus.PENDING);
 
+        // 3-1. ★ 포인트팩인 경우 가격 마스터 검증 (설계서 v2.3 §13.1 — 보안 필수)
+        //     클라이언트가 보낸 (amount, pointsAmount)가 서버 가격표와 정확히 일치하는지 검증.
+        //     미검증 시 {amount:1000, pointsAmount:999999} 공격으로 무제한 포인트 획득 가능.
+        if (orderType == PaymentOrder.OrderType.POINT_PACK) {
+            PointPackPrice validPack = pointPackPriceRepository
+                    .findByAmountAndPointsAmountAndIsActiveTrue(request.amount(), request.pointsAmount())
+                    .orElseThrow(() -> {
+                        log.error("포인트팩 가격 검증 실패 (변조 의심): amount={}, pointsAmount={}",
+                                request.amount(), request.pointsAmount());
+                        return new BusinessException(
+                                ErrorCode.PAYMENT_FAILED,
+                                "유효하지 않은 포인트팩입니다. 결제 금액: " + request.amount()
+                                        + "원, 포인트: " + request.pointsAmount() + "P"
+                        );
+                    });
+            log.debug("포인트팩 가격 검증 통과: packName={}, amount={}, points={}",
+                    validPack.getPackName(), validPack.getAmount(), validPack.getPointsAmount());
+        }
+
         // 4. 구독인 경우 plan 조회 + 금액 검증 + 연결
         if (orderType == PaymentOrder.OrderType.SUBSCRIPTION && request.planCode() != null) {
             SubscriptionPlan plan = planRepository.findByPlanCode(request.planCode())
@@ -210,37 +247,38 @@ public class PaymentService {
     }
 
     // ──────────────────────────────────────────────
-    // 결제 승인
+    // 결제 승인 (2-Phase 트랜잭션)
     // ──────────────────────────────────────────────
 
     /**
-     * 결제 승인 + 포인트 지급을 처리한다.
+     * 결제 승인 + 포인트 지급을 2-Phase 트랜잭션으로 처리한다.
      *
-     * <h3>처리 순서</h3>
+     * <h3>왜 2-Phase로 분리하는가?</h3>
+     * <p>기존 구조에서는 Toss API 호출(외부 HTTP, 500ms~2s)이 {@code @Transactional} 범위 안에
+     * 포함되어 있었다. 동시 결제 10건 시 Toss API 응답을 기다리는 동안 DB 커넥션 10개가
+     * HikariCP 풀에서 점유 상태로 유지되어 풀이 고갈되는 문제가 발생한다 (설계서 §8.4).</p>
+     *
+     * <h3>Phase 1 — 트랜잭션 없음 (이 메서드)</h3>
      * <ol>
-     *   <li>orderId로 주문 조회 및 소유자 검증 (BOLA 방지)</li>
-     *   <li>PENDING 상태 확인 (중복 처리 방지)</li>
-     *   <li>금액 일치 검증 (위변조 방지)</li>
-     *   <li>Toss Payments 결제 승인 API 호출 (외부 I/O)</li>
-     *   <li>주문 상태 COMPLETED + 포인트 지급 + 구독 활성화 (DB 원자적 처리)</li>
+     *   <li>주문 조회 + 소유자 검증 + PENDING 상태 확인 + 금액 검증 (읽기, 커넥션 즉시 반납)</li>
+     *   <li>Toss Payments 결제 승인 API 호출 → paymentKey 획득 (외부 I/O, DB 커넥션 미점유)</li>
+     *   <li>Toss API 실패 시: order.fail() 없이 예외를 던져 PENDING 상태 유지
+     *       (Toss에서 아직 승인하지 않았으므로 DB 변경 불필요)</li>
      * </ol>
      *
-     * <h3>트랜잭션 경계 설계</h3>
-     * <p>Toss API 호출(step 4)은 {@code @Transactional} 범위 안에 있다.
-     * Toss API가 성공한 뒤 DB 처리(step 5)가 실패하면 트랜잭션이 롤백되어
-     * 주문 상태가 PENDING으로 복원된다.</p>
-     *
-     * <p>이 경우 아래 두 단계의 보상(compensation) 처리를 수행한다:</p>
+     * <h3>Phase 2 — {@code @Transactional} ({@link #processConfirmedPayment})</h3>
      * <ol>
-     *   <li><b>Toss 환불 시도</b>: {@code cancelPayment}를 최대 {@value #MAX_CANCEL_RETRIES}회 재시도</li>
-     *   <li><b>COMPENSATION_FAILED 기록</b>: 환불도 실패하면
-     *       {@link PaymentCompensationService#recordCompensationFailed}를 통해
-     *       <b>독립 트랜잭션(REQUIRES_NEW)</b>으로 상태를 저장.
-     *       원본 트랜잭션이 rollback-only 상태여도 별도 트랜잭션이므로 커밋이 보장된다.</li>
+     *   <li>주문 재조회 FOR UPDATE (비관적 잠금 — TOCTOU 동시 처리 차단)</li>
+     *   <li>COMPLETED 상태이면 멱등 응답 반환 (새로고침/중복 탭 방어)</li>
+     *   <li>order.complete() + earnPoint() + createSubscription() 원자적 처리</li>
+     *   <li>예외 시 Phase 2 전체 롤백 + Toss 보상 환불 + COMPENSATION_FAILED 기록</li>
      * </ol>
      *
      * <h3>멱등성</h3>
-     * <p>PENDING이 아닌 주문에 대한 승인 요청은 {@code DUPLICATE_ORDER}로 거부된다.</p>
+     * <ul>
+     *   <li>Phase 1: PENDING이 아니면 즉시 DUPLICATE_ORDER 거부</li>
+     *   <li>Phase 2: FOR UPDATE 재조회 후 COMPLETED이면 기존 결과 반환 (새로고침 방어)</li>
+     * </ul>
      *
      * @param userId  JWT에서 추출한 현재 사용자 ID
      * @param request 결제 승인 요청 (orderId, paymentKey, amount)
@@ -248,60 +286,171 @@ public class PaymentService {
      * @throws BusinessException 주문 미발견(ORDER_NOT_FOUND), 중복 처리(DUPLICATE_ORDER),
      *                           금액 불일치(PAYMENT_FAILED), PG 승인 실패(PAYMENT_FAILED)
      */
-    @Transactional
+    // ★ @Transactional 제거: 이 메서드 자체는 트랜잭션을 열지 않는다.
+    //   DB 커넥션 점유 없이 Toss API를 호출하기 위함이다.
+    //   실제 DB 쓰기는 Phase 2인 processConfirmedPayment()에서만 수행된다.
     public ConfirmResponse confirmPayment(String userId, ConfirmRequest request) {
-        log.info("결제 승인 시작: userId={}, orderId={}, amount={}", userId, request.orderId(), request.amount());
+        log.info("[Phase 1 시작] 결제 승인: userId={}, orderId={}, amount={}",
+                userId, request.orderId(), request.amount());
 
-        // ── 1. 주문 조회 ──
-        PaymentOrder order = orderRepository.findByPaymentOrderId(request.orderId())
+        // ════════════════════════════════════════════
+        // Phase 1-1: 주문 사전 검증 (트랜잭션 없음 — 읽기 전용 단순 조회)
+        //
+        // 이 시점의 조회는 "Toss API를 호출해도 되는지"를 빠르게 판단하기 위한 것이다.
+        // 트랜잭션 없이 실행되어 커넥션을 즉시 반납한다.
+        // 최종 정합성 보장은 Phase 2의 FOR UPDATE 재조회에서 수행한다.
+        // ════════════════════════════════════════════
+
+        // 1-1. 주문 조회 (잠금 없는 단순 조회 — Phase 1용)
+        PaymentOrder preCheckOrder = orderRepository.findByPaymentOrderId(request.orderId())
                 .orElseThrow(() -> {
-                    log.error("주문 조회 실패: orderId={}", request.orderId());
+                    log.error("[Phase 1] 주문 조회 실패: orderId={}", request.orderId());
                     return new BusinessException(ErrorCode.ORDER_NOT_FOUND);
                 });
 
-        // ── 1-1. 주문 소유자 검증 (BOLA 방지 — 타인의 주문을 승인할 수 없음) ──
-        if (!order.getUserId().equals(userId)) {
-            log.error("주문 소유자 불일치: orderId={}, 주문소유자={}, 요청자={}",
-                    request.orderId(), order.getUserId(), userId);
+        // 1-2. 주문 소유자 검증 (BOLA 방지 — 타인의 주문을 승인할 수 없음)
+        if (!preCheckOrder.getUserId().equals(userId)) {
+            log.error("[Phase 1] 주문 소유자 불일치: orderId={}, 주문소유자={}, 요청자={}",
+                    request.orderId(), preCheckOrder.getUserId(), userId);
+            // 소유자 불일치는 ORDER_NOT_FOUND로 응답 (존재 여부 노출 방지)
             throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
         }
 
-        // ── 2. 중복 결제 방지 (멱등성) ──
-        // PENDING이 아닌 주문(COMPLETED/FAILED/REFUNDED/COMPENSATION_FAILED)은 재처리 불가
+        // 1-3. PENDING 상태 사전 확인 (명백한 중복 요청은 Toss API 호출 전에 차단)
+        // COMPLETED/FAILED/REFUNDED/COMPENSATION_FAILED인 경우 즉시 거부한다.
+        // 단, 이 검증은 "빠른 실패(fail-fast)"용이며, 경쟁 조건의 최종 방어는
+        // Phase 2의 FOR UPDATE 재조회가 담당한다.
+        if (preCheckOrder.getStatus() != PaymentOrder.OrderStatus.PENDING) {
+            log.warn("[Phase 1] 중복 결제 시도 사전 차단: orderId={}, currentStatus={}",
+                    request.orderId(), preCheckOrder.getStatus());
+            throw new BusinessException(ErrorCode.DUPLICATE_ORDER);
+        }
+
+        // 1-4. 금액 일치 검증 (클라이언트 위변조 방지)
+        // Integer 박싱 타입은 == 대신 equals() 사용 필수 (값 128 초과 시 == 은 false)
+        if (!preCheckOrder.getAmount().equals(request.amount())) {
+            log.error("[Phase 1] 결제 금액 불일치: orderId={}, 주문금액={}, 요청금액={}",
+                    request.orderId(), preCheckOrder.getAmount(), request.amount());
+            throw new BusinessException(
+                    ErrorCode.PAYMENT_FAILED,
+                    "결제 금액이 일치하지 않습니다. 주문: " + preCheckOrder.getAmount()
+                            + "원, 요청: " + request.amount() + "원"
+            );
+        }
+
+        // ════════════════════════════════════════════
+        // Phase 1-2: Toss Payments 결제 승인 API 호출
+        //
+        // DB 커넥션을 점유하지 않은 상태에서 외부 HTTP 요청을 수행한다.
+        // HikariCP 커넥션 풀 고갈 문제의 근본 원인을 여기서 해결한다.
+        //
+        // 실패 케이스:
+        //   - 네트워크 오류 / Toss 4xx/5xx → BusinessException(PAYMENT_FAILED) 발생
+        //   - Toss에서 아직 승인되지 않았으므로 DB 변경 불필요
+        //   - PENDING 상태 그대로 유지되어 재시도 가능
+        // ════════════════════════════════════════════
+        log.info("[Phase 1] Toss API 승인 요청: orderId={}, amount={}", request.orderId(), request.amount());
+        tossClient.confirmPayment(request.paymentKey(), request.orderId(), request.amount());
+        // 이 줄에 도달했다면 Toss API 승인 성공.
+        // 이제 반드시 DB에 COMPLETED를 기록해야 한다. Phase 2로 진입한다.
+        log.info("[Phase 1 완료] Toss API 승인 성공 → Phase 2 진입: orderId={}", request.orderId());
+
+        // ════════════════════════════════════════════
+        // Phase 2: DB 상태 변경 + 포인트 지급 + 구독 활성화 (@Transactional)
+        //
+        // Toss API 성공 이후 DB 처리 전체를 하나의 트랜잭션으로 묶는다.
+        // 실패 시 Phase 2 전체가 롤백되고, 보상 패턴(Toss 환불)이 트리거된다.
+        // ════════════════════════════════════════════
+        return processConfirmedPayment(userId, request);
+    }
+
+    /**
+     * 결제 승인 Phase 2: DB 상태 변경 + 포인트 지급 + 구독 활성화를 원자적으로 처리한다.
+     *
+     * <h3>호출 조건</h3>
+     * <p>반드시 Toss Payments 결제 승인 API 호출이 성공한 직후에만 호출한다.
+     * 이 메서드 진입 시점에 Toss에서 이미 결제가 승인된 상태이므로,
+     * DB 처리 실패 시 반드시 보상(Toss 환불)을 수행해야 한다.</p>
+     *
+     * <h3>FOR UPDATE 재조회 (멱등성 + 동시성 방어)</h3>
+     * <p>Phase 1과 Phase 2 사이에 동일 orderId로 중복 요청이 도달할 수 있다.
+     * FOR UPDATE 잠금으로 첫 번째 처리가 완료될 때까지 후속 요청을 대기시킨다.
+     * 대기 후 진입한 요청은 COMPLETED 상태를 보고 멱등 응답을 반환한다.</p>
+     *
+     * <h3>보상(Compensation) 처리</h3>
+     * <p>DB 처리 예외 발생 시:</p>
+     * <ol>
+     *   <li>현재 트랜잭션이 rollback-only로 마킹됨</li>
+     *   <li>Toss 환불 최대 {@value #MAX_CANCEL_RETRIES}회 재시도</li>
+     *   <li>환불도 실패 시 {@link PaymentCompensationService#recordCompensationFailed}로
+     *       REQUIRES_NEW 독립 트랜잭션에 COMPENSATION_FAILED 상태 저장</li>
+     * </ol>
+     *
+     * <h3>왜 별도 메서드인가?</h3>
+     * <p>Spring의 {@code @Transactional}은 AOP 프록시 기반이다.
+     * 같은 클래스 내 {@code this.processConfirmedPayment()}로 호출하면 프록시를 경유하지 않아
+     * 트랜잭션이 적용되지 않는다. 그러나 {@code confirmPayment()}가 트랜잭션 없는 public 메서드이고,
+     * 이 메서드 자체가 {@code @Transactional}이므로 외부(프록시)를 통한 호출이 보장된다.</p>
+     *
+     * <p><b>주의</b>: 이 메서드는 {@code confirmPayment()}에서만 호출해야 하므로
+     * {@code private}이 이상적이나, Spring AOP 프록시가 동작하려면 동일 Bean의 같은 클래스 내
+     * self-invocation은 프록시를 경유하지 않는다. 따라서 이 메서드에 {@code @Transactional}을
+     * 붙이고 {@code confirmPayment()}에서 호출하면 트랜잭션이 정상 동작한다.
+     * ({@code confirmPayment()}는 트랜잭션이 없으므로 프록시가 새 트랜잭션을 시작한다.)</p>
+     *
+     * @param userId  JWT에서 추출한 사용자 ID (소유자 재검증에 사용)
+     * @param request 결제 승인 요청 (orderId, paymentKey, amount)
+     * @return 승인 결과 (success, pointsGranted, newBalance)
+     */
+    @Transactional
+    public ConfirmResponse processConfirmedPayment(String userId, ConfirmRequest request) {
+        log.info("[Phase 2 시작] DB 처리: userId={}, orderId={}", userId, request.orderId());
+
+        // ── Phase 2-1: FOR UPDATE 비관적 잠금으로 주문 재조회 ──
+        // Phase 1의 사전 검증과 이 시점 사이에 동일 orderId로 중복 요청이 도달했을 수 있다.
+        // FOR UPDATE는 첫 번째 트랜잭션이 커밋/롤백할 때까지 후속 요청을 DB 레벨에서 대기시킨다.
+        PaymentOrder order = orderRepository.findByPaymentOrderIdForUpdate(request.orderId())
+                .orElseThrow(() -> {
+                    // Phase 1에서 조회됐으나 여기서 없다면 비정상 상황 — 운영 확인 필요
+                    log.error("[Phase 2] FOR UPDATE 주문 재조회 실패 (비정상): orderId={}", request.orderId());
+                    return new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+                });
+
+        // ── Phase 2-2: COMPLETED 상태 멱등 응답 (새로고침/중복 탭 방어) ──
+        // FOR UPDATE 대기 후 진입한 요청이 이미 COMPLETED 상태를 만나는 케이스:
+        //   1. 사용자가 결제 완료 후 브라우저를 새로고침
+        //   2. 여러 탭에서 동시에 결제 완료 요청
+        // → 중복 포인트 지급 없이 기존 완료 결과를 그대로 반환한다.
+        if (order.getStatus() == PaymentOrder.OrderStatus.COMPLETED) {
+            log.info("[Phase 2] 이미 완료된 주문 — 멱등 응답 반환: orderId={}", request.orderId());
+            // 완료된 주문의 pointsAmount를 그대로 반환 (이미 지급된 포인트 수량)
+            int alreadyGranted = order.getPointsAmount() != null ? order.getPointsAmount() : 0;
+            return new ConfirmResponse(true, alreadyGranted, 0);
+            // newBalance는 0으로 반환 (현재 잔액 재조회 비용 vs 정확성 트레이드오프.
+            // 클라이언트는 이미 완료된 건이므로 잔액을 별도 API로 조회하는 것이 권장된다.)
+        }
+
+        // ── Phase 2-3: PENDING이 아닌 다른 상태 (FAILED/REFUNDED/COMPENSATION_FAILED) ──
+        // Toss API 승인은 성공했는데 DB가 이미 FAILED 상태라면 비정상 상황이다.
+        // 중복 처리를 방지하기 위해 DUPLICATE_ORDER로 거부한다.
         if (order.getStatus() != PaymentOrder.OrderStatus.PENDING) {
-            log.warn("중복 결제 시도 차단: orderId={}, currentStatus={}",
+            log.warn("[Phase 2] 처리 불가 상태 — 승인 거부: orderId={}, status={}",
                     request.orderId(), order.getStatus());
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER);
         }
 
-        // ── 3. 금액 일치 검증 (클라이언트 위변조 방지) ──
-        // Integer 박싱 타입은 == 대신 equals() 사용 필수 (값 128 초과 시 == 은 false)
-        if (!order.getAmount().equals(request.amount())) {
-            log.error("결제 금액 불일치: orderId={}, 주문금액={}, 요청금액={}",
-                    request.orderId(), order.getAmount(), request.amount());
-            throw new BusinessException(
-                    ErrorCode.PAYMENT_FAILED,
-                    "결제 금액이 일치하지 않습니다. 주문: " + order.getAmount() + "원, 요청: " + request.amount() + "원"
-            );
-        }
-
-        // ── 4. Toss Payments 결제 승인 API 호출 ──
-        // 외부 I/O이므로 실패 시 BusinessException(PAYMENT_FAILED)이 발생하고
-        // 트랜잭션 롤백으로 DB 변경 없이 종료된다 (안전).
-        tossClient.confirmPayment(request.paymentKey(), request.orderId(), request.amount());
-
-        // ── 5. DB 상태 변경 + 포인트 지급 + 구독 활성화 (원자적 처리) ──
-        // [이슈 2 핵심] 이 블록 전체가 하나의 트랜잭션 안에서 실행된다.
-        // 포인트 지급 실패 시 order.complete()도 함께 롤백되어 일관성이 보장된다.
-        // 포인트 지급 성공 후 구독 생성 실패 시에도 전체 롤백되어 포인트 이중지급이 방지된다.
+        // ── Phase 2-4. DB 상태 변경 + 포인트 지급 + 구독 활성화 ──
+        // 이 블록 전체가 하나의 트랜잭션으로 묶인다.
+        //   - 포인트 지급 실패 → order.complete()도 롤백 → 일관성 보장
+        //   - 구독 생성 실패 → 포인트 지급 + 주문 완료 모두 롤백 → 이중 지급 방지
         try {
-            // 5-1. 주문 COMPLETED 처리 (pgTransactionId, pgProvider, completedAt 기록)
+            // 4-1. 주문 COMPLETED 처리 (pgTransactionId="paymentKey", pgProvider="TOSS", completedAt 기록)
             order.complete(request.paymentKey(), "TOSS");
-            log.info("주문 상태 변경: orderId={}, PENDING → COMPLETED", order.getPaymentOrderId());
+            log.info("[Phase 2] 주문 상태 변경: orderId={}, PENDING → COMPLETED", order.getPaymentOrderId());
 
-            // 5-2. 포인트 지급
-            // earnPoint()는 @Transactional(REQUIRED)이므로 현재 트랜잭션에 합류한다.
-            // 실패 시 예외가 전파되어 전체 트랜잭션이 롤백 — order.complete()도 취소됨.
+            // 4-2. 포인트 지급
+            // earnPoint()는 @Transactional(REQUIRED)이므로 현재 Phase 2 트랜잭션에 합류한다.
+            // 실패 시 예외가 전파되어 Phase 2 전체 롤백 → order.complete() 취소됨.
             int pointsToGrant = order.getPointsAmount() != null ? order.getPointsAmount() : 0;
             String description = order.getOrderType() == PaymentOrder.OrderType.SUBSCRIPTION
                     ? "구독 포인트 지급" : "포인트팩 구매";
@@ -315,47 +464,50 @@ public class PaymentService {
                         description,
                         order.getPaymentOrderId()
                 );
-                log.info("포인트 지급 완료: userId={}, points={}, newBalance={}",
+                log.info("[Phase 2] 포인트 지급 완료: userId={}, points={}, newBalance={}",
                         order.getUserId(), pointsToGrant,
                         earnResult != null ? earnResult.balanceAfter() : "N/A");
             }
 
-            // 5-3. 구독 결제인 경우 UserSubscription 생성
-            // 실패 시 예외 전파 → 트랜잭션 전체 롤백 (포인트 지급 + 주문 완료 모두 취소)
+            // 4-3. 구독 결제인 경우 UserSubscription 생성
+            // 실패 시 예외 전파 → Phase 2 전체 롤백 (포인트 지급 + 주문 완료 모두 취소)
             if (order.getOrderType() == PaymentOrder.OrderType.SUBSCRIPTION && order.getPlan() != null) {
                 subscriptionService.createSubscription(order.getUserId(), order.getPlan());
-                log.info("구독 활성화: userId={}, plan={}", order.getUserId(), order.getPlan().getPlanCode());
+                log.info("[Phase 2] 구독 활성화: userId={}, plan={}",
+                        order.getUserId(), order.getPlan().getPlanCode());
             }
 
             int newBalance = earnResult != null ? earnResult.balanceAfter() : 0;
-            log.info("결제 승인 완료: orderId={}, pointsGranted={}, newBalance={}",
+            log.info("[Phase 2 완료] 결제 승인 처리 성공: orderId={}, pointsGranted={}, newBalance={}",
                     order.getPaymentOrderId(), pointsToGrant, newBalance);
 
             return new ConfirmResponse(true, pointsToGrant, newBalance);
 
         } catch (Exception e) {
-            // ── 보상(Compensation) 처리 ──
-            // Toss 결제는 성공했으나 DB 처리가 실패한 상황.
-            // 이 catch 블록에 진입하면 현재 트랜잭션은 이미 rollback-only 상태이다.
+            // ════════════════════════════════════════════
+            // 보상(Compensation) 처리
+            //
+            // Toss 결제는 성공(Phase 1)했으나 DB 처리(Phase 2)가 실패한 상황.
+            // 이 catch 블록에 진입하면 현재 Phase 2 트랜잭션은 이미 rollback-only 상태이다.
             // (Spring이 unchecked exception 발생 즉시 트랜잭션을 rollback-only로 마킹함)
-            log.error("[C-B3] DB 처리 실패 — Toss 결제 보상 취소 시도: orderId={}, error={}",
+            //
+            // 사용자 관점: 카드는 청구됐으나 포인트/구독이 지급되지 않은 위험 상태.
+            // 대응: Toss 환불 시도 → 실패 시 COMPENSATION_FAILED 기록 → 운영팀 수동 조치.
+            // ════════════════════════════════════════════
+            log.error("[Phase 2][C-B3] DB 처리 실패 — Toss 결제 보상 취소 시도: orderId={}, error={}",
                     request.orderId(), e.getMessage(), e);
 
-            // ── 보상 취소 재시도 (최대 MAX_CANCEL_RETRIES회) ──
+            // 보상 취소 재시도 (최대 MAX_CANCEL_RETRIES회)
             boolean cancelSuccess = attemptCancelWithRetry(request.paymentKey(), request.orderId());
 
             if (!cancelSuccess) {
                 // ── CRITICAL: Toss 환불도 실패 → COMPENSATION_FAILED 상태 저장 ──
                 //
-                // [핵심 수정] 기존 코드의 문제:
-                //   order.markCompensationFailed() + orderRepository.save(order)를
-                //   현재 catch 블록 안에서 직접 호출하면, 현재 트랜잭션이 rollback-only이므로
-                //   save()가 호출되어도 실제로 DB에 커밋되지 않는다.
-                //
-                // [해결] compensationService.recordCompensationFailed()는
-                //   @Transactional(REQUIRES_NEW)가 적용된 별도 Spring Bean 메서드이다.
-                //   독립 트랜잭션으로 실행되므로 원본 트랜잭션 롤백과 무관하게 커밋이 보장된다.
-                log.error("[CRITICAL][C-B3] Toss 보상 취소 {}회 실패 — COMPENSATION_FAILED 기록 및 수동 조치 필요. " +
+                // compensationService.recordCompensationFailed()는
+                //   @Transactional(REQUIRES_NEW)가 적용된 별도 Spring Bean 메서드다.
+                //   현재 Phase 2 트랜잭션이 rollback-only여도 독립 트랜잭션으로 커밋이 보장된다.
+                log.error("[CRITICAL][Phase 2][C-B3] Toss 보상 취소 {}회 실패 — " +
+                                "COMPENSATION_FAILED 기록 및 수동 조치 필요. " +
                                 "orderId={}, paymentKey={}, userId={}, amount={}",
                         MAX_CANCEL_RETRIES,
                         request.orderId(),
@@ -363,7 +515,7 @@ public class PaymentService {
                         userId,
                         request.amount());
 
-                // REQUIRES_NEW 독립 트랜잭션으로 상태 저장 (원본 롤백과 무관하게 커밋됨)
+                // REQUIRES_NEW 독립 트랜잭션으로 보상 실패 상태 저장
                 String compensationReason = "보상 취소 " + MAX_CANCEL_RETRIES + "회 실패: "
                         + e.getMessage();
                 compensationService.recordCompensationFailed(order, compensationReason);
@@ -441,9 +593,52 @@ public class PaymentService {
                     /* 취소/환불 처리 */
                     if ("CANCELED".equals(status) || "PARTIAL_CANCELED".equals(status)) {
                         orderRepository.findByPaymentOrderId(orderId).ifPresent(order -> {
+
+                            // ── 멱등성 방어: 이미 REFUNDED 상태이면 웹훅 재수신으로 판단하고 무시 ──
+                            // Toss 웹훅은 네트워크 오류 등으로 동일 이벤트를 2회 이상 전송할 수 있다.
+                            // 이미 REFUNDED 처리된 주문에 대해 포인트 회수를 중복 실행하면
+                            // 사용자 잔액이 부당하게 추가 차감되므로 반드시 상태를 먼저 확인한다.
+                            if (order.getStatus() == PaymentOrder.OrderStatus.REFUNDED) {
+                                log.info("웹훅 중복 수신 무시 (이미 REFUNDED): orderId={}", orderId);
+                                return;
+                            }
+
+                            // COMPLETED 상태에서만 환불 처리 진행
                             if (order.getStatus() == PaymentOrder.OrderStatus.COMPLETED) {
+
+                                // ── 포인트 회수 (POINT_PACK인 경우) ──
+                                // 구독(SUBSCRIPTION)은 포인트가 서비스 이용 혜택이므로 회수하지 않는다.
+                                // 포인트팩은 현금으로 구매한 포인트이므로 환불 시 반드시 회수해야 한다.
+                                // 회수 실패 시에도 order.refund()는 계속 진행하여 PG 환불과 DB 상태를 맞춘다.
+                                // (포인트 회수 실패는 별도 운영 알람 대상 — 수동 조치 필요)
+                                if (order.getOrderType() == PaymentOrder.OrderType.POINT_PACK
+                                        && order.getPointsAmount() != null
+                                        && order.getPointsAmount() > 0) {
+                                    try {
+                                        // sessionId에 "_refund" 접미사를 붙여 일반 차감과 이력 구분
+                                        pointService.deductPoint(
+                                                order.getUserId(),
+                                                order.getPointsAmount(),
+                                                order.getPaymentOrderId() + "_refund",
+                                                "결제 환불 포인트 회수"
+                                        );
+                                        log.info("웹훅 환불 포인트 회수 완료: orderId={}, userId={}, amount={}P",
+                                                orderId, order.getUserId(), order.getPointsAmount());
+                                    } catch (Exception e) {
+                                        // 포인트 회수 실패 시에도 환불 상태 변경은 계속 진행.
+                                        // 사용자 잔액이 부족(포인트를 이미 소진)한 경우에도 이 경로를 탄다.
+                                        // 운영팀이 수동으로 조치할 수 있도록 ERROR 레벨로 기록한다.
+                                        log.error("웹훅 환불 포인트 회수 실패 (수동 조치 필요): " +
+                                                        "orderId={}, userId={}, amount={}P, error={}",
+                                                orderId, order.getUserId(), order.getPointsAmount(),
+                                                e.getMessage(), e);
+                                    }
+                                }
+
+                                // ── 주문 상태 REFUNDED로 변경 ──
                                 order.refund();
-                                log.info("웹훅 환불 처리 완료: orderId={}", orderId);
+                                log.info("웹훅 환불 처리 완료: orderId={}, orderType={}",
+                                        orderId, order.getOrderType());
                             }
                         });
                     }
@@ -519,6 +714,66 @@ public class PaymentService {
             }
         }
         return false; // 재시도 소진
+    }
+
+    // ──────────────────────────────────────────────
+    // 운영 안정성 스케줄러 (설계서 §13.7)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 30분 이상 PENDING 상태인 주문을 자동으로 FAILED 처리한다.
+     *
+     * <h3>목적</h3>
+     * <p>사용자가 결제창을 열었다가 닫거나(브라우저 탭 종료, 뒤로가기 등)
+     * 결제를 완료하지 않고 이탈한 경우, 해당 주문이 DB에 PENDING 상태로 무기한 잔류한다.
+     * 누적된 PENDING 주문은 인덱스 비효율, 멱등키 충돌 위험, 통계 왜곡을 유발하므로
+     * 주기적으로 FAILED 처리하여 DB를 정리한다.</p>
+     *
+     * <h3>실행 주기</h3>
+     * <p>10분마다 실행된다. cutoff 기준은 현재 시각 - 30분이므로,
+     * 주문 생성 후 최대 40분(30분 임계값 + 10분 실행 주기) 이내에 정리된다.</p>
+     *
+     * <h3>트랜잭션 전략</h3>
+     * <p>{@code @Transactional}로 전체 배치를 하나의 트랜잭션으로 묶는다.
+     * {@code order.fail()} 호출 후 트랜잭션 커밋 시점에 한 번의 batch update가 발생한다.
+     * 처리 도중 예외가 발생하면 전체 롤백되어 절반만 FAILED 처리되는 상황을 방지한다.</p>
+     *
+     * <h3>주의사항</h3>
+     * <p>{@code order.fail()}은 PENDING 상태에서만 호출 가능하다.
+     * {@code findByStatusAndCreatedAtBefore(PENDING, ...)}로 조회하므로 상태 불일치는 발생하지 않으나,
+     * 혹시 모를 동시성 예외는 try-catch로 개별 처리하여 나머지 주문 정리를 계속한다.</p>
+     */
+    @Scheduled(cron = "0 */10 * * * *") // 매 10분 0초마다 실행
+    @Transactional
+    public void cleanupExpiredPendingOrders() {
+        // 30분 이상 경과한 주문을 FAILED 처리 대상으로 결정
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+
+        // PENDING 상태이면서 cutoff 이전에 생성된 주문 목록 조회
+        List<PaymentOrder> expired = orderRepository
+                .findByStatusAndCreatedAtBefore(PaymentOrder.OrderStatus.PENDING, cutoff);
+
+        // 처리 대상이 없으면 로그 없이 종료 (불필요한 로그 누적 방지)
+        if (expired.isEmpty()) {
+            return;
+        }
+
+        int failedCount = 0;
+        for (PaymentOrder order : expired) {
+            try {
+                // PENDING → FAILED 상태 변경 (failedReason: 타임아웃 사유 기록)
+                order.fail("결제 타임아웃 (30분 초과)");
+                failedCount++;
+            } catch (Exception e) {
+                // 개별 주문 처리 실패 시 나머지 주문은 계속 처리 (부분 실패 허용)
+                log.warn("PENDING 주문 자동 FAILED 처리 중 개별 오류: orderId={}, error={}",
+                        order.getPaymentOrderId(), e.getMessage());
+            }
+        }
+
+        // 처리 결과 INFO 로그 (운영 모니터링 지표로 활용)
+        log.info("[스케줄러] PENDING 주문 자동 FAILED 처리 완료: 대상={}건, 성공={}건, cutoff={}",
+                expired.size(), failedCount, cutoff);
     }
 
     /**

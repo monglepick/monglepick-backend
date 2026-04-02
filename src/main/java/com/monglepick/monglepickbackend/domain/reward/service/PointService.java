@@ -12,6 +12,8 @@ import com.monglepick.monglepickbackend.domain.reward.entity.UserPoint;
 import com.monglepick.monglepickbackend.domain.reward.repository.GradeRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserPointRepository;
+
+import java.math.BigDecimal;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.global.exception.InsufficientPointException;
@@ -35,12 +37,13 @@ import java.time.LocalDate;
  * <p>포인트 변경(차감/획득)은 {@code findByUserIdForUpdate()} 비관적 락을 사용하여
  * 동시 요청 시 lost update를 방지한다. 읽기 전용 메서드는 락 없이 조회한다.</p>
  *
- * <h3>등급 체계</h3>
+ * <h3>등급 체계 (설계서 v2.3 §4.5 — earned_by_activity 기준)</h3>
  * <ul>
- *   <li>BRONZE: 누적 0~999 포인트 (maxInputLength: 200자)</li>
- *   <li>SILVER: 누적 1,000~4,999 포인트 (maxInputLength: 500자)</li>
- *   <li>GOLD: 누적 5,000~19,999 포인트 (maxInputLength: 1,000자)</li>
- *   <li>PLATINUM: 누적 20,000+ 포인트 (maxInputLength: 2,000자)</li>
+ *   <li>NORMAL: 0~499 (일일3, 월간30, 무료0, 200자, 배율×1.0)</li>
+ *   <li>BRONZE: 500~1,999 (일일5, 월간80, 무료1, 300자, 배율×1.1)</li>
+ *   <li>SILVER: 2,000~4,999 (일일10, 월간200, 무료2, 500자, 배율×1.3)</li>
+ *   <li>GOLD: 5,000~14,999 (일일30, 월간600, 무료5, 1000자, 배율×1.5)</li>
+ *   <li>PLATINUM: 15,000+ (무제한, 무료10, 2000자, 배율×2.0)</li>
  * </ul>
  *
  * <h3>쿼터 시스템 (Phase R-3)</h3>
@@ -70,7 +73,7 @@ public class PointService {
      * 등급별 쿼터 서비스 (Phase R-3 추가).
      *
      * <p>AI 추천 일일/월간 사용 횟수 제한 및 무료 사용 관리를 담당한다.
-     * {@link QuotaService}는 {@link PointsHistoryRepository}만 주입받으므로
+     * {@link QuotaService}는 {@link UserPointRepository}만 주입받으므로
      * 순환 참조가 발생하지 않는다.</p>
      */
     private final QuotaService quotaService;
@@ -102,36 +105,40 @@ public class PointService {
     // ──────────────────────────────────────────────
 
     /**
-     * 포인트 잔액 및 등급별 쿼터를 통합 확인한다.
+     * 포인트 잔액 및 등급별 쿼터를 통합 확인한다 (v3.0 QuotaCheckResult 연동).
      *
      * <p>AI Agent가 추천 실행 전에 호출한다. 락 없이 읽기 전용으로 조회하므로
      * 실시간 정확도보다 응답 속도를 우선한다.</p>
      *
-     * <h4>Phase R-3 변경: 쿼터 검사 통합</h4>
-     * <p>기존에는 잔액만 확인했으나, 이제 등급별 일일/월간 쿼터를 먼저 검사한다.
-     * 검사 순서:</p>
+     * <h4>v3.0 변경사항</h4>
+     * <ul>
+     *   <li>{@code checkQuota()} 파라미터에서 cost 제거 — QuotaService가 비용을 알 필요 없음</li>
+     *   <li>월간 한도 폐지 → monthlyUsed/monthlyLimit/freeRemaining/effectiveCost 필드 제거</li>
+     *   <li>AI 무과금 정책 → checkPoint()에서 잔액 검사 불필요 (cost는 응답에만 포함, 항상 0)</li>
+     *   <li>source/subBonusRemaining/purchasedRemaining 필드로 소스 정보 전달</li>
+     * </ul>
+     *
+     * <h4>처리 순서</h4>
      * <ol>
-     *   <li>UserPoint 조회 (없으면 잔액 0, BRONZE 등급으로 처리)</li>
-     *   <li>{@link QuotaService#checkQuota}로 등급별 일일/월간 한도 확인</li>
-     *   <li>쿼터 초과 시 → allowed=false + 쿼터 초과 메시지 반환</li>
-     *   <li>쿼터 OK이면 → effectiveCost(무료면 0)로 잔액 확인</li>
-     *   <li>잔액 부족 시 → allowed=false + 잔액 부족 메시지 반환</li>
+     *   <li>UserPoint 조회 (없으면 잔액 0, NORMAL 등급으로 처리)</li>
+     *   <li>{@link QuotaService#checkQuota(String, String)}으로 등급별 일일 한도 및 소스 확인</li>
+     *   <li>쿼터 차단(BLOCKED) 시 → allowed=false + 안내 메시지 반환</li>
+     *   <li>쿼터 허용 시 → allowed=true, source/subBonusRemaining/purchasedRemaining 포함 반환</li>
      * </ol>
      *
      * <h4>하위 호환성</h4>
      * <p>Agent의 {@code point_client.py}는 기존 5개 필드(allowed, balance, cost, message,
-     * maxInputLength)만 파싱하므로, 추가된 6개 쿼터 필드(dailyUsed, dailyLimit, monthlyUsed,
-     * monthlyLimit, freeRemaining, effectiveCost)는 Agent가 무시한다.</p>
+     * maxInputLength)만 파싱하므로, v3.0 신규 필드들은 Agent가 무시한다.</p>
      *
      * @param userId 사용자 ID
-     * @param cost   필요 포인트 (0이면 잔액 확인 건너뜀)
-     * @return 잔액 + 쿼터 통합 확인 결과
+     * @param cost   필요 포인트 (v3.0 AI 무과금 정책상 항상 0; 응답에 그대로 포함)
+     * @return 쿼터 통합 확인 결과 (잔액 정보 포함)
      */
     public CheckResponse checkPoint(String userId, int cost) {
         validateUserId(userId);
-        log.debug("포인트 잔액 + 쿼터 확인: userId={}, cost={}", userId, cost);
+        log.debug("포인트 + 쿼터 확인 (v3.0): userId={}, cost={}", userId, cost);
 
-        // 1. UserPoint 조회 (없으면 잔액 0, BRONZE 등급으로 처리)
+        // 1. UserPoint 조회 (없으면 잔액 0, NORMAL 등급 기본값)
         int balance;
         String grade;
         var userPointOpt = userPointRepository.findByUserId(userId);
@@ -139,57 +146,22 @@ public class PointService {
         if (userPointOpt.isPresent()) {
             UserPoint userPoint = userPointOpt.get();
             balance = userPoint.getBalance();
-            // getGradeCode(): grade FK 참조 null 시 "BRONZE" fallback
+            // getGradeCode(): grade FK 참조 null 시 "NORMAL" fallback
             grade = userPoint.getGradeCode();
         } else {
-            // 포인트 레코드 미존재: 잔액 0, BRONZE 등급
-            log.warn("포인트 레코드 없음: userId={}", userId);
+            // 포인트 레코드 미존재 → NORMAL 등급 기본값으로 쿼터만 확인
+            log.warn("포인트 레코드 없음 (NORMAL 등급 fallback): userId={}", userId);
             balance = 0;
-            grade = "BRONZE";
-
-            // cost > 0이면 무조건 사용 불가 (레코드 없으므로 쿼터 검사도 의미 없음)
-            if (cost > 0) {
-                // 쿼터 정보는 BRONZE 기본값으로 채움
-                QuotaCheckResult quotaResult = quotaService.checkQuota(userId, grade, cost);
-                return new CheckResponse(
-                        false,
-                        0,
-                        cost,
-                        "포인트 정보가 없습니다. 회원가입 후 이용해 주세요.",
-                        quotaResult.maxInputLength(),
-                        quotaResult.dailyUsed(),
-                        quotaResult.dailyLimit(),
-                        quotaResult.monthlyUsed(),
-                        quotaResult.monthlyLimit(),
-                        quotaResult.freeRemaining(),
-                        quotaResult.effectiveCost()
-                );
-            }
-
-            // cost == 0이면 항상 allowed=true (쿼터 정보는 기본값)
-            QuotaCheckResult quotaResult = quotaService.checkQuota(userId, grade, cost);
-            return new CheckResponse(
-                    true,
-                    0,
-                    cost,
-                    "포인트가 충분합니다.",
-                    quotaResult.maxInputLength(),
-                    quotaResult.dailyUsed(),
-                    quotaResult.dailyLimit(),
-                    quotaResult.monthlyUsed(),
-                    quotaResult.monthlyLimit(),
-                    quotaResult.freeRemaining(),
-                    quotaResult.effectiveCost()
-            );
+            grade = "NORMAL";
         }
 
-        // 2. 등급별 쿼터 확인 (일일/월간 한도 + 무료 잔여 계산)
-        QuotaCheckResult quotaResult = quotaService.checkQuota(userId, grade, cost);
+        // 2. v3.0 쿼터 확인 — cost 파라미터 없음 (QuotaService가 source를 자체 결정)
+        QuotaCheckResult quotaResult = quotaService.checkQuota(userId, grade);
 
-        // 3. 쿼터 초과 시 → 즉시 차단 (잔액 확인 불필요)
+        // 3. 쿼터 차단(source="BLOCKED") 시 → 즉시 사용 불가 반환
         if (!quotaResult.allowed()) {
-            log.info("쿼터 초과로 사용 불가: userId={}, grade={}, message={}",
-                    userId, grade, quotaResult.message());
+            log.info("쿼터 차단으로 사용 불가: userId={}, grade={}, source={}, message={}",
+                    userId, grade, quotaResult.source(), quotaResult.message());
             return new CheckResponse(
                     false,
                     balance,
@@ -198,47 +170,46 @@ public class PointService {
                     quotaResult.maxInputLength(),
                     quotaResult.dailyUsed(),
                     quotaResult.dailyLimit(),
-                    quotaResult.monthlyUsed(),
-                    quotaResult.monthlyLimit(),
-                    quotaResult.freeRemaining(),
-                    quotaResult.effectiveCost()
+                    quotaResult.source(),
+                    quotaResult.subBonusRemaining(),
+                    quotaResult.purchasedRemaining()
             );
         }
 
-        // 4. 쿼터 OK → effectiveCost로 잔액 확인 (무료면 effectiveCost=0이므로 항상 통과)
-        int effectiveCost = quotaResult.effectiveCost();
-        boolean balanceSufficient = balance >= effectiveCost;
+        // 4. 쿼터 허용 → AI 무과금 정책상 잔액 검사 없이 즉시 허용
+        // v3.0부터 AI 추천은 무과금이므로 effectiveCost 개념이 없음.
+        // 소스별 안내 메시지 구성:
+        //   GRADE_FREE  → 등급 무료 사용
+        //   SUB_BONUS   → 구독 보너스 사용 (잔여 횟수 포함)
+        //   PURCHASED   → 구매 토큰 사용 (잔여 횟수 포함)
         String message;
-
-        if (balanceSufficient) {
-            // 무료 사용이면 "무료 사용 가능" 메시지, 아니면 "포인트 충분" 메시지
-            message = effectiveCost == 0
-                    ? "무료 AI 추천을 사용합니다. (남은 무료 횟수: " + quotaResult.freeRemaining() + "회)"
-                    : "포인트가 충분합니다.";
-        } else {
-            // 잔액 부족 (무료가 아닌 경우에만 발생)
-            message = "포인트가 부족합니다. 보유: " + balance + ", 필요: " + effectiveCost;
+        switch (quotaResult.source()) {
+            case "SUB_BONUS" ->
+                    message = "구독 보너스로 AI 추천을 사용합니다. (잔여: " + quotaResult.subBonusRemaining() + "회)";
+            case "PURCHASED" ->
+                    message = "구매 이용권으로 AI 추천을 사용합니다. (잔여: " + quotaResult.purchasedRemaining() + "회)";
+            default ->
+                    // GRADE_FREE: 등급 무료 한도 내 사용
+                    message = "AI 추천을 사용할 수 있습니다. (오늘 " + quotaResult.dailyUsed() + "/" +
+                            (quotaResult.dailyLimit() == -1 ? "무제한" : quotaResult.dailyLimit()) + "회)";
         }
 
-        log.debug("포인트 + 쿼터 확인 결과: userId={}, allowed={}, balance={}, grade={}, " +
-                        "effectiveCost={}, dailyUsed={}/{}, freeRemaining={}",
-                userId, balanceSufficient, balance, grade,
-                effectiveCost, quotaResult.dailyUsed(), quotaResult.dailyLimit(),
-                quotaResult.freeRemaining());
+        log.debug("쿼터 확인 완료 (v3.0): userId={}, grade={}, source={}, dailyUsed={}/{}",
+                userId, grade, quotaResult.source(),
+                quotaResult.dailyUsed(), quotaResult.dailyLimit());
 
-        // 5. 통합 CheckResponse 반환 (기존 5개 필드 + Phase R-3 쿼터 6개 필드)
+        // 5. 통합 CheckResponse 반환 (기존 5+2 필드 + v3.0 소스 3개 필드)
         return new CheckResponse(
-                balanceSufficient,
+                true,
                 balance,
-                cost,
+                0,      // v3.0 AI 무과금: cost는 항상 0
                 message,
                 quotaResult.maxInputLength(),
                 quotaResult.dailyUsed(),
                 quotaResult.dailyLimit(),
-                quotaResult.monthlyUsed(),
-                quotaResult.monthlyLimit(),
-                quotaResult.freeRemaining(),
-                effectiveCost
+                quotaResult.source(),
+                quotaResult.subBonusRemaining(),
+                quotaResult.purchasedRemaining()
         );
     }
 
@@ -378,15 +349,19 @@ public class PointService {
             return;
         }
 
-        // 신규 UserPoint 레코드 구성 (BRONZE 등급 조회 후 FK 설정)
-        Grade bronzeGrade = gradeRepository.findByGradeCode("BRONZE").orElse(null);
+        // 신규 UserPoint 레코드 구성 (NORMAL 등급 조회 후 FK 설정 — 설계서 v2.3 기본 등급)
+        Grade normalGrade = gradeRepository.findByGradeCode("NORMAL").orElse(null);
+        LocalDate today = LocalDate.now();
+        // v3.0: monthlyReset 필드 제거됨 (월간 한도 폐지로 UserPoint 엔티티에서 삭제)
         UserPoint userPoint = UserPoint.builder()
                 .userId(userId)
                 .balance(freePoints)
                 .totalEarned(freePoints)
                 .dailyEarned(0)
-                .dailyReset(LocalDate.now())
-                .grade(bronzeGrade)
+                .dailyReset(today)
+                .earnedByActivity(0)
+                .dailyCapUsed(0)
+                .grade(normalGrade)
                 .build();
 
         try {
@@ -431,32 +406,76 @@ public class PointService {
     // ──────────────────────────────────────────────
 
     /**
-     * 포인트를 획득(지급)한다.
+     * 포인트를 획득(지급)한다 — 하위 호환용 오버로드 (5-파라미터).
      *
-     * <p>출석 체크, 퀴즈 보상, 이벤트 보너스 등 포인트를 지급할 때 사용한다.
-     * 비관적 락으로 동시 요청을 처리하며, 획득 후 등급 재계산을 수행한다.</p>
-     *
-     * <h4>등급 계산 기준 (누적 포인트 기반)</h4>
-     * <ul>
-     *   <li>0 ~ 999: BRONZE</li>
-     *   <li>1,000 ~ 4,999: SILVER</li>
-     *   <li>5,000 ~ 19,999: GOLD</li>
-     *   <li>20,000+: PLATINUM</li>
-     * </ul>
+     * <p>결제 충전, 관리자 수동 지급 등 활동 리워드가 아닌 포인트 지급에 사용.
+     * {@code isActivityReward=false}로 호출하므로 earnedByActivity에 반영되지 않는다.</p>
      *
      * @param userId      사용자 ID
      * @param amount      획득 포인트 (양수)
      * @param pointType   변동 유형 (earn, bonus 등)
      * @param description 획득 사유 (nullable)
-     * @param referenceId 참조 ID (nullable, 이벤트 ID 등)
+     * @param referenceId 참조 ID (nullable)
+     * @return 획득 결과 (balanceAfter, grade)
+     */
+    @Transactional
+    public EarnResponse earnPoint(String userId, int amount, String pointType,
+                                  String description, String referenceId) {
+        return earnPoint(userId, amount, pointType, description, referenceId, null, false);
+    }
+
+    /**
+     * 포인트를 획득(지급)한다 — 확장판 (7-파라미터, 설계서 v2.3 §5.2 기준).
+     *
+     * <p>활동 리워드, 결제 충전, 관리자 지급 등 모든 포인트 획득에 사용하는 핵심 메서드.
+     * 비관적 락으로 동시 요청을 처리하며, 획득 후 등급 재계산을 수행한다.</p>
+     *
+     * <h4>설계서 v2.3 변경사항</h4>
+     * <ul>
+     *   <li>{@code amount == 0}: user_points/points_history 스킵 (카운팅 전용 활동, 예: AI_CHAT_USE)</li>
+     *   <li>{@code isActivityReward=true}: earnedByActivity 증가, dailyCapUsed 증가</li>
+     *   <li>등급 산정 기준: {@code earned_by_activity} (total_earned가 아님)</li>
+     *   <li>등급 연쇄 승급: 건너뛴 중간 등급도 감지 (old_sort < g.sort <= new_sort)</li>
+     * </ul>
+     *
+     * <h4>등급 계산 기준 (earned_by_activity, 설계서 v2.3 §4.5)</h4>
+     * <ul>
+     *   <li>NORMAL: 0~499</li>
+     *   <li>BRONZE: 500~1,999</li>
+     *   <li>SILVER: 2,000~4,999</li>
+     *   <li>GOLD: 5,000~14,999</li>
+     *   <li>PLATINUM: 15,000+</li>
+     * </ul>
+     *
+     * @param userId           사용자 ID
+     * @param amount           획득 포인트 (양수 또는 0, 음수=revoke)
+     * @param pointType        변동 유형 (earn, bonus, refund, revoke 등)
+     * @param description      획득 사유 (nullable)
+     * @param referenceId      참조 ID (nullable)
+     * @param actionType       활동 유형 코드 (reward_policy.action_type, nullable — 비리워드 변동이면 null)
+     * @param isActivityReward RewardService 경유 여부. true이면 earned_by_activity 반영 (등급 산정 포함).
+     *                         false이면 결제 충전/관리자 지급 (등급 미반영).
      * @return 획득 결과 (balanceAfter, grade)
      * @throws BusinessException 포인트 레코드가 없는 경우
      */
     @Transactional
     public EarnResponse earnPoint(String userId, int amount, String pointType,
-                                  String description, String referenceId) {
+                                  String description, String referenceId,
+                                  String actionType, boolean isActivityReward) {
         validateUserId(userId);
-        log.info("포인트 획득 시작: userId={}, amount={}, type={}", userId, amount, pointType);
+        log.info("포인트 획득 시작: userId={}, amount={}, type={}, actionType={}, isActivity={}",
+                userId, amount, pointType, actionType, isActivityReward);
+
+        // ★ 0P 스킵 로직 (설계서 v2.3 §5.2 단계 4)
+        // AI_CHAT_USE 등 카운팅 전용 활동: 포인트 변동 없음 → user_points/points_history 스킵.
+        // 0P 레코드가 원장에 쌓이면 point_after 체인 검증과 통계 집계에 노이즈 발생.
+        if (amount == 0) {
+            log.debug("0P 지급 스킵 (카운팅 전용): userId={}, actionType={}", userId, actionType);
+            // 현재 잔액/등급만 조회하여 반환 (변경 없음)
+            return userPointRepository.findByUserId(userId)
+                    .map(up -> new EarnResponse(up.getBalance(), up.getGradeCode()))
+                    .orElse(new EarnResponse(0, "NORMAL"));
+        }
 
         // 1. 비관적 락으로 포인트 레코드 조회
         UserPoint userPoint = userPointRepository.findByUserIdForUpdate(userId)
@@ -465,22 +484,44 @@ public class PointService {
                     return new BusinessException(ErrorCode.POINT_NOT_FOUND);
                 });
 
-        // 2. 포인트 추가 (도메인 메서드: 보유/누적/일일 갱신)
-        userPoint.addPoints(amount, LocalDate.now());
+        // 1-1. lazy reset (일일)
+        // v3.0: resetMonthlyIfNeeded() 제거 — 월간 한도 폐지로 UserPoint 엔티티에서 해당 메서드 삭제됨
+        LocalDate today = LocalDate.now();
+        userPoint.resetDailyIfNeeded(today);
+
+        // 1-2. ★ 일일 활동 리워드 상한 검사 (설계서 v2.3 §4.1)
+        // isActivityReward=true이고 amount > 0인 경우에만 검사.
+        // 구독 포인트/관리자 지급은 상한 미적용.
+        if (isActivityReward && amount > 0) {
+            Grade currentGrade = userPoint.getGrade();
+            if (currentGrade != null && currentGrade.getDailyEarnCap() > 0) {
+                int capAfter = userPoint.getDailyCapUsed() + amount;
+                if (capAfter > currentGrade.getDailyEarnCap()) {
+                    log.info("일일 활동 리워드 상한 도달: userId={}, capUsed={}, amount={}, cap={}",
+                            userId, userPoint.getDailyCapUsed(), amount, currentGrade.getDailyEarnCap());
+                    return new EarnResponse(userPoint.getBalance(), userPoint.getGradeCode());
+                }
+            }
+        }
+
+        // 2. 포인트 추가 (도메인 메서드: balance/totalEarned/dailyEarned + 활동이면 earnedByActivity/dailyCapUsed)
+        userPoint.addPoints(amount, today, isActivityReward);
         int newBalance = userPoint.getBalance();
 
-        // 3. 등급 재계산 (누적 포인트 기반, grades 마스터 테이블 조회)
+        // 3. 등급 재계산 (★ earned_by_activity 기준, 설계서 v2.3 §4.5)
+        // 결제 포인트(isActivityReward=false)로는 등급이 올라가지 않는다.
         String oldGradeCode = userPoint.getGradeCode();
         Grade newGrade = gradeRepository
-                .findTopByMinPointsLessThanEqualAndIsActiveTrueOrderByMinPointsDesc(userPoint.getTotalEarned())
+                .findTopByMinPointsLessThanEqualAndIsActiveTrueOrderByMinPointsDesc(
+                        userPoint.getEarnedByActivity())  // ★ totalEarned → earnedByActivity
                 .orElse(null);
-        String newGradeCode = (newGrade != null) ? newGrade.getGradeCode() : "BRONZE";
+        String newGradeCode = (newGrade != null) ? newGrade.getGradeCode() : "NORMAL";
         if (!newGradeCode.equals(oldGradeCode)) {
             userPoint.updateGrade(newGrade);
             log.info("등급 변경: userId={}, {} → {}", userId, oldGradeCode, newGradeCode);
         }
 
-        // 4. 변동 이력 기록
+        // 4. 변동 이력 기록 (★ actionType, baseAmount, appliedMultiplier 포함)
         PointsHistory history = PointsHistory.builder()
                 .userId(userId)
                 .pointChange(amount)
@@ -488,11 +529,12 @@ public class PointService {
                 .pointType(pointType)
                 .description(description != null ? description : "포인트 획득")
                 .referenceId(referenceId)
+                .actionType(actionType)
                 .build();
         pointsHistoryRepository.save(history);
 
-        log.info("포인트 획득 완료: userId={}, 획득={}, 잔액={}, 등급={}",
-                userId, amount, newBalance, newGradeCode);
+        log.info("포인트 획득 완료: userId={}, 획득={}, 잔액={}, 등급={}, actionType={}",
+                userId, amount, newBalance, newGradeCode, actionType);
 
         // 5. 응답 반환
         return new EarnResponse(newBalance, newGradeCode);

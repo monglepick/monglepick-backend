@@ -129,5 +129,35 @@ public class WorldcupResult extends BaseAuditEntity {
     @Builder.Default
     private Boolean onboardingCompleted = false;
 
+    /**
+     * 진행 세션 ID — worldcup_session.session_id 논리적 참조 (nullable).
+     *
+     * <p>신규 월드컵 세션 기반 결과는 session_id가 설정된다.
+     * 레거시(온보딩 전용) 결과 또는 세션 없이 생성된 결과는 NULL이다.</p>
+     */
+    @Column(name = "session_id")
+    private Long sessionId;
+
+    /**
+     * 리워드 지급 여부 (기본값 false).
+     *
+     * <p>WORLDCUP_COMPLETE / WORLDCUP_FIRST 리워드 지급 후 true로 전환된다.
+     * WorldcupSession.rewardGranted 와 별도로 결과 레코드에도 기록하여
+     * 결과 기반 집계 시 이중 지급 여부를 확인할 수 있다.</p>
+     */
+    @Column(name = "reward_granted", nullable = false)
+    @Builder.Default
+    private boolean rewardGranted = false;
+
+    /**
+     * 총 매치 수 (nullable, 통계용).
+     *
+     * <p>완료된 토너먼트에서 사용자가 선택한 전체 매치 수를 저장한다.
+     * 16강 기준 = 15경기 (16+8+4+2+1 = 31 → 16/2 + ... = 15).
+     * 통계 및 분석 페이지에서 활동량 지표로 활용한다.</p>
+     */
+    @Column(name = "total_matches")
+    private Integer totalMatches;
+
     /* 수동 createdAt 필드 제거됨 — BaseAuditEntity가 created_at 컬럼을 자동 관리 */
 }

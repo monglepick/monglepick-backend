@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    사용자(users) Mapper XML.
+    테이블: users
+    담당: 김민규 (user 도메인)
+
+    참고: User Entity의 JPA 어노테이션은 무시됨.
+    MyBatis는 resultMap 기반으로 직접 매핑한다.
+-->
+<mapper namespace="com.monglepick.monglepickbackend.domain.user.mapper.UserMapper">
+
+    <!-- ═══ ResultMap ═══ -->
+    <resultMap id="userResultMap" type="com.monglepick.monglepickbackend.domain.user.entity.User">
+        <id property="userId" column="user_id"/>
+        <result property="email" column="email"/>
+        <result property="nickname" column="nickname"/>
+        <result property="passwordHash" column="password_hash"/>
+        <result property="profileImage" column="profile_image"/>
+        <result property="provider" column="provider"/>
+        <result property="providerId" column="provider_id"/>
+        <result property="userRole" column="user_role"/>
+        <result property="userBirth" column="user_birth"/>
+        <result property="name" column="name"/>
+        <result property="requiredTerm" column="required_term"/>
+        <result property="optionTerm" column="option_term"/>
+        <result property="marketingAgreed" column="marketing_agreed"/>
+        <result property="status" column="status"/>
+        <result property="suspendedAt" column="suspended_at"/>
+        <result property="suspendReason" column="suspend_reason"/>
+        <result property="isDeleted" column="is_deleted"/>
+        <result property="deletedAt" column="deleted_at"/>
+        <result property="lastLoginAt" column="last_login_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="updatedBy" column="updated_by"/>
+    </resultMap>
+
+    <!-- ═══ 공통 SELECT 컬럼 ═══ -->
+    <sql id="allColumns">
+        user_id, email, nickname, password_hash, profile_image,
+        provider, provider_id, user_role, user_birth, name,
+        required_term, option_term, marketing_agreed,
+        status, suspended_at, suspend_reason,
+        is_deleted, deleted_at, last_login_at,
+        created_at, updated_at, created_by, updated_by
+    </sql>
+
+    <!-- ═══ SELECT ═══ -->
+
+    <!-- PK(user_id)로 조회 -->
+    <select id="findById" resultMap="userResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM users
+        WHERE user_id = #{userId}
+    </select>
+
+    <!-- 이메일로 조회 (로컬 로그인) -->
+    <select id="findByEmail" resultMap="userResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM users
+        WHERE email = #{email}
+    </select>
+
+    <!-- 소셜 제공자 + ID로 조회 (소셜 로그인) -->
+    <select id="findByProviderAndProviderId" resultMap="userResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM users
+        WHERE provider = #{provider}
+          AND provider_id = #{providerId}
+    </select>
+
+    <!-- 이메일 중복 확인 -->
+    <select id="existsByEmail" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM users
+        WHERE email = #{email}
+    </select>
+
+    <!-- 닉네임 중복 확인 -->
+    <select id="existsByNickname" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM users
+        WHERE nickname = #{nickname}
+    </select>
+
+    <!-- ═══ INSERT ═══ -->
+
+    <!-- 사용자 신규 등록 -->
+    <insert id="insert">
+        INSERT INTO users (
+            user_id, email, nickname, password_hash, profile_image,
+            provider, provider_id, user_role, user_birth, name,
+            required_term, option_term, marketing_agreed,
+            status, is_deleted, created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{userId}, #{email}, #{nickname}, #{passwordHash}, #{profileImage},
+            #{provider}, #{providerId}, #{userRole}, #{userBirth}, #{name},
+            #{requiredTerm}, #{optionTerm}, #{marketingAgreed},
+            #{status}, #{isDeleted}, NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <!-- ═══ UPDATE ═══ -->
+
+    <!-- 사용자 정보 수정 (변경 가능 필드만) -->
+    <update id="update">
+        UPDATE users
+        SET nickname       = #{nickname},
+            password_hash  = #{passwordHash},
+            profile_image  = #{profileImage},
+            user_role      = #{userRole},
+            status         = #{status},
+            suspended_at   = #{suspendedAt},
+            suspend_reason = #{suspendReason},
+            is_deleted     = #{isDeleted},
+            deleted_at     = #{deletedAt},
+            last_login_at  = #{lastLoginAt},
+            updated_at     = NOW(),
+            updated_by     = #{updatedBy}
+        WHERE user_id = #{userId}
+    </update>
+
+    <!-- 최종 로그인 시각만 갱신 -->
+    <update id="updateLastLoginAt">
+        UPDATE users
+        SET last_login_at = NOW(),
+            updated_at    = NOW()
+        WHERE user_id = #{userId}
+    </update>
+
+</mapper>

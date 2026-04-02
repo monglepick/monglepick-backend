@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    콘텐츠 관리(banners, profanity_dictionary, toxicity_logs) Mapper XML.
+    담당: 이민수 (content 도메인)
+-->
+<mapper namespace="com.monglepick.monglepickbackend.domain.content.mapper.ContentMapper">
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- Banner ResultMap & SQL                         -->
+    <!-- ══════════════════════════════════════════════ -->
+
+    <resultMap id="bannerResultMap" type="com.monglepick.monglepickbackend.domain.content.entity.Banner">
+        <id property="bannerId" column="banner_id"/>
+        <result property="title" column="title"/>
+        <result property="imageUrl" column="image_url"/>
+        <result property="linkUrl" column="link_url"/>
+        <result property="position" column="position"/>
+        <result property="sortOrder" column="sort_order"/>
+        <result property="isActive" column="is_active"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findBannerById" resultMap="bannerResultMap">
+        SELECT banner_id, title, image_url, link_url, position,
+               sort_order, is_active, start_date, end_date,
+               created_at, updated_at
+        FROM banners
+        WHERE banner_id = #{bannerId}
+    </select>
+
+    <!-- 프론트엔드용: 활성 + 현재 게시 기간 내 배너 (정렬순서 ASC) -->
+    <select id="findActiveBannersByPosition" resultMap="bannerResultMap">
+        SELECT banner_id, title, image_url, link_url, position,
+               sort_order, is_active, start_date, end_date,
+               created_at, updated_at
+        FROM banners
+        WHERE position = #{position}
+          AND is_active = true
+          AND (start_date IS NULL OR start_date &lt;= NOW())
+          AND (end_date IS NULL OR end_date &gt;= NOW())
+        ORDER BY sort_order ASC
+    </select>
+
+    <select id="findAllBanners" resultMap="bannerResultMap">
+        SELECT banner_id, title, image_url, link_url, position,
+               sort_order, is_active, start_date, end_date,
+               created_at, updated_at
+        FROM banners
+        ORDER BY position ASC, sort_order ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countAllBanners" resultType="long">
+        SELECT COUNT(*) FROM banners
+    </select>
+
+    <insert id="insertBanner" useGeneratedKeys="true" keyProperty="bannerId">
+        INSERT INTO banners (
+            title, image_url, link_url, position, sort_order,
+            is_active, start_date, end_date,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{title}, #{imageUrl}, #{linkUrl}, #{position}, #{sortOrder},
+            #{isActive}, #{startDate}, #{endDate},
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <update id="updateBanner">
+        UPDATE banners
+        SET title      = #{title},
+            image_url  = #{imageUrl},
+            link_url   = #{linkUrl},
+            position   = #{position},
+            sort_order = #{sortOrder},
+            is_active  = #{isActive},
+            start_date = #{startDate},
+            end_date   = #{endDate},
+            updated_at = NOW(),
+            updated_by = #{updatedBy}
+        WHERE banner_id = #{bannerId}
+    </update>
+
+    <delete id="deleteBanner">
+        DELETE FROM banners WHERE banner_id = #{bannerId}
+    </delete>
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- ProfanityWord ResultMap & SQL                  -->
+    <!-- ══════════════════════════════════════════════ -->
+
+    <resultMap id="profanityResultMap" type="com.monglepick.monglepickbackend.domain.content.entity.ProfanityWord">
+        <id property="profanityId" column="profanity_id"/>
+        <result property="word" column="word"/>
+        <result property="category" column="category"/>
+        <result property="severity" column="severity"/>
+        <result property="isActive" column="is_active"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findProfanityById" resultMap="profanityResultMap">
+        SELECT profanity_id, word, category, severity, is_active,
+               created_at, updated_at
+        FROM profanity_dictionary
+        WHERE profanity_id = #{profanityId}
+    </select>
+
+    <!-- 모더레이션 엔진용: 활성 금칙어 전체 로드 -->
+    <select id="findActiveProfanityWords" resultMap="profanityResultMap">
+        SELECT profanity_id, word, category, severity, is_active,
+               created_at, updated_at
+        FROM profanity_dictionary
+        WHERE is_active = true
+        ORDER BY severity DESC, word ASC
+    </select>
+
+    <!-- 관리자용: 카테고리 필터 + 페이징 -->
+    <select id="findProfanityWords" resultMap="profanityResultMap">
+        SELECT profanity_id, word, category, severity, is_active,
+               created_at, updated_at
+        FROM profanity_dictionary
+        <where>
+            <if test="category != null and category != ''">
+                category = #{category}
+            </if>
+        </where>
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countProfanityWords" resultType="long">
+        SELECT COUNT(*)
+        FROM profanity_dictionary
+        <where>
+            <if test="category != null and category != ''">
+                category = #{category}
+            </if>
+        </where>
+    </select>
+
+    <insert id="insertProfanity" useGeneratedKeys="true" keyProperty="profanityId">
+        INSERT INTO profanity_dictionary (
+            word, category, severity, is_active,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{word}, #{category}, #{severity}, #{isActive},
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <update id="updateProfanity">
+        UPDATE profanity_dictionary
+        SET category   = #{category},
+            severity   = #{severity},
+            is_active  = #{isActive},
+            updated_at = NOW(),
+            updated_by = #{updatedBy}
+        WHERE profanity_id = #{profanityId}
+    </update>
+
+    <delete id="deleteProfanity">
+        DELETE FROM profanity_dictionary WHERE profanity_id = #{profanityId}
+    </delete>
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- ToxicityLog ResultMap & SQL                    -->
+    <!-- ══════════════════════════════════════════════ -->
+
+    <resultMap id="toxicityLogResultMap" type="com.monglepick.monglepickbackend.domain.content.entity.ToxicityLog">
+        <id property="toxicityLogId" column="toxicity_log_id"/>
+        <result property="contentType" column="content_type"/>
+        <result property="contentId" column="content_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="detectedWords" column="detected_words"/>
+        <result property="toxicityScore" column="toxicity_score"/>
+        <result property="severity" column="severity"/>
+        <result property="actionTaken" column="action_taken"/>
+        <result property="processedAt" column="processed_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findToxicityLogById" resultMap="toxicityLogResultMap">
+        SELECT toxicity_log_id, content_type, content_id, user_id,
+               detected_words, toxicity_score, severity,
+               action_taken, processed_at, created_at, updated_at
+        FROM toxicity_logs
+        WHERE toxicity_log_id = #{toxicityLogId}
+    </select>
+
+    <!-- 관리자용: 미처리(action_taken IS NULL) 로그 조회, 심각도 필터 -->
+    <select id="findPendingLogs" resultMap="toxicityLogResultMap">
+        SELECT toxicity_log_id, content_type, content_id, user_id,
+               detected_words, toxicity_score, severity,
+               action_taken, processed_at, created_at, updated_at
+        FROM toxicity_logs
+        WHERE action_taken IS NULL
+        <if test="severity != null and severity != ''">
+            AND severity = #{severity}
+        </if>
+        ORDER BY
+            FIELD(severity, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'),
+            created_at ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countPendingLogs" resultType="long">
+        SELECT COUNT(*)
+        FROM toxicity_logs
+        WHERE action_taken IS NULL
+        <if test="severity != null and severity != ''">
+            AND severity = #{severity}
+        </if>
+    </select>
+
+    <insert id="insertToxicityLog" useGeneratedKeys="true" keyProperty="toxicityLogId">
+        INSERT INTO toxicity_logs (
+            content_type, content_id, user_id,
+            detected_words, toxicity_score, severity,
+            action_taken, processed_at,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{contentType}, #{contentId}, #{userId},
+            #{detectedWords}, #{toxicityScore}, #{severity},
+            #{actionTaken}, #{processedAt},
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <!-- 관리자 조치 처리 -->
+    <update id="processAction">
+        UPDATE toxicity_logs
+        SET action_taken = #{actionTaken},
+            processed_at = NOW(),
+            updated_at   = NOW()
+        WHERE toxicity_log_id = #{toxicityLogId}
+    </update>
+
+</mapper>

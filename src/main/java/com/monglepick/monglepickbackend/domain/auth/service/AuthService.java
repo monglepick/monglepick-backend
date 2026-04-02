@@ -5,6 +5,7 @@ import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.SignupRequest;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.UserInfo;
 import com.monglepick.monglepickbackend.domain.auth.dto.CustomOAuth2User;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
+import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -39,6 +40,11 @@ import java.util.UUID;
  *
  * <h3>C-2 수정: signup() 완료 후 Refresh Token을 RefreshRepository에 저장</h3>
  * <h3>C-3 수정: Kakao loadUser()에서 kakaoAccount/profile null 체크 추가</h3>
+ * <h3>R-1 수정: signup() 가입 보너스를 RewardService.grantReward()로 위임</h3>
+ * <p>기존 {@code pointService.initializePoint(userId, 500)} 방식에서
+ * {@code rewardService.grantReward(userId, "SIGNUP_BONUS", "signup", 0)} 방식으로 변경.
+ * {@code max_count=1} 정책으로 중복 지급이 자동 차단된다.
+ * 포인트 레코드 초기화는 {@code pointService.initializePoint(userId, 0)} (잔액 0)으로만 수행.</p>
  */
 @Slf4j
 @Service
@@ -54,9 +60,14 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     /** C-2: Refresh Token DB 저장을 위한 JwtService 의존성 추가 */
     private final JwtService jwtService;
 
-    /** 가입 보너스 포인트 */
-    @Value("${app.point.free-on-signup:500}")
-    private int freePointsOnSignup;
+    /**
+     * R-1: 회원가입 보너스 지급을 위한 RewardService 주입.
+     *
+     * <p>SIGNUP_BONUS 정책(max_count=1)을 통해 500P를 지급한다.
+     * 기존 {@code pointService.initializePoint(userId, 500)} 하드코딩을 대체하며,
+     * RewardService 내부에서 중복 지급 방지(max_count 한도 검사)가 자동 처리된다.</p>
+     */
+    private final RewardService rewardService;
 
     // ──────────────────────────────────────────────
     // 로컬 회원가입
@@ -65,10 +76,16 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     /**
      * 로컬 회원가입을 처리한다.
      *
-     * <p>이메일/닉네임 중복 확인 → BCrypt 해싱 → 사용자 생성 → 포인트 초기화 → JWT 발급</p>
+     * <p>이메일/닉네임 중복 확인 → BCrypt 해싱 → 사용자 생성 → 포인트 레코드 초기화(잔액 0)
+     * → 회원가입 보너스 지급(RewardService) → JWT 발급</p>
      *
      * <p>C-2 수정: Refresh Token을 DB 화이트리스트에 저장하여
      * 회원가입 직후 발급된 토큰이 갱신 가능하도록 한다.</p>
+     *
+     * <p>R-1 수정: 가입 보너스 500P를 {@code rewardService.grantReward()}로 위임.
+     * {@code pointService.initializePoint(userId, 0)}으로 포인트 레코드만 생성(잔액 0)하고,
+     * 실제 500P 지급은 SIGNUP_BONUS 정책(max_count=1)을 통해 처리된다.
+     * 이로써 보너스 금액 변경은 reward_policy 테이블에서만 관리된다.</p>
      */
     @Transactional
     public AuthResponse signup(SignupRequest request) {
@@ -99,14 +116,21 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                 .build();
 
         userRepository.save(user);
-        pointService.initializePoint(userId, freePointsOnSignup);
+
+        // R-1: 포인트 레코드를 잔액 0으로 초기화 (보너스 지급은 rewardService가 담당)
+        //      기존 initializePoint(userId, 500) 방식에서 변경 — 하드코딩 500P 제거
+        pointService.initializePoint(userId, 0);
+
+        // R-1: 회원가입 보너스 — SIGNUP_BONUS 정책 기반 500P 지급
+        //      max_count=1 정책으로 중복 지급 자동 차단
+        //      referenceId "signup" 고정으로 동일 사용자의 중복 요청도 방지
+        rewardService.grantReward(userId, "SIGNUP_BONUS", "signup", 0);
 
         /* C-2: Refresh Token을 DB 화이트리스트에 저장 */
         AuthResponse authResponse = buildAuthResponse(user);
         jwtService.addRefresh(userId, authResponse.refreshToken());
 
-        log.info("로컬 회원가입 완료 — userId: {}, email: {}, 가입보너스: {}P",
-                userId, request.email(), freePointsOnSignup);
+        log.info("로컬 회원가입 완료 — userId: {}, email: {}", userId, request.email());
 
         return authResponse;
     }
@@ -132,10 +156,12 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
             throw new UsernameNotFoundException("소셜 로그인 계정입니다. " + user.getProvider() + " 로그인을 사용하세요.");
         }
 
+        /* userRole에서 실제 권한을 읽어 설정 (ADMIN 계정이 ROLE_USER로 로드되는 버그 수정) */
+        String role = "ROLE_" + (user.getUserRole() != null ? user.getUserRole().name() : "USER");
         return org.springframework.security.core.userdetails.User.builder()
                 .username(user.getEmail())
                 .password(user.getPasswordHash())
-                .authorities("ROLE_USER")
+                .authorities(role)
                 .build();
     }
 
@@ -244,7 +270,7 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
             userRepository.save(user);
             log.info("소셜 로그인 — 기존 사용자: userId={}, provider={}", user.getUserId(), provider);
         } else {
-            /* 신규 사용자: 생성 + 포인트 초기화 */
+            /* 신규 사용자: 생성 + 포인트 레코드 초기화(잔액 0) + 가입 보너스 지급 */
             String userId = UUID.randomUUID().toString();
             user = User.builder()
                     .userId(userId)
@@ -255,9 +281,14 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                     .requiredTerm(true)
                     .build();
             userRepository.save(user);
-            pointService.initializePoint(userId, freePointsOnSignup);
-            log.info("소셜 로그인 — 신규 사용자 생성: userId={}, provider={}, 가입보너스: {}P",
-                    userId, provider, freePointsOnSignup);
+
+            // R-1: 포인트 레코드를 잔액 0으로 초기화 (보너스 지급은 rewardService가 담당)
+            pointService.initializePoint(userId, 0);
+
+            // R-1: 회원가입 보너스 — SIGNUP_BONUS 정책 기반 500P 지급 (max_count=1 중복 차단)
+            rewardService.grantReward(userId, "SIGNUP_BONUS", "signup", 0);
+
+            log.info("소셜 로그인 — 신규 사용자 생성: userId={}, provider={}", userId, provider);
         }
 
         List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));

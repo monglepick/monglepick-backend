@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    영화 리뷰(reviews) Mapper XML.
+    테이블: reviews
+    담당: 이민수 (review 도메인)
+-->
+<mapper namespace="com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper">
+
+    <!-- ═══ ResultMap ═══ -->
+
+    <!-- 리뷰 기본 매핑 -->
+    <resultMap id="reviewResultMap" type="com.monglepick.monglepickbackend.domain.review.entity.Review">
+        <id property="reviewId" column="review_id"/>
+        <result property="movieId" column="movie_id"/>
+        <result property="rating" column="rating"/>
+        <result property="content" column="content"/>
+        <result property="isDeleted" column="is_deleted"/>
+        <result property="isBlinded" column="is_blinded"/>
+        <result property="spoiler" column="spoiler"/>
+        <result property="likeCount" column="like_count"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="updatedBy" column="updated_by"/>
+    </resultMap>
+
+    <!-- 리뷰 + 작성자 JOIN 매핑 -->
+    <resultMap id="reviewWithUserResultMap" type="com.monglepick.monglepickbackend.domain.review.entity.Review"
+               extends="reviewResultMap">
+        <association property="user" javaType="com.monglepick.monglepickbackend.domain.user.entity.User">
+            <id property="userId" column="user_id"/>
+            <result property="nickname" column="nickname"/>
+            <result property="profileImage" column="profile_image"/>
+        </association>
+    </resultMap>
+
+    <!-- ═══ SELECT ═══ -->
+
+    <!-- PK로 리뷰 조회 -->
+    <select id="findById" resultMap="reviewResultMap">
+        SELECT review_id, user_id, movie_id, rating, content,
+               is_deleted, is_blinded, spoiler, like_count,
+               created_at, updated_at, created_by, updated_by
+        FROM reviews
+        WHERE review_id = #{reviewId}
+    </select>
+
+    <!-- 리뷰 + 작성자 JOIN 조회 -->
+    <select id="findByIdWithUser" resultMap="reviewWithUserResultMap">
+        SELECT r.review_id, r.movie_id, r.rating, r.content,
+               r.is_deleted, r.is_blinded, r.spoiler, r.like_count,
+               r.created_at, r.updated_at, r.created_by, r.updated_by,
+               u.user_id, u.nickname, u.profile_image
+        FROM reviews r
+        INNER JOIN users u ON r.user_id = u.user_id
+        WHERE r.review_id = #{reviewId}
+    </select>
+
+    <!-- 영화별 리뷰 목록 + 작성자 (페이징, 최신순) -->
+    <select id="findByMovieIdWithUser" resultMap="reviewWithUserResultMap">
+        SELECT r.review_id, r.movie_id, r.rating, r.content,
+               r.is_deleted, r.is_blinded, r.spoiler, r.like_count,
+               r.created_at, r.updated_at, r.created_by, r.updated_by,
+               u.user_id, u.nickname, u.profile_image
+        FROM reviews r
+        INNER JOIN users u ON r.user_id = u.user_id
+        WHERE r.movie_id = #{movieId}
+          AND r.is_deleted = false
+        ORDER BY r.created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 영화별 리뷰 총 건수 -->
+    <select id="countByMovieId" resultType="long">
+        SELECT COUNT(*)
+        FROM reviews
+        WHERE movie_id = #{movieId}
+          AND is_deleted = false
+    </select>
+
+    <!-- 사용자별 리뷰 목록 (마이페이지) -->
+    <select id="findByUserId" resultMap="reviewResultMap">
+        SELECT review_id, user_id, movie_id, rating, content,
+               is_deleted, is_blinded, spoiler, like_count,
+               created_at, updated_at, created_by, updated_by
+        FROM reviews
+        WHERE user_id = #{userId}
+          AND is_deleted = false
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 중복 리뷰 확인 -->
+    <select id="existsByUserIdAndMovieId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM reviews
+        WHERE user_id = #{userId}
+          AND movie_id = #{movieId}
+    </select>
+
+    <!-- ═══ INSERT ═══ -->
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="reviewId">
+        INSERT INTO reviews (
+            user_id, movie_id, rating, content,
+            is_deleted, is_blinded, spoiler, like_count,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{user.userId}, #{movieId}, #{rating}, #{content},
+            false, false, #{spoiler}, 0,
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <!-- ═══ UPDATE ═══ -->
+
+    <!-- 리뷰 수정 (평점, 본문) -->
+    <update id="update">
+        UPDATE reviews
+        SET rating     = #{rating},
+            content    = #{content},
+            updated_at = NOW(),
+            updated_by = #{updatedBy}
+        WHERE review_id = #{reviewId}
+    </update>
+
+    <!-- 소프트 삭제 -->
+    <update id="softDelete">
+        UPDATE reviews
+        SET is_deleted = true,
+            updated_at = NOW()
+        WHERE review_id = #{reviewId}
+    </update>
+
+    <!-- 블라인드 처리 -->
+    <update id="blind">
+        UPDATE reviews
+        SET is_blinded = true,
+            updated_at = NOW()
+        WHERE review_id = #{reviewId}
+    </update>
+
+    <!-- ═══ DELETE ═══ -->
+
+    <delete id="deleteById">
+        DELETE FROM reviews
+        WHERE review_id = #{reviewId}
+    </delete>
+
+</mapper>

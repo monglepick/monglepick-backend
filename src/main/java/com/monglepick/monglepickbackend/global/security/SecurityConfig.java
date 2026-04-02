@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.global.security;
 
 // Jackson 3.x: com.fasterxml.jackson → tools.jackson 패키지 경로 변경 (Spring Boot 4.x)
 import tools.jackson.databind.ObjectMapper;
+import com.monglepick.monglepickbackend.domain.auth.filter.AdminLoginFilter;
 import com.monglepick.monglepickbackend.domain.auth.filter.LoginFilter;
 import com.monglepick.monglepickbackend.domain.auth.handler.LoginSuccessHandler;
 import com.monglepick.monglepickbackend.domain.auth.handler.RefreshTokenLogoutHandler;
@@ -306,6 +307,9 @@ public class SecurityConfig {
                 /* 인증 API (회원가입, 로그인, 소셜 로그인 등) */
                 .requestMatchers("/api/v1/auth/**").permitAll()
 
+                /* 관리자 전용 로그인 — AdminLoginFilter가 처리, permitAll 필요 */
+                .requestMatchers("/api/v1/admin/auth/login").permitAll()
+
                 /* JWT 토큰 교환/갱신 (KMG 패턴: OAuth2 성공 후 /jwt/exchange 호출) */
                 .requestMatchers("/jwt/exchange", "/jwt/refresh").permitAll()
 
@@ -350,6 +354,16 @@ public class SecurityConfig {
              */
             .addFilterBefore(
                 new LoginFilter(authenticationManager, loginSuccessHandler),
+                UsernamePasswordAuthenticationFilter.class
+            )
+
+            /*
+             * 2-1. AdminLoginFilter → UsernamePasswordAuthenticationFilter 앞에 배치.
+             * POST /api/v1/admin/auth/login 전용. 인증 성공 후 ROLE_ADMIN 검증을 추가로 수행하여
+             * 일반 사용자(ROLE_USER)에게는 403을 반환하고 관리자 JWT 발급을 차단한다.
+             */
+            .addFilterBefore(
+                new AdminLoginFilter(authenticationManager, loginSuccessHandler),
                 UsernamePasswordAuthenticationFilter.class
             )
 

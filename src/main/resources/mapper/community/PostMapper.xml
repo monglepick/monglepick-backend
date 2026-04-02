@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    커뮤니티 게시글/댓글(posts, post_comment) Mapper XML.
+    테이블: posts, post_comment
+    담당: 이민수 (community 도메인)
+-->
+<mapper namespace="com.monglepick.monglepickbackend.domain.community.mapper.PostMapper">
+
+    <!-- ═══ ResultMap ═══ -->
+
+    <!-- 게시글 기본 매핑 -->
+    <resultMap id="postResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post">
+        <id property="postId" column="post_id"/>
+        <!-- user는 별도 association으로 매핑 -->
+        <result property="title" column="title"/>
+        <result property="content" column="content"/>
+        <result property="category" column="category"/>
+        <result property="viewCount" column="view_count"/>
+        <result property="status" column="status"/>
+        <result property="likeCount" column="like_count"/>
+        <result property="commentCount" column="comment_count"/>
+        <result property="isDeleted" column="is_deleted"/>
+        <result property="deletedAt" column="deleted_at"/>
+        <result property="isBlinded" column="is_blinded"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="updatedBy" column="updated_by"/>
+    </resultMap>
+
+    <!-- 게시글 + 작성자 JOIN 매핑 -->
+    <resultMap id="postWithUserResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post"
+               extends="postResultMap">
+        <association property="user" javaType="com.monglepick.monglepickbackend.domain.user.entity.User">
+            <id property="userId" column="user_id"/>
+            <result property="nickname" column="nickname"/>
+            <result property="profileImage" column="profile_image"/>
+            <result property="email" column="email"/>
+        </association>
+    </resultMap>
+
+    <!-- 댓글 매핑 -->
+    <resultMap id="commentResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.PostComment">
+        <id property="postCommentId" column="post_comment_id"/>
+        <result property="postId" column="post_id"/>
+        <result property="categoryId" column="category_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="parentCommentId" column="parent_comment_id"/>
+        <result property="content" column="content"/>
+        <result property="isDeleted" column="is_deleted"/>
+        <result property="likeCount" column="like_count"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <!-- ═══ Post SELECT ═══ -->
+
+    <!-- PK로 게시글 조회 -->
+    <select id="findById" resultMap="postResultMap">
+        SELECT p.post_id, p.user_id, p.title, p.content, p.category,
+               p.view_count, p.status, p.like_count, p.comment_count,
+               p.is_deleted, p.deleted_at, p.is_blinded,
+               p.created_at, p.updated_at, p.created_by, p.updated_by
+        FROM posts p
+        WHERE p.post_id = #{postId}
+    </select>
+
+    <!-- 게시글 + 작성자 JOIN 조회 (N+1 방지) -->
+    <select id="findByIdWithUser" resultMap="postWithUserResultMap">
+        SELECT p.post_id, p.title, p.content, p.category,
+               p.view_count, p.status, p.like_count, p.comment_count,
+               p.is_deleted, p.deleted_at, p.is_blinded,
+               p.created_at, p.updated_at, p.created_by, p.updated_by,
+               u.user_id, u.nickname, u.profile_image, u.email
+        FROM posts p
+        INNER JOIN users u ON p.user_id = u.user_id
+        WHERE p.post_id = #{postId}
+    </select>
+
+    <!-- 상태별 게시글 목록 + 작성자 (페이징) -->
+    <select id="findByStatusWithUser" resultMap="postWithUserResultMap">
+        SELECT p.post_id, p.title, p.content, p.category,
+               p.view_count, p.status, p.like_count, p.comment_count,
+               p.is_deleted, p.deleted_at, p.is_blinded,
+               p.created_at, p.updated_at, p.created_by, p.updated_by,
+               u.user_id, u.nickname, u.profile_image, u.email
+        FROM posts p
+        INNER JOIN users u ON p.user_id = u.user_id
+        WHERE p.status = #{status}
+          AND p.is_deleted = false
+        ORDER BY p.created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 카테고리 + 상태별 게시글 목록 + 작성자 (페이징) -->
+    <select id="findByCategoryAndStatusWithUser" resultMap="postWithUserResultMap">
+        SELECT p.post_id, p.title, p.content, p.category,
+               p.view_count, p.status, p.like_count, p.comment_count,
+               p.is_deleted, p.deleted_at, p.is_blinded,
+               p.created_at, p.updated_at, p.created_by, p.updated_by,
+               u.user_id, u.nickname, u.profile_image, u.email
+        FROM posts p
+        INNER JOIN users u ON p.user_id = u.user_id
+        WHERE p.category = #{category}
+          AND p.status = #{status}
+          AND p.is_deleted = false
+        ORDER BY p.created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 상태별 총 건수 -->
+    <select id="countByStatus" resultType="long">
+        SELECT COUNT(*)
+        FROM posts
+        WHERE status = #{status}
+          AND is_deleted = false
+    </select>
+
+    <!-- 카테고리 + 상태별 총 건수 -->
+    <select id="countByCategoryAndStatus" resultType="long">
+        SELECT COUNT(*)
+        FROM posts
+        WHERE category = #{category}
+          AND status = #{status}
+          AND is_deleted = false
+    </select>
+
+    <!-- 사용자 + 상태별 게시글 목록 (임시저장 목록, 마이페이지) -->
+    <select id="findByUserIdAndStatus" resultMap="postResultMap">
+        SELECT post_id, user_id, title, content, category,
+               view_count, status, like_count, comment_count,
+               is_deleted, deleted_at, is_blinded,
+               created_at, updated_at, created_by, updated_by
+        FROM posts
+        WHERE user_id = #{userId}
+          AND status = #{status}
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- ═══ Post INSERT / UPDATE / DELETE ═══ -->
+
+    <!-- 게시글 등록 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="postId">
+        INSERT INTO posts (
+            user_id, title, content, category, status,
+            view_count, like_count, comment_count,
+            is_deleted, is_blinded,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{user.userId}, #{title}, #{content}, #{category}, #{status},
+            0, 0, 0,
+            false, false,
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <!-- 게시글 수정 -->
+    <update id="update">
+        UPDATE posts
+        SET title      = #{title},
+            content    = #{content},
+            category   = #{category},
+            status     = #{status},
+            updated_at = NOW(),
+            updated_by = #{updatedBy}
+        WHERE post_id = #{postId}
+    </update>
+
+    <!-- 게시글 삭제 -->
+    <delete id="deleteById">
+        DELETE FROM posts
+        WHERE post_id = #{postId}
+    </delete>
+
+    <!-- 조회수 원자적 1 증가 -->
+    <update id="incrementViewCount">
+        UPDATE posts
+        SET view_count = view_count + 1
+        WHERE post_id = #{postId}
+    </update>
+
+    <!-- 좋아요 수 원자적 증가/감소 (delta: +1 또는 -1) -->
+    <update id="updateLikeCount">
+        UPDATE posts
+        SET like_count = GREATEST(like_count + #{delta}, 0)
+        WHERE post_id = #{postId}
+    </update>
+
+    <!-- 댓글 수 원자적 증가/감소 (delta: +1 또는 -1) -->
+    <update id="updateCommentCount">
+        UPDATE posts
+        SET comment_count = GREATEST(comment_count + #{delta}, 0)
+        WHERE post_id = #{postId}
+    </update>
+
+    <!-- ═══ PostComment ═══ -->
+
+    <!-- 게시글의 댓글 목록 (최신순) -->
+    <select id="findCommentsByPostId" resultMap="commentResultMap">
+        SELECT post_comment_id, post_id, category_id, user_id,
+               parent_comment_id, content, is_deleted, like_count,
+               created_at, updated_at
+        FROM post_comment
+        WHERE post_id = #{postId}
+        ORDER BY created_at ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 댓글 등록 -->
+    <insert id="insertComment" useGeneratedKeys="true" keyProperty="postCommentId">
+        INSERT INTO post_comment (
+            post_id, category_id, user_id, parent_comment_id,
+            content, is_deleted, like_count,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{postId}, #{categoryId}, #{userId}, #{parentCommentId},
+            #{content}, false, 0,
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <!-- 댓글 소프트 삭제 -->
+    <update id="softDeleteComment">
+        UPDATE post_comment
+        SET is_deleted = true,
+            updated_at = NOW()
+        WHERE post_comment_id = #{postCommentId}
+    </update>
+
+</mapper>

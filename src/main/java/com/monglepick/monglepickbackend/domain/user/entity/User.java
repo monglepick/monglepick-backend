@@ -162,6 +162,19 @@ public class User extends BaseAuditEntity {
         this.nickname = nickname;
     }
 
+    /**
+     * 사용자 역할 변경 (관리자 기능).
+     *
+     * <p>USER ↔ ADMIN 전환에 사용한다.
+     * Spring Security의 권한 체계가 userRole을 기반으로 동작하므로,
+     * 변경 즉시 해당 사용자의 다음 JWT 발급 시 새 역할이 반영된다.</p>
+     *
+     * @param newRole 새 역할 (USER, ADMIN)
+     */
+    public void updateUserRole(UserRole newRole) {
+        this.userRole = newRole;
+    }
+
     /** 프로필 이미지 변경 */
     public void updateProfileImage(String profileImage) {
         this.profileImage = profileImage;

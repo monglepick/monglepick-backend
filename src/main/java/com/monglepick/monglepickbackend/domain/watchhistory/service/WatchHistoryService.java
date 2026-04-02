@@ -94,12 +94,15 @@ public class WatchHistoryService {
                 ? request.watchedAt()
                 : LocalDateTime.now();
 
-        // 시청이력 엔티티 생성 및 저장
+        // 시청이력 엔티티 생성 및 저장 (Phase 2: watchSource, watchDurationSeconds, completionStatus 추가)
         WatchHistory watchHistory = WatchHistory.builder()
                 .user(user)
                 .movieId(request.movieId())
                 .watchedAt(watchedAt)
                 .rating(request.rating())
+                .watchSource(request.watchSource())
+                .watchDurationSeconds(request.watchDurationSeconds())
+                .completionStatus(request.completionStatus())
                 .build();
 
         WatchHistory saved = watchHistoryRepository.save(watchHistory);

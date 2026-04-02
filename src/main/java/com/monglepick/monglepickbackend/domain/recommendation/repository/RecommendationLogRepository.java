@@ -1,0 +1,72 @@
+package com.monglepick.monglepickbackend.domain.recommendation.repository;
+
+import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationLog;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.LocalDateTime;
+
+/**
+ * 추천 로그 JPA 리포지토리 — recommendation_log 테이블 데이터 접근.
+ *
+ * <p>AI Agent가 기록한 추천 이력의 조회 및 통계 집계를 지원한다.
+ * 관리자 통계 탭(추천 성과, 추천 로그 목록)에서 주로 사용된다.</p>
+ *
+ * <h3>주요 메서드</h3>
+ * <ul>
+ *   <li>{@link #countByCreatedAtAfter(LocalDateTime)} — 기간 내 추천 총 횟수</li>
+ *   <li>{@link #countByClickedTrueAndCreatedAtAfter(LocalDateTime)} — 기간 내 클릭 발생 횟수 (CTR 분자)</li>
+ *   <li>{@link #findAverageScoreAfter(LocalDateTime)} — 기간 내 평균 추천 점수</li>
+ *   <li>{@link #findAllWithMovieAndUser(Pageable)} — 추천 로그 목록 (N+1 방지, 페이징)</li>
+ * </ul>
+ */
+public interface RecommendationLogRepository extends JpaRepository<RecommendationLog, Long> {
+
+    /**
+     * 지정 시각 이후에 생성된 추천 로그 수를 집계한다.
+     *
+     * <p>관리자 통계에서 기간 내 총 추천 횟수(totalRecommendations)를 계산할 때 사용한다.</p>
+     *
+     * @param after 기준 시각 (이 시각 이후 레코드만 포함)
+     * @return 해당 기간 내 추천 총 횟수
+     */
+    long countByCreatedAtAfter(LocalDateTime after);
+
+    /**
+     * 지정 시각 이후 클릭이 발생한 추천 로그 수를 집계한다.
+     *
+     * <p>CTR(Click-Through Rate) 계산의 분자로 사용된다.
+     * CTR = countByClickedTrueAndCreatedAtAfter / countByCreatedAtAfter × 100</p>
+     *
+     * @param after 기준 시각
+     * @return 해당 기간 내 클릭 발생 추천 횟수
+     */
+    long countByClickedTrueAndCreatedAtAfter(LocalDateTime after);
+
+    /**
+     * 지정 시각 이후 추천 로그의 평균 추천 점수를 계산한다.
+     *
+     * <p>AVG 집계 쿼리. 레코드가 없으면 null을 반환한다.</p>
+     *
+     * @param after 기준 시각
+     * @return 평균 추천 점수 (레코드 없으면 null)
+     */
+    @Query("SELECT AVG(r.score) FROM RecommendationLog r WHERE r.createdAt > :after")
+    Double findAverageScoreAfter(@Param("after") LocalDateTime after);
+
+    /**
+     * 추천 로그 전체를 영화 및 사용자와 함께 페이징 조회한다 (N+1 방지).
+     *
+     * <p>관리자 추천 로그 목록 화면에서 사용한다.
+     * movie와 user를 JOIN FETCH하여 추가 쿼리를 방지한다.</p>
+     *
+     * @param pageable 페이징 정보
+     * @return 추천 로그 페이지
+     */
+    @Query(value = "SELECT r FROM RecommendationLog r JOIN FETCH r.movie JOIN FETCH r.user",
+           countQuery = "SELECT COUNT(r) FROM RecommendationLog r")
+    Page<RecommendationLog> findAllWithMovieAndUser(Pageable pageable);
+}

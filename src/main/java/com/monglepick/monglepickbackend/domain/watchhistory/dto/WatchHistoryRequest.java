@@ -43,6 +43,25 @@ public record WatchHistoryRequest(
          */
         @DecimalMin(value = "1.0", message = "평점은 1.0 이상이어야 합니다")
         @DecimalMax(value = "5.0", message = "평점은 5.0 이하여야 합니다")
-        Double rating
+        Double rating,
+
+        /**
+         * 시청 경로 (Phase 2) — null 허용.
+         * 예: "recommendation", "search", "wishlist", "home", "match", "direct"
+         */
+        @Size(max = 50, message = "시청 경로는 50자 이하여야 합니다")
+        String watchSource,
+
+        /**
+         * 시청 시간 (초 단위, Phase 2) — null이면 미측정.
+         */
+        Integer watchDurationSeconds,
+
+        /**
+         * 시청 완료 상태 (Phase 2) — null 허용.
+         * "COMPLETED", "ABANDONED", "IN_PROGRESS"
+         */
+        @Size(max = 30, message = "완료 상태는 30자 이하여야 합니다")
+        String completionStatus
 ) {
 }

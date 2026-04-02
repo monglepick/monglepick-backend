@@ -8,6 +8,7 @@ import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.domain.review.repository.ReviewRepository;
 import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -31,6 +32,7 @@ public class ReviewService {
 
     private final ReviewRepository reviewRepository;
     private final UserRepository userRepository;
+    private final RewardService rewardService;
 
     /**
      * 영화 리뷰를 작성합니다.
@@ -66,6 +68,10 @@ public class ReviewService {
         Review savedReview = reviewRepository.save(review);
         log.info("리뷰 작성 완료 - reviewId: {}, userId: {}, movieId: {}",
                 savedReview.getReviewId(), userId, movieId);  /* PK 필드명 변경: getId() → getReviewId() */
+
+        // 리워드 지급 — 같은 영화 리뷰 1회만 지급 (reference_id = "movie_{movieId}")
+        // RewardService 내부에서 중복 검사/정책 조회/포인트 지급을 모두 처리하므로 try-catch 불필요
+        rewardService.grantReward(userId, "REVIEW_CREATE", "movie_" + movieId, request.content().length());
 
         return ReviewResponse.from(savedReview);
     }
@@ -106,5 +112,9 @@ public class ReviewService {
 
         reviewRepository.delete(review);
         log.info("리뷰 삭제 완료 - reviewId: {}, userId: {}", reviewId, userId);
+
+        // 리워드 회수 — 리뷰 삭제 시 지급했던 포인트를 회수 (reference_id = "movie_{movieId}")
+        // RewardService 내부에서 지급 이력 조회/회수 처리를 모두 수행하므로 try-catch 불필요
+        rewardService.revokeReward(userId, "REVIEW_CREATE", "movie_" + review.getMovieId());
     }
 }

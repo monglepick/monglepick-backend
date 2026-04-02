@@ -107,4 +107,20 @@ public class PostComment extends BaseAuditEntity {
 
     /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
+
+    // ─────────────────────────────────────────────
+    // 도메인 메서드
+    // ─────────────────────────────────────────────
+
+    /**
+     * 댓글을 소프트 삭제한다.
+     *
+     * <p>is_deleted 플래그를 true로 변경하며, 실제 레코드는 DB에 남긴다.
+     * 프론트엔드에서는 "삭제된 댓글입니다"로 표시하고 content를 마스킹한다.</p>
+     *
+     * <p>설계서 §6.3.2: 댓글 삭제 시 리워드는 회수하지 않는다 (소액이므로 미회수 정책).</p>
+     */
+    public void softDelete() {
+        this.isDeleted = true;
+    }
 }

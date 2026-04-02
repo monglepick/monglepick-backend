@@ -103,6 +103,27 @@ spring:
     ## Open Session In View 비활성화 (성능 + LazyInitializationException 명시적 처리)
     open-in-view: false
 
+  ## -------------------------------------------------------------------------
+  ## MyBatis 설정 (프로젝트 기본 데이터 접근 계층)
+  ## -------------------------------------------------------------------------
+  ## 김민규/이민수 도메인은 MyBatis Mapper + XML로 SQL 직접 작성
+  ## 윤형주 도메인은 JPA Repository 사용 (위 JPA 설정 참조)
+
+mybatis:
+  ## Mapper XML 파일 위치 (도메인별 하위 디렉토리)
+  mapper-locations: classpath:mapper/**/*.xml
+  ## Entity/DTO 패키지 별칭 (XML에서 풀패키지명 대신 클래스명만 사용 가능)
+  type-aliases-package: com.monglepick.monglepickbackend.domain
+  configuration:
+    ## DB 컬럼 snake_case → Java 필드 camelCase 자동 변환
+    map-underscore-to-camel-case: true
+    ## null 파라미터의 JDBC 타입 (MySQL 호환)
+    jdbc-type-for-null: NULL
+    ## 기본 fetch 크기
+    default-fetch-size: 100
+    ## 쿼리 타임아웃 (30초)
+    default-statement-timeout: 30
+
 ## -------------------------------------------------------------------------
 ## Swagger/OpenAPI 설정
 ## -------------------------------------------------------------------------
@@ -185,6 +206,12 @@ app:
       monthly-limit: -1
       free-daily: 10
       max-input-length: 2000
+  ## 관리자 시드 계정 설정 (앱 기동 시 자동 생성)
+  ## ⚠ .env 파일에 ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NICKNAME 설정 필수
+  admin:
+    email: ${ADMIN_EMAIL}
+    password: ${ADMIN_PASSWORD}
+    nickname: ${ADMIN_NICKNAME}
   jwt:
     ## ⚠ 운영 환경에서는 반드시 JWT_SECRET 환경변수를 256비트 이상의 안전한 키로 설정해야 합니다
     secret: ${JWT_SECRET:monglepick-dev-jwt-secret-key-must-be-at-least-256-bits-long-for-hs256}

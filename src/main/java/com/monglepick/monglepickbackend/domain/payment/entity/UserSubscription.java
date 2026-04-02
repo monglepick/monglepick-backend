@@ -28,14 +28,22 @@ import java.time.LocalDateTime;
  *
  * <p>사용자의 구독 상태(활성/취소/만료)를 관리한다.
  * 한 사용자가 동시에 active 구독을 2개 이상 가질 수 없으며,
- * 이 제약은 서비스 레이어에서 검증한다.</p>
+ * 이 제약은 서비스 레이어에서 검증한다 (PESSIMISTIC_WRITE 락 사용).</p>
  *
- * <h3>변경 이력</h3>
+ * <h3>v3.0 변경 — AI 3-소스 모델</h3>
+ * <p>구독이 AI 쿼터를 직접 제공하도록 변경되었다.
+ * 월간 AI 보너스 풀(remaining_ai_bonus)을 관리하며, 매월 자동 리셋된다.</p>
  * <ul>
- *   <li>2026-03-24: BaseTimeEntity → BaseAuditEntity 변경 (created_by/updated_by 추가)</li>
- *   <li>2026-03-24: PK 필드명 subscriptionId → userSubscriptionId 로 변경, @Column(name = "user_subscription_id") 추가</li>
- *   <li>2026-03-24: FK 필드 plan의 @JoinColumn(name = "plan_id") → @JoinColumn(name = "subscription_plan_id") 변경</li>
+ *   <li>추가: {@code remainingAiBonus} — 이번 달 남은 AI 보너스 횟수</li>
+ *   <li>추가: {@code aiBonusReset} — 마지막 AI 보너스 리셋 날짜 (lazy reset 패턴)</li>
  * </ul>
+ *
+ * <h3>v3.0 AI 요청 처리에서의 역할</h3>
+ * <ol>
+ *   <li>grade.daily_ai_limit 초과 후 QuotaService가 이 엔티티의 remainingAiBonus를 확인</li>
+ *   <li>remainingAiBonus &gt; 0이면 {@link #consumeAiBonus()} 호출 → source="SUB_BONUS"</li>
+ *   <li>매월 첫 AI 요청 시 {@link #resetAiBonusIfNeeded(LocalDate, int)} 호출로 자동 리셋</li>
+ * </ol>
  *
  * <h3>상태 전이 (State Transition)</h3>
  * <pre>
@@ -44,6 +52,15 @@ import java.time.LocalDateTime;
  * CANCELLED ──→ (종료, 만료일까지 혜택 유지 후 자연 종료)
  * </pre>
  *
+ * <h3>변경 이력</h3>
+ * <ul>
+ *   <li>2026-03-24: BaseTimeEntity → BaseAuditEntity 변경 (created_by/updated_by 추가)</li>
+ *   <li>2026-03-24: PK 필드명 subscriptionId → userSubscriptionId 로 변경</li>
+ *   <li>2026-03-24: FK 필드 plan의 @JoinColumn(name="plan_id") → @JoinColumn(name="subscription_plan_id") 변경</li>
+ *   <li>2026-04-02 v3.0: remainingAiBonus/aiBonusReset 필드 추가.
+ *       initAiBonus()/resetAiBonusIfNeeded()/consumeAiBonus() 도메인 메서드 추가.</li>
+ * </ul>
+ *
  * <h3>주요 필드</h3>
  * <ul>
  *   <li>{@code userId} — 구독자 ID (FK → users.user_id)</li>
@@ -51,15 +68,10 @@ import java.time.LocalDateTime;
  *   <li>{@code status} — 구독 상태 (ACTIVE / CANCELLED / EXPIRED)</li>
  *   <li>{@code startedAt} — 구독 시작 시각</li>
  *   <li>{@code expiresAt} — 만료 예정 시각</li>
- *   <li>{@code cancelledAt} — 취소 시각 (nullable, 취소 시에만 기록)</li>
+ *   <li>{@code cancelledAt} — 취소 시각 (nullable)</li>
  *   <li>{@code autoRenew} — 자동 갱신 여부 (기본값: true)</li>
- * </ul>
- *
- * <h3>도메인 메서드</h3>
- * <ul>
- *   <li>{@link #cancel()} — 구독 취소 (상태 CANCELLED + 자동 갱신 중지)</li>
- *   <li>{@link #expire()} — 구독 만료 (상태 EXPIRED)</li>
- *   <li>{@link #renew(LocalDateTime)} — 구독 갱신 (만료일 연장 + 상태 ACTIVE)</li>
+ *   <li>{@code remainingAiBonus} — 이번 달 남은 AI 보너스 횟수 (v3.0 신규)</li>
+ *   <li>{@code aiBonusReset} — 마지막 AI 보너스 리셋 날짜 (v3.0 신규)</li>
  * </ul>
  *
  * @see SubscriptionPlan 구독 상품 마스터
@@ -111,7 +123,6 @@ public class UserSubscription extends BaseAuditEntity {
     /**
      * 구독 상품 (FK → subscription_plans.subscription_plan_id).
      * LAZY 로딩으로 N+1 쿼리를 방지한다.
-     * 기존 @JoinColumn(name = "plan_id") → @JoinColumn(name = "subscription_plan_id")로 변경.
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "subscription_plan_id", nullable = false)
@@ -183,6 +194,40 @@ public class UserSubscription extends BaseAuditEntity {
     private LocalDate nextBillingDate;
 
     // ──────────────────────────────────────────────
+    // v3.0 신규: AI 보너스 풀 관리
+    // ──────────────────────────────────────────────
+
+    /**
+     * 이번 달 남은 AI 보너스 횟수 (INT, NOT NULL, DEFAULT 0).
+     *
+     * <p>v3.0 신규 필드. 구독 활성화 시 {@code SubscriptionPlan.monthlyAiBonus} 값으로 초기화되며,
+     * 매월 첫 AI 요청 시 {@link #resetAiBonusIfNeeded(LocalDate, int)}로 자동 리셋된다.</p>
+     *
+     * <p>AI 요청 처리 순서:
+     * <ol>
+     *   <li>grade.daily_ai_limit 초과 후 이 값 확인</li>
+     *   <li>0보다 크면 {@link #consumeAiBonus()} 호출 → AI 허용 (source="SUB_BONUS")</li>
+     *   <li>0이면 구매 토큰(user_points.purchased_ai_tokens) 확인</li>
+     * </ol>
+     * </p>
+     */
+    @Column(name = "remaining_ai_bonus", nullable = false)
+    @Builder.Default
+    private Integer remainingAiBonus = 0;
+
+    /**
+     * 마지막 AI 보너스 리셋 날짜 (DATE, nullable).
+     *
+     * <p>v3.0 신규 필드. lazy reset 패턴: AI 요청 시 이 날짜의 월이 오늘과 다르면
+     * remainingAiBonus를 plan.monthlyAiBonus로 리셋한다.
+     * null이면 아직 한 번도 리셋되지 않은 상태 (구독 직후 상태).</p>
+     *
+     * <p>dailyReset과 동일한 패턴으로 동작하며, QuotaService에서 트랜잭션 내에서 호출된다.</p>
+     */
+    @Column(name = "ai_bonus_reset")
+    private LocalDate aiBonusReset;
+
+    // ──────────────────────────────────────────────
     // 도메인 메서드 (Lombok @Getter only, setter 대신 사용)
     // ──────────────────────────────────────────────
 
@@ -192,8 +237,6 @@ public class UserSubscription extends BaseAuditEntity {
      * <p>구독 상태를 {@code CANCELLED}로 변경하고, 자동 갱신을 중지하며,
      * 취소 시각을 현재 시각으로 기록한다.
      * 취소 후에도 만료일({@code expiresAt})까지 서비스 이용이 가능하다.</p>
-     *
-     * <p>이미 취소/만료된 구독에 대해 호출하면 {@link IllegalStateException}을 발생시킨다.</p>
      *
      * @throws IllegalStateException 이미 취소되었거나 만료된 구독인 경우
      */
@@ -240,6 +283,65 @@ public class UserSubscription extends BaseAuditEntity {
         }
         this.expiresAt = newExpiresAt;
         this.status = Status.ACTIVE;
+    }
+
+    // ──────────────────────────────────────────────
+    // v3.0 신규: AI 보너스 풀 도메인 메서드
+    // ──────────────────────────────────────────────
+
+    /**
+     * 구독 시작 시 AI 보너스 풀을 초기화한다.
+     *
+     * <p>구독 결제 완료 후 SubscriptionService에서 호출한다.
+     * plan.monthlyAiBonus 값으로 remainingAiBonus를 설정하고,
+     * aiBonusReset을 오늘 날짜로 기록한다.</p>
+     *
+     * @param monthlyAiBonus 구독 상품의 월간 AI 보너스 횟수 (plan.monthlyAiBonus)
+     */
+    public void initAiBonus(int monthlyAiBonus) {
+        this.remainingAiBonus = monthlyAiBonus;
+        this.aiBonusReset = LocalDate.now();
+    }
+
+    /**
+     * 월이 바뀐 경우 AI 보너스 풀을 리셋한다 (lazy reset 패턴).
+     *
+     * <p>QuotaService에서 AI 요청을 처리할 때 호출한다.
+     * aiBonusReset의 년/월이 today와 다르면 remainingAiBonus를 monthlyAiBonus로 초기화하고
+     * aiBonusReset을 today로 갱신한다. 이미 같은 월이면 아무 작업도 하지 않는다.</p>
+     *
+     * <p>주의: 이 메서드 호출 후 반드시 JPA dirty checking이 동작하는 트랜잭션 내에서
+     * 호출해야 변경 사항이 DB에 반영된다.</p>
+     *
+     * @param today          오늘 날짜
+     * @param monthlyAiBonus 리셋할 AI 보너스 횟수 (plan.monthlyAiBonus에서 전달)
+     */
+    public void resetAiBonusIfNeeded(LocalDate today, int monthlyAiBonus) {
+        // aiBonusReset이 null이거나 년/월이 다르면 리셋
+        if (this.aiBonusReset == null
+                || this.aiBonusReset.getYear() != today.getYear()
+                || this.aiBonusReset.getMonth() != today.getMonth()) {
+            this.remainingAiBonus = monthlyAiBonus;
+            this.aiBonusReset = today;
+        }
+    }
+
+    /**
+     * AI 보너스 풀에서 1회 차감한다.
+     *
+     * <p>QuotaService에서 source="SUB_BONUS"로 AI 요청을 허용할 때 호출한다.
+     * 음수 방지: remainingAiBonus가 0이면 false를 반환하며 차감하지 않는다.</p>
+     *
+     * <p>호출 전 반드시 {@link #resetAiBonusIfNeeded(LocalDate, int)}를 먼저 수행해야 한다.</p>
+     *
+     * @return 차감 성공 여부 (remainingAiBonus가 0이면 false)
+     */
+    public boolean consumeAiBonus() {
+        if (this.remainingAiBonus <= 0) {
+            return false; // 보너스 소진 — 다음 소스(구매 토큰)로 넘어가야 함
+        }
+        this.remainingAiBonus -= 1;
+        return true;
     }
 
     // ──────────────────────────────────────────────

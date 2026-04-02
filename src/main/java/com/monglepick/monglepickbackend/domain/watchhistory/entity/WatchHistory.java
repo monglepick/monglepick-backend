@@ -63,11 +63,39 @@ public class WatchHistory extends BaseAuditEntity {
     @Column
     private Double rating;
 
+    /**
+     * 시청 경로 (Phase 2).
+     * 사용자가 어떤 경로로 이 영화를 시청하게 되었는지 기록한다.
+     * 예: "recommendation"(AI 추천), "search"(검색), "wishlist"(찜목록),
+     *     "home"(홈 인기영화), "match"(무비매치), "direct"(직접 접근)
+     */
+    @Column(name = "watch_source", length = 50)
+    private String watchSource;
+
+    /**
+     * 실제 시청 시간 — 초 단위 (Phase 2).
+     * 클라이언트에서 측정하여 전달한다. null이면 미측정.
+     * 영화 runtime과 비교하여 completion_status 판정에 활용 가능.
+     */
+    @Column(name = "watch_duration_seconds")
+    private Integer watchDurationSeconds;
+
+    /**
+     * 시청 완료 상태 (Phase 2).
+     * COMPLETED(완료), ABANDONED(중도 포기), IN_PROGRESS(시청 중)
+     */
+    @Column(name = "completion_status", length = 30)
+    private String completionStatus;
+
     @Builder
-    public WatchHistory(User user, String movieId, LocalDateTime watchedAt, Double rating) {
+    public WatchHistory(User user, String movieId, LocalDateTime watchedAt, Double rating,
+                        String watchSource, Integer watchDurationSeconds, String completionStatus) {
         this.user = user;
         this.movieId = movieId;
         this.watchedAt = watchedAt;
         this.rating = rating;
+        this.watchSource = watchSource;
+        this.watchDurationSeconds = watchDurationSeconds;
+        this.completionStatus = completionStatus;
     }
 }

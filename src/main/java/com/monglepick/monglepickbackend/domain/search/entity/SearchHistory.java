@@ -83,4 +83,19 @@ public class SearchHistory extends BaseAuditEntity {
      */
     @Column(name = "searched_at")
     private LocalDateTime searchedAt;
+
+    // ─────────────────────────────────────────────
+    // 도메인 메서드 (setter 대신 의미 있는 메서드명 사용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 검색 시각을 현재 시각으로 갱신한다 (재검색 UPSERT 처리용).
+     *
+     * <p>동일 사용자가 같은 키워드를 다시 검색하면 새 레코드를 생성하는 대신
+     * 이 메서드로 searchedAt을 현재 시각으로 업데이트한다.
+     * (user_id, keyword) UNIQUE 제약을 애플리케이션 레벨에서 처리한다.</p>
+     */
+    public void updateSearchedAt() {
+        this.searchedAt = LocalDateTime.now();
+    }
 }

@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.support.service;
 
+import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.FaqFeedbackRequest;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.FaqResponse;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.HelpArticleResponse;
@@ -51,6 +52,9 @@ public class SupportService {
     private final SupportTicketRepository ticketRepository;
     private final SupportFaqFeedbackRepository faqFeedbackRepository;
     private final UserRepository userRepository;
+
+    /** 활동 리워드 서비스 — FAQ 피드백(FAQ_FEEDBACK), 티켓 생성(TICKET_CREATE) 리워드 지급 위임 */
+    private final RewardService rewardService;
 
     // ─────────────────────────────────────────────
     // FAQ
@@ -121,6 +125,14 @@ public class SupportService {
         }
 
         log.info("[Support] FAQ 피드백 제출: faqId={}, userId={}, helpful={}", faqId, userId, request.helpful());
+
+        /*
+         * FAQ 피드백 활동 리워드 지급 (FAQ_FEEDBACK).
+         * RewardService REQUIRES_NEW + 내부 try-catch로 동작하므로
+         * 리워드 실패가 피드백 저장 트랜잭션에 영향을 주지 않는다.
+         * referenceId: "faq_{faqId}" — 동일 FAQ 중복 지급 방지 키로 사용.
+         */
+        rewardService.grantReward(userId, "FAQ_FEEDBACK", "faq_" + faqId, 0);
     }
 
     // ─────────────────────────────────────────────
@@ -189,6 +201,14 @@ public class SupportService {
 
         log.info("[Support] 상담 티켓 생성: ticketId={}, userId={}, category={}",
                 ticket.getTicketId(), userId, category);
+
+        /*
+         * 티켓 생성 활동 리워드 지급 (TICKET_CREATE).
+         * RewardService REQUIRES_NEW + 내부 try-catch로 동작하므로
+         * 리워드 실패가 티켓 저장 트랜잭션에 영향을 주지 않는다.
+         * referenceId: "ticket_{ticketId}" — 티켓 단위 중복 지급 방지 키로 사용.
+         */
+        rewardService.grantReward(userId, "TICKET_CREATE", "ticket_" + ticket.getTicketId(), 0);
 
         return TicketResponse.from(ticket);
     }

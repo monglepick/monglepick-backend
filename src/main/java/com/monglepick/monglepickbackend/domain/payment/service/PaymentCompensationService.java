@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 /**
  * 결제 보상(Compensation) 트랜잭션 전담 서비스.
  *
@@ -71,6 +73,17 @@ public class PaymentCompensationService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordCompensationFailed(PaymentOrder order, String compensationMsg) {
         try {
+            // ── 관리자 즉시 알림 (설계서 §13.8) ──
+            // COMPENSATION_FAILED는 사용자 카드가 청구됐으나 포인트가 미지급된 위험 상태이다.
+            // 현재는 ERROR 로그로 알림하며, 향후 Slack/PagerDuty 연동 시 이 위치에 구현한다.
+            // 모니터링 시스템(Grafana/Loki)에서 "[COMPENSATION_FAILED]" 패턴으로 알람 설정 권장.
+            log.error("[COMPENSATION_FAILED] 즉시 관리자 확인 필요! " +
+                            "orderId={}, userId={}, amount={}원, 시각={}",
+                    order.getPaymentOrderId(),
+                    order.getUserId(),
+                    order.getAmount(),
+                    LocalDateTime.now());
+
             // COMPENSATION_FAILED 상태로 변경 (도메인 메서드: failedReason 기록 포함)
             order.markCompensationFailed(compensationMsg);
 

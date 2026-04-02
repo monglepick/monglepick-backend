@@ -1,9 +1,11 @@
 package com.monglepick.monglepickbackend.domain.payment.repository;
 
 import com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -81,6 +83,50 @@ public interface UserSubscriptionRepository extends JpaRepository<UserSubscripti
      * @return 구독 이력 목록 (최신순 정렬)
      */
     List<UserSubscription> findByUserIdOrderByCreatedAtDesc(String userId);
+
+    /**
+     * 특정 상태의 구독 수를 카운트한다.
+     *
+     * <p>관리자 대시보드 KPI 카드에서 현재 활성 구독 수를 집계할 때 사용한다.
+     * {@code Status.ACTIVE}를 전달하면 현재 유효한 구독 건수를 반환한다.</p>
+     *
+     * @param status 구독 상태 (ACTIVE / CANCELLED / EXPIRED)
+     * @return 해당 상태의 구독 수
+     */
+    long countByStatus(UserSubscription.Status status);
+
+    /**
+     * 특정 사용자의 특정 상태 구독을 비관적 쓰기 락으로 조회한다 (동시 결제 중복 구독 방지).
+     *
+     * <p>동일 사용자가 여러 탭/기기에서 동시에 구독 결제를 완료하면,
+     * {@link #findByUserIdAndStatus(String, UserSubscription.Status)} 단순 조회로는
+     * 두 트랜잭션 모두 "ACTIVE 구독 없음"을 읽고 각각 구독을 생성하는
+     * TOCTOU(Time-Of-Check-To-Time-Of-Use) 경쟁 조건이 발생한다.
+     * {@code SELECT FOR UPDATE}를 사용하면 첫 번째 트랜잭션이 잠금을 획득하고,
+     * 두 번째 트랜잭션은 첫 번째가 커밋/롤백될 때까지 대기한 후 진입 시점에
+     * 이미 ACTIVE 구독이 존재함을 확인하여 중복 생성을 차단한다.</p>
+     *
+     * <h4>사용 위치</h4>
+     * <p>{@link com.monglepick.monglepickbackend.domain.payment.service.SubscriptionService#createSubscription}
+     * — 중복 구독 방지 체크에서 이 메서드를 사용한다.
+     * 반드시 {@code @Transactional} 메서드 내에서 호출해야 한다.
+     * 트랜잭션 밖에서 호출하면 잠금이 즉시 해제되어 방어 효과가 없다.</p>
+     *
+     * <h4>SQL 동치</h4>
+     * <pre>
+     * SELECT * FROM user_subscriptions
+     * WHERE user_id = :userId AND status = :status
+     * FOR UPDATE
+     * </pre>
+     *
+     * @param userId 사용자 ID
+     * @param status 구독 상태 (주로 {@code Status.ACTIVE})
+     * @return 해당 상태의 구독 (존재하지 않으면 empty) — 조회 기간 동안 행 잠금 유지
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM UserSubscription s WHERE s.userId = :userId AND s.status = :status")
+    Optional<UserSubscription> findByUserIdAndStatusForUpdate(
+            @Param("userId") String userId, @Param("status") UserSubscription.Status status);
 
     /**
      * 사용자의 특정 상태 구독을 plan과 함께 조회한다 (N+1 방지).

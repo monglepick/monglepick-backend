@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    Refresh Token 화이트리스트 Mapper XML.
+    테이블: refresh_tokens
+    담당: 김민규 (auth 도메인)
+-->
+<mapper namespace="com.monglepick.monglepickbackend.domain.auth.mapper.RefreshMapper">
+
+    <!-- ═══ ResultMap ═══ -->
+    <resultMap id="refreshResultMap" type="com.monglepick.monglepickbackend.domain.auth.entity.RefreshEntity">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="refreshToken" column="refresh_token"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <!-- ═══ SELECT ═══ -->
+
+    <!-- PK로 조회 -->
+    <select id="findById" resultMap="refreshResultMap">
+        SELECT id, user_id, refresh_token, created_at
+        FROM refresh_tokens
+        WHERE id = #{id}
+    </select>
+
+    <!-- 토큰 존재 여부 확인 (화이트리스트 검증) -->
+    <select id="existsByRefreshToken" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM refresh_tokens
+        WHERE refresh_token = #{refreshToken}
+    </select>
+
+    <!-- ═══ INSERT ═══ -->
+
+    <!-- 새 Refresh Token 저장 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO refresh_tokens (user_id, refresh_token, created_at)
+        VALUES (#{userId}, #{refreshToken}, NOW())
+    </insert>
+
+    <!-- ═══ DELETE ═══ -->
+
+    <!-- 특정 토큰 삭제 (Rotation 시 기존 토큰 무효화) -->
+    <delete id="deleteByRefreshToken">
+        DELETE FROM refresh_tokens
+        WHERE refresh_token = #{refreshToken}
+    </delete>
+
+    <!-- 사용자의 모든 토큰 삭제 (전체 로그아웃) -->
+    <delete id="deleteByUserId">
+        DELETE FROM refresh_tokens
+        WHERE user_id = #{userId}
+    </delete>
+
+</mapper>

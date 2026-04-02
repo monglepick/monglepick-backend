@@ -4,7 +4,14 @@ import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import jakarta.persistence.LockModeType;
+
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -23,6 +30,10 @@ import java.util.Optional;
  * <ul>
  *   <li>{@link #findByPaymentOrderId(String)} — 주문 UUID로 조회 (PG 결제 확인 콜백에서 사용)</li>
  *   <li>{@link #findByUserIdOrderByCreatedAtDesc(String, Pageable)} — 사용자 결제 이력 (페이징)</li>
+ *   <li>{@link #sumAmountByStatusAndCreatedAtBetween} — 기간 내 완료 결제 금액 합계 (매출 통계)</li>
+ *   <li>{@link #countByStatusAndCreatedAtBetween} — 기간 내 결제 건수 집계 (ARPU 계산용)</li>
+ *   <li>{@link #sumAmountByStatusAndCreatedAtAfter} — 기준 시각 이후 누적 매출 (MRR 계산용)</li>
+ *   <li>{@link #findDistinctPayerCountAfter} — 기간 내 결제 고유 사용자 수 (ARPU 분모)</li>
  * </ul>
  *
  * @see PaymentOrder 결제 주문 엔티티
@@ -69,4 +80,160 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, Stri
      * @return 기존 주문 (없으면 empty)
      */
     Optional<PaymentOrder> findByIdempotencyKey(String idempotencyKey);
+
+    /**
+     * 주문 UUID로 결제 주문을 비관적 쓰기 잠금(SELECT ... FOR UPDATE)으로 조회한다.
+     *
+     * <h4>사용 목적</h4>
+     * <p>2-Phase 결제 승인의 Phase 2 시작 시점에 사용한다.
+     * Toss API 호출 이후 DB 상태 변경 직전에 동일 주문에 대한 동시 처리(중복 새로고침,
+     * 중복 탭 결제 등)를 DB 레벨에서 완전히 차단한다.</p>
+     *
+     * <h4>2-Phase 분리 흐름에서의 역할</h4>
+     * <ol>
+     *   <li>Phase 1: 트랜잭션 없음 — Toss API 호출 (DB 커넥션 미점유)</li>
+     *   <li>Phase 2: {@code @Transactional} 시작 → 이 메서드로 FOR UPDATE 잠금 획득
+     *       → 상태 변경 → 커밋 시 잠금 해제</li>
+     * </ol>
+     *
+     * <h4>왜 FOR UPDATE인가?</h4>
+     * <p>Phase 1과 Phase 2 사이에 동일 orderId로 중복 요청이 도달할 수 있다.
+     * FOR UPDATE 없이 단순 조회 후 PENDING 검증만 하면 두 요청이 모두 PENDING을 읽고
+     * 각각 처리에 진입하는 TOCTOU(Time-of-Check-Time-of-Use) 경쟁이 발생한다.
+     * FOR UPDATE는 첫 번째 요청이 커밋하기 전까지 두 번째 요청을 대기시켜
+     * 한 요청만 처리하고 나머지는 COMPLETED 상태를 보고 멱등 응답을 반환하도록 강제한다.</p>
+     *
+     * <h4>주의사항</h4>
+     * <p>반드시 {@code @Transactional} 컨텍스트 내부에서 호출해야 한다.
+     * 트랜잭션 외부에서 호출하면 잠금이 즉시 해제되어 의미가 없다.</p>
+     *
+     * @param orderId 주문 UUID
+     * @return 잠금이 걸린 결제 주문 (없으면 empty)
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM PaymentOrder p WHERE p.paymentOrderId = :orderId")
+    Optional<PaymentOrder> findByPaymentOrderIdForUpdate(@Param("orderId") String orderId);
+
+    /**
+     * 특정 상태와 생성 시각 범위에 해당하는 결제 주문의 금액 합계를 조회한다.
+     *
+     * <p>관리자 대시보드 KPI 카드 및 추이 차트에서 일별 결제 금액 집계에 사용된다.
+     * 결제가 없는 경우 SUM이 NULL을 반환하므로 서비스 레이어에서 null 처리가 필요하다.</p>
+     *
+     * <p>예시: 오늘 COMPLETED 결제 금액 합계</p>
+     * <pre>
+     * Long total = repository.sumAmountByStatusAndCreatedAtBetween(
+     *     PaymentOrder.OrderStatus.COMPLETED, todayStart, todayEnd);
+     * long safeTotal = total != null ? total : 0L;
+     * </pre>
+     *
+     * @param status 주문 상태 (주로 COMPLETED)
+     * @param start  범위 시작 시각 (inclusive)
+     * @param end    범위 종료 시각 (exclusive)
+     * @return 해당 범위의 금액 합계 (결제가 없으면 null)
+     */
+    @Query("SELECT SUM(p.amount) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt >= :start AND p.createdAt < :end")
+    Long sumAmountByStatusAndCreatedAtBetween(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
+
+    /**
+     * 생성 시각 기준 최신 순으로 결제 주문 목록을 페이징 조회한다.
+     *
+     * <p>관리자 대시보드 최근 활동 피드에서 최근 결제 내역 N건을 조회할 때 사용한다.
+     * Pageable의 size로 반환 건수를 제어한다 (예: PageRequest.of(0, 20)).</p>
+     *
+     * @param pageable 페이지 정보 (page=0, size=N 으로 상위 N건 조회)
+     * @return 최신순 결제 주문 목록
+     */
+    @Query("SELECT p FROM PaymentOrder p ORDER BY p.createdAt DESC")
+    List<PaymentOrder> findTopByOrderByCreatedAtDesc(Pageable pageable);
+
+    /**
+     * 지정된 상태와 기간 내 결제 건수를 집계한다.
+     *
+     * <p>관리자 통계 탭의 ARPU(Average Revenue Per User) 계산 및
+     * 기간별 결제 건수 추이에 사용된다.</p>
+     *
+     * @param status 주문 상태 (주로 COMPLETED)
+     * @param start  범위 시작 시각 (inclusive)
+     * @param end    범위 종료 시각 (exclusive)
+     * @return 해당 범위의 결제 건수
+     */
+    long countByStatusAndCreatedAtBetween(
+            PaymentOrder.OrderStatus status,
+            LocalDateTime start,
+            LocalDateTime end);
+
+    /**
+     * 지정 시각 이후 특정 상태 결제의 금액 합계를 반환한다.
+     *
+     * <p>MRR(Monthly Recurring Revenue) 계산에서 이번 달 1일 이후의
+     * COMPLETED 결제 합계를 구할 때 사용한다.</p>
+     *
+     * @param status 주문 상태 (주로 COMPLETED)
+     * @param after  기준 시각 (이 시각 이후 레코드만 포함)
+     * @return 해당 기간 금액 합계 (레코드 없으면 null)
+     */
+    @Query("SELECT SUM(p.amount) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt > :after")
+    Long sumAmountByStatusAndCreatedAtAfter(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("after") LocalDateTime after);
+
+    /**
+     * 지정 시각 이후 특정 상태로 결제한 고유 사용자 수를 반환한다.
+     *
+     * <p>ARPU = 총 매출 / 결제 고유 사용자 수 계산에서 분모로 사용된다.
+     * DISTINCT COUNT로 동일 사용자의 중복 결제를 1명으로 처리한다.</p>
+     *
+     * @param status 주문 상태 (주로 COMPLETED)
+     * @param after  기준 시각
+     * @return 해당 기간 내 결제한 고유 사용자 수
+     */
+    @Query("SELECT COUNT(DISTINCT p.userId) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt > :after")
+    long findDistinctPayerCountAfter(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("after") LocalDateTime after);
+
+    /**
+     * 지정된 상태이면서 생성 시각이 기준 시각 이전인 주문 목록을 조회한다.
+     *
+     * <p>PENDING 주문 자동 정리 스케줄러({@code PaymentSchedulerService#cleanupExpiredPendingOrders})
+     * 에서 30분 이상 방치된 PENDING 주문을 찾아 FAILED 처리할 때 사용한다.</p>
+     *
+     * <p>예시: 30분 이상 경과한 PENDING 주문 조회</p>
+     * <pre>
+     * LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+     * List&lt;PaymentOrder&gt; expired = repository.findByStatusAndCreatedAtBefore(
+     *     PaymentOrder.OrderStatus.PENDING, cutoff);
+     * </pre>
+     *
+     * @param status  주문 상태 (주로 PENDING)
+     * @param cutoff  기준 시각 — 이 시각 이전에 생성된 주문만 반환
+     * @return 기준 시각 이전에 생성된 지정 상태 주문 목록
+     */
+    List<PaymentOrder> findByStatusAndCreatedAtBefore(
+            PaymentOrder.OrderStatus status,
+            LocalDateTime cutoff);
+
+    /**
+     * 기간 내 결제 수단(pgProvider)별 금액 합계를 조회한다.
+     *
+     * <p>관리자 통계 탭의 결제 수단 분포(PaymentMethodDistribution) 계산에 사용된다.
+     * 반환값은 [pgProvider, totalAmount] 형태의 Object 배열 리스트다.</p>
+     *
+     * @param status 주문 상태 (주로 COMPLETED)
+     * @param after  기준 시각
+     * @return [pgProvider (String), totalAmount (Long)] 형태의 Object[] 리스트
+     */
+    @Query("SELECT p.pgProvider, SUM(p.amount) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt > :after " +
+           "GROUP BY p.pgProvider")
+    List<Object[]> sumAmountGroupByProviderAfter(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("after") LocalDateTime after);
 }

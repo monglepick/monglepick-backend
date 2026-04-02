@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 /**
  * 게시글 JPA 리포지토리
  *
@@ -47,4 +49,27 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     @Transactional
     @Query("UPDATE Post p SET p.viewCount = p.viewCount + 1 WHERE p.postId = :postId")
     void incrementViewCount(@Param("postId") Long postId);
+
+    /**
+     * 특정 상태 + 생성 시각 범위에 해당하는 게시글 수를 카운트한다.
+     *
+     * <p>관리자 통계 탭에서 일별 신규 게시글 수 집계에 사용된다.
+     * PUBLISHED 상태만 집계하여 임시저장 글을 제외할 수 있다.</p>
+     *
+     * @param status 게시글 상태 (DRAFT / PUBLISHED)
+     * @param start  범위 시작 시각 (inclusive)
+     * @param end    범위 종료 시각 (exclusive)
+     * @return 해당 상태 + 범위 내 게시글 수
+     */
+    long countByStatusAndCreatedAtBetween(PostStatus status, LocalDateTime start, LocalDateTime end);
+
+    /**
+     * 특정 상태의 전체 게시글 수를 카운트한다.
+     *
+     * <p>관리자 통계 탭 KPI 카드의 "전체 게시글 수(PUBLISHED)" 집계에 사용된다.</p>
+     *
+     * @param status 게시글 상태 (DRAFT / PUBLISHED)
+     * @return 해당 상태의 전체 게시글 수
+     */
+    long countByStatus(PostStatus status);
 }

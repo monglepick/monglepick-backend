@@ -164,9 +164,16 @@ public class SubscriptionService {
     public void createSubscription(String userId, SubscriptionPlan plan) {
         log.info("구독 생성 시작: userId={}, planCode={}", userId, plan.getPlanCode());
 
-        // 1. 기존 활성 구독 확인 (중복 방지)
-        if (subscriptionRepository.findByUserIdAndStatus(userId, UserSubscription.Status.ACTIVE).isPresent()) {
-            log.warn("중복 구독 시도 차단: userId={}", userId);
+        // 1. 기존 활성 구독 확인 (중복 방지 — PESSIMISTIC_WRITE 비관적 락)
+        //
+        // 단순 findByUserIdAndStatus() 대신 FOR UPDATE 잠금 쿼리를 사용한다.
+        // 동일 사용자가 여러 탭/기기에서 동시에 구독 결제를 완료하면
+        // TOCTOU 경쟁 조건으로 두 트랜잭션 모두 "ACTIVE 없음"을 읽고
+        // 2개의 ACTIVE 구독이 생성되는 문제가 발생한다.
+        // FOR UPDATE 잠금으로 첫 번째 트랜잭션이 커밋될 때까지
+        // 후속 트랜잭션의 진입을 DB 레벨에서 차단한다.
+        if (subscriptionRepository.findByUserIdAndStatusForUpdate(userId, UserSubscription.Status.ACTIVE).isPresent()) {
+            log.warn("중복 구독 시도 차단 (FOR UPDATE 잠금): userId={}", userId);
             throw new BusinessException(ErrorCode.ACTIVE_SUBSCRIPTION_EXISTS);
         }
 

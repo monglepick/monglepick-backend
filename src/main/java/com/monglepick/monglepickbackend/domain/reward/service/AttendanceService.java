@@ -2,8 +2,9 @@ package com.monglepick.monglepickbackend.domain.reward.service;
 
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.AttendanceResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.AttendanceStatusResponse;
-import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.EarnResponse;
+import com.monglepick.monglepickbackend.domain.reward.entity.UserActivityProgress;
 import com.monglepick.monglepickbackend.domain.reward.entity.UserAttendance;
+import com.monglepick.monglepickbackend.domain.reward.repository.UserActivityProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserAttendanceRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
@@ -17,18 +18,20 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 출석 체크 서비스 — 일일 출석, 연속 출석(streak), 보너스 포인트 지급 비즈니스 로직.
+ * 출석 체크 서비스 — 일일 출석, 연속 출석(streak), 리워드 포인트 지급 비즈니스 로직.
  *
- * <p>사용자가 매일 출석 체크를 수행하면 기본 포인트를 지급하고,
- * 연속 출석일(streak)에 따라 추가 보너스를 지급한다.</p>
+ * <p>사용자가 매일 출석 체크를 수행하면 {@link RewardService#grantReward}를 통해
+ * {@code reward_policy} 정책 기반으로 포인트를 지급한다.
+ * 포인트 금액·한도·등급 배율·연속 마일스톤(streak) 보상은 모두 정책 테이블에서 관리된다.</p>
  *
- * <h3>보너스 포인트 정책</h3>
- * <table>
- *   <tr><th>연속 출석일</th><th>지급 포인트</th><th>설명</th></tr>
- *   <tr><td>1~6일</td><td>10P</td><td>기본 출석 보상</td></tr>
- *   <tr><td>7~29일</td><td>30P</td><td>기본 10P + 7일 연속 보너스 20P</td></tr>
- *   <tr><td>30일 이상</td><td>60P</td><td>기본 10P + 30일 연속 보너스 50P</td></tr>
- * </table>
+ * <h3>리워드 연동 흐름</h3>
+ * <ol>
+ *   <li>{@code user_attendance} INSERT + streak 계산</li>
+ *   <li>{@code UserActivityProgress.updateStreak(today)} — streak 필드 갱신
+ *       (grantReward 내부의 threshold 판정이 갱신된 값을 읽어야 하므로 먼저 호출)</li>
+ *   <li>{@code rewardService.grantReward(userId, "ATTENDANCE_BASE", "date_" + today, 0)}
+ *       — 기본 출석 포인트 + 7/15/30일 연속 마일스톤 보너스 + 등급 배율 자동 처리</li>
+ * </ol>
  *
  * <h3>연속 출석(streak) 계산 규칙</h3>
  * <ul>
@@ -40,11 +43,13 @@ import java.util.Optional;
  * <h3>트랜잭션 전략</h3>
  * <ul>
  *   <li>클래스 레벨: {@code @Transactional(readOnly = true)} — 기본 읽기 전용</li>
- *   <li>{@link #checkIn}: 개별 {@code @Transactional} — 쓰기 트랜잭션 (출석 저장 + 포인트 지급)</li>
+ *   <li>{@link #checkIn}: 개별 {@code @Transactional} — 쓰기 트랜잭션 (출석 저장 + streak 갱신)</li>
+ *   <li>{@code RewardService.grantReward()} 는 {@code REQUIRES_NEW}로 별도 트랜잭션 수행</li>
  * </ul>
  *
  * @see UserAttendanceRepository
- * @see PointService#earnPoint(String, int, String, String, String)
+ * @see RewardService#grantReward(String, String, String, int)
+ * @see UserActivityProgressRepository
  */
 @Service
 @Slf4j
@@ -55,53 +60,52 @@ public class AttendanceService {
     /** 출석 체크 리포지토리 (출석 기록 조회/저장) */
     private final UserAttendanceRepository attendanceRepository;
 
-    /** 포인트 서비스 (출석 보상 포인트 지급) */
-    private final PointService pointService;
+    /**
+     * 리워드 서비스 — ATTENDANCE_BASE 정책 기반 포인트 지급 + streak 마일스톤 보너스 위임.
+     *
+     * <p>기존 하드코딩 방식(10P/30P/60P 직접 지급)을 대체한다.
+     * 포인트 금액·한도·등급 배율·threshold 보너스는 reward_policy 테이블에서 관리된다.</p>
+     */
+    private final RewardService rewardService;
 
-    // ──────────────────────────────────────────────
-    // 보너스 포인트 상수 정의
-    // ──────────────────────────────────────────────
-
-    /** 기본 출석 보상 포인트 (1~6일 연속) */
-    private static final int BASE_POINT = 10;
-
-    /** 7일 연속 출석 보상 포인트 (기본 10P + 보너스 20P = 30P) */
-    private static final int STREAK_7_POINT = 30;
-
-    /** 30일 연속 출석 보상 포인트 (기본 10P + 보너스 50P = 60P) */
-    private static final int STREAK_30_POINT = 60;
-
-    /** 7일 연속 보너스 적용 기준 일수 */
-    private static final int STREAK_7_THRESHOLD = 7;
-
-    /** 30일 연속 보너스 적용 기준 일수 */
-    private static final int STREAK_30_THRESHOLD = 30;
+    /**
+     * 유저 활동 진행률 리포지토리 — ATTENDANCE_BASE progress의 streak 갱신에 사용.
+     *
+     * <p>{@code grantReward()} 내부의 threshold 판정이 갱신된 streak을 읽어야 하므로
+     * {@code grantReward()} 호출 전에 {@code updateStreak(today)}를 먼저 수행한다.</p>
+     */
+    private final UserActivityProgressRepository progressRepo;
 
     // ──────────────────────────────────────────────
     // 출석 체크 (쓰기 트랜잭션)
     // ──────────────────────────────────────────────
 
     /**
-     * 오늘의 출석 체크를 수행하고 보너스 포인트를 지급한다.
+     * 오늘의 출석 체크를 수행하고 리워드 포인트를 지급한다.
      *
      * <p>처리 순서:</p>
      * <ol>
      *   <li>오늘 이미 출석했는지 확인 (중복 방지)</li>
      *   <li>가장 최근 출석 기록으로 연속 출석일(streak) 계산</li>
-     *   <li>출석 기록 저장 (user_attendance INSERT)</li>
-     *   <li>streak에 따른 보너스 포인트 계산 및 지급 (PointService.earnPoint 호출)</li>
+     *   <li>출석 기록 저장 ({@code user_attendance} INSERT)</li>
+     *   <li>{@code UserActivityProgress.updateStreak(today)} 호출
+     *       — grantReward 내부 threshold 판정이 갱신 값을 읽기 위해 먼저 수행</li>
+     *   <li>{@code rewardService.grantReward(userId, "ATTENDANCE_BASE", "date_" + today, 0)} 호출
+     *       — 기본 출석 포인트 + streak 마일스톤 보너스 + 등급 배율 자동 처리</li>
      * </ol>
      *
      * <h4>예외 상황</h4>
      * <ul>
      *   <li>오늘 이미 출석 → {@link BusinessException}(ALREADY_ATTENDED, 409 Conflict)</li>
-     *   <li>포인트 레코드 없음 → {@link BusinessException}(POINT_NOT_FOUND, 404 Not Found)
-     *       — PointService에서 발생</li>
      * </ul>
      *
+     * <h4>포인트 지급 방식 변경</h4>
+     * <p>기존 하드코딩(1~6일=10P, 7~29일=30P, 30일+=60P)은 {@code reward_policy} 정책으로 대체.
+     * 이중 지급 방지를 위해 {@code pointService.earnPoint()} 직접 호출 코드는 제거됨.</p>
+     *
      * @param userId 사용자 ID
-     * @return 출석 결과 (출석일, 연속일수, 획득 포인트, 잔액)
-     * @throws BusinessException 이미 출석한 경우 또는 포인트 레코드 없음
+     * @return 출석 결과 (출석일, 연속일수, 획득 포인트 0·잔액 0 — 실제 금액은 RewardService가 처리)
+     * @throws BusinessException 이미 출석한 경우
      */
     @Transactional
     public AttendanceResponse checkIn(String userId) {
@@ -138,21 +142,34 @@ public class AttendanceService {
         attendanceRepository.save(attendance);
         log.debug("출석 기록 저장 완료: userId={}, date={}, streak={}", userId, today, streak);
 
-        // 4. 보너스 포인트 계산 및 지급
-        int bonus = calculateBonus(streak);
-        EarnResponse earnResult = pointService.earnPoint(
-                userId,
-                bonus,
-                "earn",
-                "출석 체크 보상 (연속 " + streak + "일)",
-                "attendance-" + today
-        );
+        // 4. UserActivityProgress의 ATTENDANCE_BASE streak 갱신
+        //    grantReward() 내부에서 threshold(7일/15일/30일) 판정 시 갱신된 streak을 읽어야 하므로
+        //    반드시 grantReward() 호출 전에 수행한다.
+        //    첫 출석인 경우 progress 레코드가 없을 수 있으며, 이때는 grantReward가 신규 생성하므로 무시한다.
+        Optional<UserActivityProgress> progressOpt =
+                progressRepo.findByUserIdAndActionType(userId, "ATTENDANCE_BASE");
+        if (progressOpt.isPresent()) {
+            progressOpt.get().updateStreak(today);
+            log.debug("ATTENDANCE_BASE streak 갱신 완료: userId={}, streak={}", userId, streak);
+        } else {
+            log.debug("ATTENDANCE_BASE progress 레코드 미존재, grantReward에서 신규 생성 예정: userId={}", userId);
+        }
 
-        log.info("출석 체크 완료: userId={}, streak={}, bonus={}P, balance={}",
-                userId, streak, bonus, earnResult.balanceAfter());
+        // 5. 리워드 서비스 연동 — ATTENDANCE_BASE 정책 기반 포인트 지급
+        //    - 기본 출석 포인트 (reward_policy.points_amount)
+        //    - streak 마일스톤 보너스 (7일/15일/30일 threshold 달성 시 연쇄 지급)
+        //    - 등급 배율 자동 적용 (BRONZE=1.0x ~ PLATINUM=2.0x)
+        //    - referenceId: "date_YYYY-MM-DD" 형식으로 날짜별 중복 방지
+        //    ※ 기존 pointService.earnPoint() 직접 호출(하드코딩 10P/30P/60P)은
+        //      이중 지급 방지를 위해 제거하고 이 한 줄로 대체한다.
+        rewardService.grantReward(userId, "ATTENDANCE_BASE", "date_" + today, 0);
 
-        // 5. 출석 응답 반환
-        return new AttendanceResponse(today, streak, bonus, earnResult.balanceAfter());
+        log.info("출석 체크 완료 (리워드 위임): userId={}, streak={}", userId, streak);
+
+        // 6. 출석 응답 반환
+        //    실제 지급 포인트·잔액은 RewardService(REQUIRES_NEW 트랜잭션)가 처리하므로
+        //    응답에는 streak 정보만 포함하고 포인트/잔액은 0으로 반환한다.
+        return new AttendanceResponse(today, streak, 0, 0);
     }
 
     // ──────────────────────────────────────────────
@@ -220,32 +237,5 @@ public class AttendanceService {
                 userId, currentStreak, totalDays, checkedToday, monthlyDates.size());
 
         return new AttendanceStatusResponse(currentStreak, (int) totalDays, checkedToday, monthlyDates);
-    }
-
-    // ──────────────────────────────────────────────
-    // private 헬퍼 메서드
-    // ──────────────────────────────────────────────
-
-    /**
-     * 연속 출석일(streak)에 따른 보너스 포인트를 계산한다.
-     *
-     * <p>보너스 정책:</p>
-     * <ul>
-     *   <li>30일 이상 연속: 60P (기본 10P + 30일 보너스 50P)</li>
-     *   <li>7일 이상 연속: 30P (기본 10P + 7일 보너스 20P)</li>
-     *   <li>그 외: 10P (기본 출석 보상)</li>
-     * </ul>
-     *
-     * @param streak 연속 출석 일수 (1 이상)
-     * @return 지급할 보너스 포인트
-     */
-    private int calculateBonus(int streak) {
-        if (streak >= STREAK_30_THRESHOLD) {
-            return STREAK_30_POINT;  // 기본 10P + 30일 보너스 50P = 60P
-        }
-        if (streak >= STREAK_7_THRESHOLD) {
-            return STREAK_7_POINT;   // 기본 10P + 7일 보너스 20P = 30P
-        }
-        return BASE_POINT;           // 기본 10P
     }
 }

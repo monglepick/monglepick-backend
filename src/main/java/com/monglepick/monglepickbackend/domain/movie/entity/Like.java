@@ -83,4 +83,28 @@ public class Like extends BaseAuditEntity {
      */
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
+
+    // ─────────────────────────────────────────────
+    // 도메인 메서드 (setter 대신 의미 있는 이름 사용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 좋아요를 소프트 삭제(취소) 처리한다.
+     *
+     * <p>deleted_at에 현재 시각을 기록하여 논리적으로 삭제된 상태로 전환한다.
+     * 물리적으로 레코드를 삭제하지 않아 이력 조회가 가능하다.</p>
+     */
+    public void softDelete() {
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 취소된 좋아요를 복구(재활성화)한다.
+     *
+     * <p>deleted_at을 null로 초기화하여 활성 좋아요 상태로 되돌린다.
+     * 기존 레코드를 재사용하므로 UNIQUE(user_id, movie_id) 제약을 위반하지 않는다.</p>
+     */
+    public void restore() {
+        this.deletedAt = null;
+    }
 }

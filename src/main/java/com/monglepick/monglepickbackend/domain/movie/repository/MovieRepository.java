@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -51,4 +52,17 @@ public interface MovieRepository extends JpaRepository<Movie, String> {
      * @return 평점순 정렬된 영화 페이지
      */
     Page<Movie> findByRatingIsNotNullOrderByRatingDesc(Pageable pageable);
+
+    /**
+     * 행동 프로필 배치용 — movie_id 목록에 해당하는 영화의 genres, director 필드만 일괄 조회.
+     *
+     * <p>BehaviorProfileScheduler에서 장르·감독 친화도 계산 시 사용한다.
+     * IN 절로 최대 100건을 한 번에 조회하므로 N+1 문제가 발생하지 않는다.
+     * genres, director 필드만 필요하지만 Movie 전체를 반환하여 호출 측에서 선택 사용한다.</p>
+     *
+     * @param movieIds 조회할 movie_id 목록 (최대 100건 권장)
+     * @return 해당 영화 목록 (존재하지 않는 ID는 결과에서 제외됨)
+     */
+    @Query("SELECT m FROM Movie m WHERE m.movieId IN :movieIds")
+    List<Movie> findAllByMovieIdIn(@Param("movieIds") List<String> movieIds);
 }

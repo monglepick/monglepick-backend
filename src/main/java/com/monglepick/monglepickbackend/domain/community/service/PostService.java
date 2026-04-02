@@ -9,6 +9,7 @@ import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.domain.community.repository.PostRepository;
 import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -30,6 +31,7 @@ public class PostService {
 
     private final PostRepository postRepository;
     private final UserRepository userRepository;
+    private final RewardService rewardService;
 
     // ──────────────────────────────────────────────
     // 게시글 CRUD (기존 기능)
@@ -59,6 +61,10 @@ public class PostService {
         Post savedPost = postRepository.save(post);
         log.info("게시글 작성 완료 — postId: {}, userId: {}, category: {}",
                 savedPost.getPostId(), userId, category);
+
+        // 리워드 지급 — 게시글 ID 기준 1회 (reference_id = "post_{postId}")
+        // RewardService 내부에서 중복 검사/정책 조회/포인트 지급을 모두 처리하므로 try-catch 불필요
+        rewardService.grantReward(userId, "POST_REWARD", "post_" + savedPost.getPostId(), request.content().length());
 
         return PostResponse.from(savedPost);
     }
@@ -124,6 +130,10 @@ public class PostService {
 
         postRepository.delete(post);
         log.info("게시글 삭제 완료 — postId: {}, userId: {}", postId, userId);
+
+        // 리워드 회수 — 게시글 삭제 시 지급했던 포인트를 회수 (reference_id = "post_{postId}")
+        // RewardService 내부에서 지급 이력 조회/회수 처리를 모두 수행하므로 try-catch 불필요
+        rewardService.revokeReward(userId, "POST_REWARD", "post_" + postId);
     }
 
     // ──────────────────────────────────────────────
@@ -216,6 +226,10 @@ public class PostService {
 
         post.publish();
         log.info("임시저장 게시 완료 — postId: {}", postId);
+
+        // 리워드 지급 — 임시저장 후 정식 게시 시점에 1회 지급 (reference_id = "post_{postId}")
+        // createPost()와 동일한 액션 타입을 사용하며, RewardService 내부 중복 검사로 이중 지급 방지
+        rewardService.grantReward(userId, "POST_REWARD", "post_" + postId, post.getContent().length());
 
         return PostResponse.from(post);
     }

@@ -108,6 +108,9 @@ public enum ErrorCode {
     /** OAuth2 쿠키에 Refresh Token이 없음 (소셜 로그인 토큰 교환 실패). */
     COOKIE_NOT_FOUND(HttpStatus.BAD_REQUEST, "A009", "쿠키가 존재하지 않습니다"),
 
+    /** 관리자 전용 로그인 엔드포인트에 일반 사용자가 접근 시도. */
+    ADMIN_ONLY(HttpStatus.FORBIDDEN, "A010", "관리자 계정만 로그인할 수 있습니다"),
+
     // ─────────────────────────────────────────────
     // 공통 (G0xx)
     // ─────────────────────────────────────────────
@@ -218,7 +221,17 @@ public enum ErrorCode {
     ACHIEVEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "ACH001", "업적을 찾을 수 없습니다"),
 
     /** 본인 업적이 아닌 경우 접근 거부. */
-    ACHIEVEMENT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "ACH002", "업적 조회 권한이 없습니다");
+    ACHIEVEMENT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "ACH002", "업적 조회 권한이 없습니다"),
+
+    // ─────────────────────────────────────────────
+    // 채팅 (CHAT0xx)
+    // ─────────────────────────────────────────────
+
+    /** sessionId에 해당하는 채팅 세션을 찾을 수 없음. */
+    CHAT_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT001", "채팅 세션을 찾을 수 없습니다"),
+
+    /** 본인 세션이 아닌 경우 접근 거부. */
+    CHAT_SESSION_ACCESS_DENIED(HttpStatus.FORBIDDEN, "CHAT002", "채팅 세션 접근 권한이 없습니다");
 
     // ─────────────────────────────────────────────
     // 필드

@@ -22,20 +22,20 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * 채팅 세션 아카이브 엔티티 — chat_session_archive 테이블 매핑.
+ * 채팅 세션 엔티티 — chat_session_archive 테이블 매핑.
  *
- * <p>AI Agent와의 채팅 세션이 종료된 후, Redis에서 MySQL로 아카이빙된 대화 기록을 저장한다.
- * 실시간 대화는 Redis에서 관리되며, 세션 종료/만료 시 이 테이블로 영속화된다.</p>
+ * <p>AI Agent와의 채팅 세션을 MySQL 단일 저장소에 영속화한다.
+ * Agent가 매 턴마다 Backend API를 통해 세션 상태를 저장/로드하며,
+ * Client는 이력 API로 이전 대화 목록 조회 및 이어하기를 수행한다.</p>
  *
  * <h3>주요 필드</h3>
  * <ul>
  *   <li>{@code user} — 대화 참여 사용자 (FK → users.user_id)</li>
- *   <li>{@code sessionId} — 세션 UUID (UNIQUE, Redis 세션 키와 동일)</li>
+ *   <li>{@code sessionId} — 세션 UUID (UNIQUE)</li>
  *   <li>{@code messages} — 전체 대화 내역 (JSON 배열, 필수)</li>
+ *   <li>{@code sessionState} — Agent 세션 상태 (preferences, emotion 등 JSON)</li>
  *   <li>{@code turnCount} — 대화 턴 수 (사용자 메시지 수)</li>
- *   <li>{@code intentSummary} — 세션 중 감지된 의도 요약 (JSON)</li>
- *   <li>{@code startedAt} — 세션 시작 시각 (도메인 고유 필드, 유지)</li>
- *   <li>{@code endedAt} — 세션 종료 시각 (도메인 고유 필드, 유지)</li>
+ *   <li>{@code isActive} — 진행 중 세션 여부</li>
  * </ul>
  *
  * <h3>messages JSON 구조</h3>
@@ -46,12 +46,21 @@ import java.time.LocalDateTime;
  * ]
  * </pre>
  *
+ * <h3>sessionState JSON 구조</h3>
+ * <pre>
+ * {
+ *   "preferences": { ... ExtractedPreferences ... },
+ *   "emotion": { ... EmotionResult ... },
+ *   "user_profile": { ... },
+ *   "watch_history": [ ... ]
+ * }
+ * </pre>
+ *
  * <h3>변경 이력</h3>
  * <ul>
  *   <li>PK 필드명: id → chatSessionArchiveId (컬럼명: chat_session_archive_id)</li>
  *   <li>BaseAuditEntity 상속 추가 — created_at/updated_at/created_by/updated_by 자동 관리</li>
- *   <li>수동 createdAt 필드 및 @CreationTimestamp 제거 — BaseTimeEntity에서 상속</li>
- *   <li>startedAt, endedAt 도메인 고유 타임스탬프는 유지 (@CreationTimestamp 제거)</li>
+ *   <li>Redis → MySQL 단일 저장소 전환: sessionState, isActive 컬럼 추가</li>
  * </ul>
  */
 @Entity
@@ -61,7 +70,9 @@ import java.time.LocalDateTime;
                 // 사용자별 채팅 세션 목록 조회 시 사용 (user_id + 최신순 정렬)
                 @Index(name = "idx_chat_session_user", columnList = "user_id"),
                 // 세션 시작 시각 기준 정렬/필터 시 사용
-                @Index(name = "idx_chat_session_started", columnList = "started_at")
+                @Index(name = "idx_chat_session_started", columnList = "started_at"),
+                // 마지막 메시지 시각 기준 정렬 (이력 목록 최신순)
+                @Index(name = "idx_chat_session_last_msg", columnList = "last_message_at")
         }
 )
 @Getter
@@ -72,7 +83,6 @@ public class ChatSessionArchive extends BaseAuditEntity {
 
     /**
      * 아카이브 고유 ID (BIGINT AUTO_INCREMENT PK).
-     * 필드명 변경: id → chatSessionArchiveId (엔티티 PK 네이밍 통일)
      */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -88,8 +98,7 @@ public class ChatSessionArchive extends BaseAuditEntity {
     private User user;
 
     /**
-     * 세션 UUID (v4).
-     * Redis 세션 키와 동일한 값이며, UNIQUE 제약이 있다.
+     * 세션 UUID (v4). UNIQUE 제약.
      */
     @Column(name = "session_id", length = 36, nullable = false, unique = true)
     private String sessionId;
@@ -107,6 +116,14 @@ public class ChatSessionArchive extends BaseAuditEntity {
     private Integer turnCount = 0;
 
     /**
+     * Agent 세션 상태 (JSON).
+     * preferences, emotion, user_profile, watch_history를 묶어 저장한다.
+     * 이어하기 시 Agent가 이 상태를 복원하여 대화 맥락을 유지한다.
+     */
+    @Column(name = "session_state", columnDefinition = "json")
+    private String sessionState;
+
+    /**
      * 세션 중 감지된 의도 요약 (JSON 객체).
      * 예: {"recommend": 3, "search": 1, "general": 2}
      */
@@ -115,8 +132,7 @@ public class ChatSessionArchive extends BaseAuditEntity {
 
     /**
      * 세션 시작 시각 (도메인 고유 타임스탬프).
-     * Redis 세션이 최초 생성된 시각을 기록한다.
-     * created_at(아카이빙 시각)과 별개로 유지된다.
+     * 세션이 최초 생성된 시각을 기록한다.
      */
     @Column(name = "started_at")
     private LocalDateTime startedAt;
@@ -135,10 +151,14 @@ public class ChatSessionArchive extends BaseAuditEntity {
     /**
      * 마지막 메시지 시각 (정렬용).
      * 채팅 세션 목록을 최신 대화 순으로 정렬할 때 사용한다.
-     * 각 메시지 추가 시 갱신된다.
      */
     @Column(name = "last_message_at")
     private LocalDateTime lastMessageAt;
+
+    /** 세션 활성 여부 (진행 중 = true, 종료 = false) */
+    @Column(name = "is_active", nullable = false)
+    @Builder.Default
+    private Boolean isActive = true;
 
     /** 소프트 삭제 여부 (REQ_054: 이전 채팅 내역 삭제) */
     @Column(name = "is_deleted", nullable = false)
@@ -149,8 +169,38 @@ public class ChatSessionArchive extends BaseAuditEntity {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
-    /* created_at, updated_at → BaseTimeEntity에서 상속 (아카이빙 시각) */
+    /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
+
+    // ── 비즈니스 메서드 ──
+
+    /** 매 턴마다 Agent가 호출: 메시지 + 턴 수 + 마지막 메시지 시각 갱신 */
+    public void updateMessages(String messages, int turnCount, LocalDateTime lastMessageAt) {
+        this.messages = messages;
+        this.turnCount = turnCount;
+        this.lastMessageAt = lastMessageAt;
+    }
+
+    /** Agent 세션 상태 갱신 (preferences, emotion 등) */
+    public void updateSessionState(String sessionState) {
+        this.sessionState = sessionState;
+    }
+
+    /** 의도 요약 갱신 */
+    public void updateIntentSummary(String intentSummary) {
+        this.intentSummary = intentSummary;
+    }
+
+    /** 세션 제목 변경 */
+    public void updateTitle(String title) {
+        this.title = title;
+    }
+
+    /** 세션 종료 처리 */
+    public void endSession() {
+        this.isActive = false;
+        this.endedAt = LocalDateTime.now();
+    }
 
     /** 채팅 세션 소프트 삭제 (REQ_054) */
     public void softDelete() {

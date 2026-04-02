@@ -50,27 +50,30 @@ public final class PointDto {
     }
 
     /**
-     * 포인트 잔액 확인 응답.
+     * 포인트 잔액 확인 응답 (v3.0 QuotaCheckResult 연동).
      *
      * <p>Agent의 {@code point_client.py}가 이 JSON을 직접 파싱한다.
      * <b>기존 5개 필드(allowed, balance, cost, message, maxInputLength)는 절대 변경 금지.</b>
      * Agent는 기존 필드만 파싱하므로 추가 필드는 Agent가 무시한다 (하위 호환성 유지).</p>
      *
-     * <h4>Phase R-3 추가 필드 (쿼터 관련)</h4>
-     * <p>등급별 일일/월간 사용 한도 정보를 포함한다. 클라이언트(monglepick-client)에서
-     * "오늘 N/M회 사용" 등의 UI 표시에 활용할 수 있다.</p>
+     * <h4>v3.0 변경사항 (QuotaCheckResult 구조 변경 반영)</h4>
+     * <p>월간 한도 폐지에 따라 monthlyUsed/monthlyLimit/freeRemaining/effectiveCost 필드가 제거되고,
+     * 구독 보너스 및 구매 토큰 기반 소스 정보로 대체된다.</p>
      *
-     * @param allowed        사용 가능 여부 (잔액 + 쿼터 모두 통과 시 true)
-     * @param balance        현재 보유 포인트
-     * @param cost           요청된 비용 (원래 비용, 무료 적용 전)
-     * @param message        결과 메시지 (부족/한도초과 시 안내 메시지 포함)
-     * @param maxInputLength 등급별 최대 입력 글자 수 (BRONZE:200, SILVER:500, GOLD:1000, PLATINUM:2000)
-     * @param dailyUsed      오늘 AI 추천 사용 횟수 (Phase R-3 추가)
-     * @param dailyLimit     일일 한도 (-1이면 무제한) (Phase R-3 추가)
-     * @param monthlyUsed    이번 달 AI 추천 사용 횟수 (Phase R-3 추가)
-     * @param monthlyLimit   월간 한도 (-1이면 무제한) (Phase R-3 추가)
-     * @param freeRemaining  오늘 남은 무료 사용 횟수 (Phase R-3 추가)
-     * @param effectiveCost  실제 차감 포인트 — 무료 잔여가 있으면 0, 없으면 cost와 동일 (Phase R-3 추가)
+     * <h4>v3.0 신규 필드 (쿼터 소스 정보)</h4>
+     * <p>등급별 일일 사용 현황 및 허용 소스 정보를 포함한다.
+     * 클라이언트에서 "오늘 N/M회 사용" 및 구독/토큰 잔여 안내 UI에 활용한다.</p>
+     *
+     * @param allowed            AI 사용 가능 여부 (쿼터 통과 시 true)
+     * @param balance            현재 보유 포인트
+     * @param cost               요청된 비용 (v3.0에서 AI 무과금이므로 항상 0)
+     * @param message            결과 메시지 (한도 초과 시 안내 메시지 포함)
+     * @param maxInputLength     등급별 최대 입력 글자 수 (NORMAL:200, BRONZE:300, SILVER:500, GOLD:1000, PLATINUM:2000)
+     * @param dailyUsed          오늘 AI 추천 사용 횟수 (등급 무료 한도 기준)
+     * @param dailyLimit         일일 등급 무료 한도 (-1이면 PLATINUM 무제한)
+     * @param source             허용 소스 식별자 — "GRADE_FREE" | "SUB_BONUS" | "PURCHASED" | "BLOCKED"
+     * @param subBonusRemaining  구독 보너스 잔여 횟수 (-1이면 구독 없음)
+     * @param purchasedRemaining 구매 토큰 잔여 횟수
      */
     public record CheckResponse(
             boolean allowed,
@@ -78,13 +81,12 @@ public final class PointDto {
             int cost,
             String message,
             int maxInputLength,
-            // ── Phase R-3 쿼터 필드 (하위 호환: Agent는 이 필드를 무시) ──
+            // ── v3.0 쿼터 필드 (하위 호환: Agent는 이 필드를 무시) ──
             int dailyUsed,
             int dailyLimit,
-            int monthlyUsed,
-            int monthlyLimit,
-            int freeRemaining,
-            int effectiveCost
+            String source,           // "GRADE_FREE" | "SUB_BONUS" | "PURCHASED" | "BLOCKED"
+            int subBonusRemaining,   // 구독 보너스 잔여 (-1이면 구독 없음)
+            int purchasedRemaining   // 구매 토큰 잔여
     ) {
     }
 

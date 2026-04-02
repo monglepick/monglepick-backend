@@ -6,23 +6,28 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * 등급별 쿼터(이용 한도) 설정 프로퍼티.
  *
  * <p>{@code application.yml}의 {@code app.quota} 하위 설정을 바인딩한다.
- * QuotaService에서 16개 @Value 파라미터 대신 이 프로퍼티 클래스를 주입받아
- * 생성자 파라미터를 2개로 축소한다.</p>
+ * QuotaService에서 이 프로퍼티 클래스를 주입받아 등급별 쿼터를 초기화한다.</p>
  *
- * <h3>application.yml 구조</h3>
+ * <h3>application.yml 구조 (설계서 v2.3 §4.5 — 5등급 체계)</h3>
  * <pre>{@code
  * app:
  *   quota:
- *     bronze:
+ *     normal:
  *       daily-limit: 3
  *       monthly-limit: 30
  *       free-daily: 0
  *       max-input-length: 200
+ *     bronze:
+ *       daily-limit: 5
+ *       monthly-limit: 80
+ *       free-daily: 1
+ *       max-input-length: 300
  *     silver: ...
  *     gold: ...
  *     platinum: ...
  * }</pre>
  *
+ * @param normal   NORMAL 등급 설정 (nullable — 미정의 시 QuotaService에서 기본값 적용)
  * @param bronze   BRONZE 등급 설정
  * @param silver   SILVER 등급 설정
  * @param gold     GOLD 등급 설정
@@ -30,6 +35,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "app.quota")
 public record QuotaProperties(
+        GradeConfig normal,
         GradeConfig bronze,
         GradeConfig silver,
         GradeConfig gold,

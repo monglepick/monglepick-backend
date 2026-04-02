@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.user.service;
 
+import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
@@ -40,6 +41,9 @@ public class UserService {
     private final UserWishlistRepository userWishlistRepository;
     private final UserPreferenceRepository userPreferenceRepository;
     private final PasswordEncoder passwordEncoder;
+
+    /** 활동 리워드 서비스 — 위시리스트 추가(WISHLIST_ADD) 리워드 지급 위임 */
+    private final RewardService rewardService;
 
     /**
      * 사용자 프로필 정보를 조회합니다.
@@ -150,6 +154,14 @@ public class UserService {
 
         userWishlistRepository.save(wishlist);
         log.info("위시리스트 추가 - userId: {}, movieId: {}", userId, movieId);
+
+        /*
+         * 위시리스트 추가 활동 리워드 지급 (WISHLIST_ADD).
+         * RewardService는 REQUIRES_NEW 트랜잭션 + 내부 try-catch로 동작하므로
+         * 리워드 실패가 위시리스트 저장 트랜잭션에 영향을 주지 않는다.
+         * referenceId: "movie_{movieId}" — 동일 영화 중복 지급 방지 키로 사용.
+         */
+        rewardService.grantReward(userId, "WISHLIST_ADD", "movie_" + movieId, 0);
     }
 
     /**

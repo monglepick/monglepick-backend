@@ -87,6 +87,25 @@ public class RecommendationFeedback extends BaseAuditEntity {
 
     /* created_at은 BaseAuditEntity(→BaseTimeEntity)에서 자동 관리 — 수동 @CreationTimestamp 필드 제거됨 */
 
+    // ─────────────────────────────────────────────
+    // 도메인 메서드 (setter 대신 의미 있는 메서드명 사용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 기존 피드백의 유형과 코멘트를 갱신한다 (UPSERT 처리용).
+     *
+     * <p>동일 사용자가 같은 추천에 대해 피드백을 재제출하면
+     * 새 레코드를 생성하는 대신 이 메서드로 기존 값을 덮어쓴다.
+     * (user_id, recommendation_id) UNIQUE 제약을 애플리케이션 레벨에서 처리한다.</p>
+     *
+     * @param feedbackType 새 피드백 유형
+     * @param comment      새 피드백 코멘트 (null 허용)
+     */
+    public void update(FeedbackType feedbackType, String comment) {
+        this.feedbackType = feedbackType;
+        this.comment = comment;
+    }
+
     /**
      * 추천 피드백 유형 열거형.
      *

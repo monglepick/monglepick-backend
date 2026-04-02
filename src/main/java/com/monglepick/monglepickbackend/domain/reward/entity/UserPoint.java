@@ -26,12 +26,31 @@ import java.time.LocalDate;
  * <p>사용자의 포인트 잔액 및 등급 정보를 관리한다.
  * 각 사용자당 하나의 포인트 레코드만 존재한다 (user_id UNIQUE).</p>
  *
+ * <h3>v3.1 AI 4-단계 모델 변경</h3>
+ * <ul>
+ *   <li>복원: {@code monthlyAiUsed} — 이번 달 AI 총 사용 횟수 (전 소스 합산). grade.monthly_ai_limit와 비교.</li>
+ *   <li>복원: {@code monthlyReset} — 월간 lazy reset 기준일</li>
+ *   <li>유지: {@code purchasedAiTokens} — 포인트 상점에서 구매한 AI 이용권 잔여 횟수</li>
+ * </ul>
+ *
+ * <h3>v3.1 AI 사용 처리 순서 (QuotaService.checkQuota)</h3>
+ * <ol>
+ *   <li>monthly_ai_used &gt;= grade.monthly_ai_limit → 월간 상한 초과, 즉시 차단 (PLATINUM은 -1 무제한)</li>
+ *   <li>daily_ai_used &lt; grade.daily_ai_limit → 무료 허용 (daily_ai_used++, monthly_ai_used++)</li>
+ *   <li>활성 구독의 remaining_ai_bonus &gt; 0 → 구독 풀 차감 (remaining_ai_bonus--, monthly_ai_used++)</li>
+ *   <li>purchased_ai_tokens &gt; 0 → 구매 토큰 차감 (purchased_ai_tokens--, monthly_ai_used++). 일일 한도 우회.</li>
+ *   <li>모두 소진 → 차단</li>
+ * </ol>
+ *
  * <h3>변경 이력</h3>
  * <ul>
  *   <li>2026-03-24: BaseTimeEntity → BaseAuditEntity 변경 (created_by/updated_by 추가)</li>
- *   <li>2026-03-24: PK 필드명 pointId → userPointId 로 변경, @Column(name = "user_point_id") 추가</li>
- *   <li>2026-03-31: userGrade 필드를 등급 문자열 컬럼에서 {@code Grade} 엔티티 FK로 전환.
- *       컬럼명 {@code user_grade}(VARCHAR) → {@code grade_id}(BIGINT FK).</li>
+ *   <li>2026-03-24: PK 필드명 pointId → userPointId 로 변경</li>
+ *   <li>2026-03-31: userGrade 필드를 Grade 엔티티 FK로 전환</li>
+ *   <li>2026-04-02: monthlyReset/earnedByActivity/dailyCapUsed 추가. addPoints() 파라미터 확장.</li>
+ *   <li>2026-04-02 v3.0: purchasedAiTokens 추가. consumePurchasedToken()/addPurchasedTokens() 추가.</li>
+ *   <li>2026-04-02 v3.1: monthlyAiUsed/monthlyReset 복원. incrementAiUsage() → monthly_ai_used도 함께 증가.
+ *       resetMonthlyIfNeeded() 추가. 구매 이용권이 일일 한도를 우회하므로 월간 절대 상한 필요.</li>
  * </ul>
  *
  * <h3>주요 필드</h3>
@@ -39,8 +58,15 @@ import java.time.LocalDate;
  *   <li>{@code userId} — 사용자 ID (FK → users.user_id, UNIQUE)</li>
  *   <li>{@code balance} — 현재 보유 포인트</li>
  *   <li>{@code totalEarned} — 누적 획득 포인트</li>
+ *   <li>{@code totalSpent} — 누적 사용 포인트</li>
+ *   <li>{@code earnedByActivity} — 순수 활동 누적 포인트 (등급 산정 기준, 결제 충전 제외)</li>
  *   <li>{@code dailyEarned} — 오늘 획득 포인트 (일일 한도 관리용)</li>
+ *   <li>{@code dailyCapUsed} — 오늘 활동 리워드 총 획득 (일일 상한 검사용)</li>
  *   <li>{@code dailyReset} — 일일 리셋 기준일 (DATE)</li>
+ *   <li>{@code dailyAiUsed} — 오늘 AI 사용 횟수 (grade.daily_ai_limit와 비교)</li>
+ *   <li>{@code monthlyAiUsed} — 이번 달 AI 총 사용 횟수 전 소스 합산 (grade.monthly_ai_limit와 비교)</li>
+ *   <li>{@code monthlyReset} — 월간 lazy reset 기준일 (DATE)</li>
+ *   <li>{@code purchasedAiTokens} — 포인트 상점 구매 AI 이용권 잔여 횟수</li>
  *   <li>{@code grade} — 사용자 등급 (FK → grades.grade_id, LAZY)</li>
  * </ul>
  */
@@ -73,10 +99,7 @@ public class UserPoint extends BaseAuditEntity {
      *
      * <p>{@code unique = true}는 JPA가 DDL을 생성할 때 UK 제약을 컬럼 레벨에 추가한다.
      * 클래스 레벨의 {@code @UniqueConstraint(columnNames = "user_id")}와 동일한 효과이나,
-     * 두 가지 방식을 함께 선언하여 JPA 레이어와 DB 레이어 모두에서 중복을 방지한다.
-     * 덕분에 동시 삽입 시 DB가 {@code DataIntegrityViolationException}을 발생시키며,
-     * {@link com.monglepick.monglepickbackend.domain.reward.service.PointService#initializePoint}
-     * 에서 이를 포착하여 멱등 동작을 보장한다.</p>
+     * 두 가지 방식을 함께 선언하여 JPA 레이어와 DB 레이어 모두에서 중복을 방지한다.</p>
      */
     @Column(name = "user_id", length = 50, nullable = false, unique = true)
     private String userId;
@@ -84,7 +107,6 @@ public class UserPoint extends BaseAuditEntity {
     /**
      * 현재 보유 포인트.
      * 기본값: 0.
-     * 필드명 변경 이력: pointHave → balance (2026-03-31)
      */
     @Column(name = "balance")
     @Builder.Default
@@ -110,8 +132,8 @@ public class UserPoint extends BaseAuditEntity {
 
     /**
      * 일일 리셋 기준일.
-     * dailyEarned가 마지막으로 0으로 초기화된 날짜.
-     * 날짜가 바뀌면 dailyEarned를 0으로 리셋한다.
+     * dailyEarned/dailyAiUsed/dailyCapUsed가 마지막으로 0으로 초기화된 날짜.
+     * 날짜가 바뀌면 위 세 필드를 0으로 리셋한다.
      */
     @Column(name = "daily_reset")
     private LocalDate dailyReset;
@@ -122,8 +144,7 @@ public class UserPoint extends BaseAuditEntity {
      * <p>기존 Enum 문자열 컬럼(user_grade VARCHAR)에서 {@code Grade} 엔티티 FK(grade_id BIGINT)로
      * 전환하였다. 이를 통해 관리자 페이지에서 등급 기준/쿼터를 동적으로 관리할 수 있다.</p>
      *
-     * <p>LAZY 로딩을 사용하므로 등급 정보가 필요한 시점(트랜잭션 내)에만 조인 쿼리가 발생한다.
-     * null이 허용되며, null인 경우 서비스 레이어에서 BRONZE 등급으로 fallback 처리한다.</p>
+     * <p>null인 경우 서비스 레이어에서 NORMAL 등급으로 fallback 처리한다.</p>
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "grade_id")
@@ -132,27 +153,87 @@ public class UserPoint extends BaseAuditEntity {
     /**
      * 일일 AI 질문 사용 횟수.
      * 기본값: 0.
-     * 매일 자정에 스케줄러가 0으로 리셋한다.
-     * 등급별 일일 쿼터(BRONZE 3회, SILVER 10회, GOLD 30회, PLATINUM 무제한) 초과 여부 판단에 사용.
+     *
+     * <p>v3.0: grade.daily_ai_limit와 비교하여 무료 AI 사용 가능 여부를 판단한다.
+     * 한도 내이면 포인트 차감 없이 무료 사용 (source="GRADE_FREE").
+     * 한도 초과 시 구독 보너스 풀 또는 구매 토큰으로 처리한다.</p>
+     *
+     * <p>dailyReset 기준일이 오늘이 아니면 resetDailyIfNeeded()에서 0으로 리셋된다.</p>
      */
     @Column(name = "daily_ai_used")
     @Builder.Default
     private Integer dailyAiUsed = 0;
 
     /**
-     * 월간 AI 질문 사용 횟수.
-     * 기본값: 0.
-     * 매월 1일 자정에 스케줄러가 0으로 리셋한다.
-     * 등급별 월간 쿼터(BRONZE 30회, SILVER 200회, GOLD 600회, PLATINUM 무제한) 초과 여부 판단에 사용.
+     * 이번 달 AI 총 사용 횟수 (INT, NOT NULL, DEFAULT 0) — v3.1 복원.
+     *
+     * <p>GRADE_FREE·SUB_BONUS·PURCHASED 전 소스의 사용량을 합산한다.
+     * grade.monthly_ai_limit와 비교하여 월간 절대 상한을 초과하면 전 소스를 차단한다.
+     * 구매 이용권은 daily_ai_limit를 우회하지만, 이 monthly 카운터에는 반드시 포함된다.</p>
+     *
+     * <p>monthlyReset 기준일이 이번 달이 아니면 {@link #resetMonthlyIfNeeded(LocalDate)}에서 0으로 리셋된다.</p>
      */
-    @Column(name = "monthly_ai_used")
+    @Column(name = "monthly_ai_used", nullable = false)
     @Builder.Default
     private Integer monthlyAiUsed = 0;
+
+    /**
+     * 월간 카운터 lazy reset 기준일 (DATE) — v3.1 복원.
+     *
+     * <p>월이 바뀌었으면 monthlyAiUsed를 0으로 초기화하고 이 필드를 오늘로 갱신한다.
+     * {@code monthlyReset.getMonthValue() != LocalDate.now().getMonthValue()} 조건으로 판단.</p>
+     */
+    @Column(name = "monthly_reset")
+    private LocalDate monthlyReset;
+
+    /**
+     * 포인트 상점에서 구매한 AI 이용권 잔여 횟수 (INT, NOT NULL, DEFAULT 0).
+     *
+     * <p>v3.0 신규 필드. 사용자가 포인트 상점에서 "AI 이용권"을 구매하면 이 값이 증가한다.
+     * grade.daily_ai_limit와 구독 보너스 풀이 모두 소진된 경우에 사용된다 (source="PURCHASED").</p>
+     *
+     * <p>구매 시: {@link #addPurchasedTokens(int)} 호출.
+     * 사용 시: {@link #consumePurchasedToken()} 호출 (음수 방지 보장).</p>
+     *
+     * <p>유효 기간(30일/60일)은 별도 테이블(point_item_purchases) 또는 메타데이터로 관리할 예정.
+     * 현재는 횟수만 차감하는 방식으로 구현한다.</p>
+     */
+    @Column(name = "purchased_ai_tokens", nullable = false)
+    @Builder.Default
+    private Integer purchasedAiTokens = 0;
+
+    /**
+     * 순수 활동으로 획득한 누적 포인트 (등급 산정 기준).
+     * 기본값: 0.
+     *
+     * <p>RewardService.grantReward() 또는 grantRewardWithAmount()를 경유하여 지급된 포인트만 증가.
+     * 결제 충전, 관리자 수동 지급은 제외된다.</p>
+     *
+     * <p><b>등급 산정</b>: {@code WHERE earned_by_activity >= grades.min_points}
+     * (total_earned가 아님 — 결제 포인트 구매→환불 반복으로 등급 악용 방지)</p>
+     */
+    @Column(name = "earned_by_activity", nullable = false)
+    @Builder.Default
+    private Integer earnedByActivity = 0;
+
+    /**
+     * 오늘 활동 리워드로 획득한 총 포인트 (일일 상한 검사용).
+     * 기본값: 0.
+     *
+     * <p>등급별 일일 총 포인트 상한({@code grades.daily_earn_cap})과 비교하여 극단적 어뷰징 방지.
+     * 상한 초과 시 해당 일 추가 리워드 차단. 구독 포인트/관리자 지급은 미포함.</p>
+     *
+     * <p>dailyReset 시 0으로 리셋된다 (resetDailyIfNeeded에서 처리).</p>
+     */
+    @Column(name = "daily_cap_used", nullable = false)
+    @Builder.Default
+    private Integer dailyCapUsed = 0;
 
     /**
      * 총 사용 포인트 (누적).
      * 기본값: 0.
      * 포인트 차감 시마다 증가하며, 관리자 통계 및 사용자 활동 지표로 활용된다.
+     * 정합성 공식: balance = total_earned - total_spent
      */
     @Column(name = "total_spent")
     @Builder.Default
@@ -190,35 +271,65 @@ public class UserPoint extends BaseAuditEntity {
      * <p>보유 포인트(balance), 누적 획득(totalEarned), 일일 획득(dailyEarned)을 갱신한다.
      * 날짜가 바뀌었으면 일일 획득량을 먼저 리셋한 뒤 적용한다.</p>
      *
-     * @param amount 획득 포인트 (양수)
-     * @param today  오늘 날짜 (일일 리셋 판단용)
+     * <p>{@code isActivityReward=true}이면 추가로:
+     * <ul>
+     *   <li>{@code earnedByActivity += amount} — 순수 활동 포인트 누적 (등급 산정 기준)</li>
+     *   <li>{@code dailyCapUsed += amount} — 일일 활동 리워드 상한 추적</li>
+     * </ul>
+     * </p>
+     *
+     * @param amount           획득 포인트 (양수)
+     * @param today            오늘 날짜 (일일 리셋 판단용)
+     * @param isActivityReward RewardService 경유 여부. true이면 활동 포인트로 분류 (등급 반영).
+     *                         false이면 결제 충전/관리자 지급 (등급 미반영).
      */
-    public void addPoints(int amount, LocalDate today) {
+    public void addPoints(int amount, LocalDate today, boolean isActivityReward) {
         resetDailyIfNeeded(today);
         this.balance += amount;
         this.totalEarned += amount;
         this.dailyEarned += amount;
+        if (isActivityReward) {
+            this.earnedByActivity += amount;
+            this.dailyCapUsed += amount;
+        }
     }
 
     /**
-     * 일일 획득량 리셋.
+     * 포인트 획득 (하위 호환용 오버로드 — isActivityReward=false 기본값).
      *
-     * <p>dailyReset 날짜가 오늘이 아니면 dailyEarned를 0으로 초기화하고
-     * dailyReset을 오늘로 갱신한다. 이미 오늘이면 아무 작업도 하지 않는다.</p>
+     * <p>결제 충전, 관리자 수동 지급 등 활동 리워드가 아닌 포인트 지급에 사용.
+     * earnedByActivity와 dailyCapUsed는 변경되지 않는다.</p>
+     *
+     * @param amount 획득 포인트 (양수)
+     * @param today  오늘 날짜 (일일 리셋 판단용)
+     */
+    public void addPoints(int amount, LocalDate today) {
+        addPoints(amount, today, false);
+    }
+
+    /**
+     * 일일 카운터 리셋.
+     *
+     * <p>dailyReset 날짜가 오늘이 아니면 dailyEarned, dailyAiUsed, dailyCapUsed를
+     * 0으로 초기화하고 dailyReset을 오늘로 갱신한다. 이미 오늘이면 아무 작업도 하지 않는다.</p>
      *
      * @param today 오늘 날짜
      */
     public void resetDailyIfNeeded(LocalDate today) {
         if (this.dailyReset == null || !this.dailyReset.equals(today)) {
             this.dailyEarned = 0;
+            this.dailyAiUsed = 0;
+            this.dailyCapUsed = 0;
             this.dailyReset = today;
         }
     }
 
     /**
-     * AI 질문 사용 횟수 증가.
+     * AI 질문 일일 + 월간 사용 횟수 동시 증가.
      *
-     * <p>AI 채팅 요청 시 호출한다. 일일/월간 사용 횟수를 각각 1씩 증가시킨다.
+     * <p>v3.1: GRADE_FREE 소스 사용 시 daily_ai_used와 monthly_ai_used를 함께 증가시킨다.
+     * 호출 전에 반드시 {@link #resetDailyIfNeeded(LocalDate)}와
+     * {@link #resetMonthlyIfNeeded(LocalDate)}를 먼저 수행해야 한다.
      * 쿼터 초과 여부 사전 검증은 서비스 레이어(QuotaService)에서 수행한다.</p>
      */
     public void incrementAiUsage() {
@@ -227,17 +338,71 @@ public class UserPoint extends BaseAuditEntity {
     }
 
     /**
-     * 일일 AI 사용 횟수 리셋 (스케줄러 — 매일 자정 호출).
+     * 월간 AI 사용 횟수만 증가 (SUB_BONUS / PURCHASED 소스용).
+     *
+     * <p>v3.1: 구독 보너스 또는 구매 이용권 사용 시 daily_ai_used는 건드리지 않고
+     * monthly_ai_used만 증가시킨다. QuotaService에서 consumeAiBonus()/consumePurchasedToken()
+     * 호출 후 이 메서드를 호출한다.</p>
      */
-    public void resetDailyAiUsed() {
-        this.dailyAiUsed = 0;
+    public void incrementMonthlyAiUsage() {
+        this.monthlyAiUsed += 1;
     }
 
     /**
-     * 월간 AI 사용 횟수 리셋 (스케줄러 — 매월 1일 자정 호출).
+     * 월간 카운터 리셋.
+     *
+     * <p>monthlyReset 날짜의 월이 오늘과 다르면 monthlyAiUsed를 0으로 초기화하고
+     * monthlyReset을 오늘로 갱신한다. 이미 이번 달이면 아무 작업도 하지 않는다.</p>
+     *
+     * @param today 오늘 날짜
      */
-    public void resetMonthlyAiUsed() {
-        this.monthlyAiUsed = 0;
+    public void resetMonthlyIfNeeded(LocalDate today) {
+        if (this.monthlyReset == null || this.monthlyReset.getMonthValue() != today.getMonthValue()
+                || this.monthlyReset.getYear() != today.getYear()) {
+            this.monthlyAiUsed = 0;
+            this.monthlyReset = today;
+        }
+    }
+
+    /**
+     * 구매한 AI 이용권 토큰 1회 차감.
+     *
+     * <p>v3.0 신규 메서드. grade.daily_ai_limit와 구독 보너스 풀이 모두 소진된 경우
+     * QuotaService에서 호출한다. 음수 방지: 0 미만으로 내려가지 않는다.</p>
+     *
+     * @return 차감 성공 여부 (잔여 토큰이 0이면 false 반환)
+     */
+    public boolean consumePurchasedToken() {
+        if (this.purchasedAiTokens <= 0) {
+            return false; // 구매 토큰 없음 — 차단 필요
+        }
+        this.purchasedAiTokens -= 1;
+        return true;
+    }
+
+    /**
+     * 구매한 AI 이용권 토큰 추가.
+     *
+     * <p>v3.0 신규 메서드. 사용자가 포인트 상점에서 AI 이용권을 구매하면
+     * PointItemService에서 호출한다.</p>
+     *
+     * @param count 추가할 토큰 횟수 (양수여야 함)
+     * @throws IllegalArgumentException count가 0 이하인 경우
+     */
+    public void addPurchasedTokens(int count) {
+        if (count <= 0) {
+            throw new IllegalArgumentException("추가할 토큰 횟수는 1 이상이어야 합니다: count=" + count);
+        }
+        this.purchasedAiTokens += count;
+    }
+
+    /**
+     * 일일 AI 사용 횟수 리셋 (스케줄러 — 매일 자정 호출).
+     * @deprecated resetDailyIfNeeded()의 lazy reset으로 대체. 스케줄러 호환용으로 유지.
+     */
+    @Deprecated
+    public void resetDailyAiUsed() {
+        this.dailyAiUsed = 0;
     }
 
     /**
@@ -247,13 +412,7 @@ public class UserPoint extends BaseAuditEntity {
      * 등급 계산 로직(누적 포인트 기반 Grade 조회)은 서비스 레이어에서 수행하며,
      * 이 메서드는 단순히 참조를 교체한다.</p>
      *
-     * <h4>변경 이력</h4>
-     * <ul>
-     *   <li>2026-03-31: {@code updateGrade(Grade)} 방식으로 변경 —
-     *       외부에서 {@link Grade} 엔티티 객체를 주입받아 FK를 교체하는 방식으로 전환.</li>
-     * </ul>
-     *
-     * @param newGrade 새 등급 엔티티 (null 허용 — 서비스에서 BRONZE fallback 처리)
+     * @param newGrade 새 등급 엔티티 (null 허용 — 서비스에서 NORMAL fallback 처리)
      */
     public void updateGrade(Grade newGrade) {
         this.grade = newGrade;
@@ -262,12 +421,12 @@ public class UserPoint extends BaseAuditEntity {
     /**
      * 현재 등급 코드 문자열을 반환한다 (null-safe).
      *
-     * <p>grade 참조가 null이거나 LAZY 로딩 전이면 "BRONZE"를 반환한다.
-     * 서비스 레이어에서 등급 코드 문자열이 필요할 때 사용한다.</p>
+     * <p>grade 참조가 null이거나 LAZY 로딩 전이면 "NORMAL"을 반환한다.
+     * v3.0 기준 기본 등급은 NORMAL (가입 시 초기 등급).</p>
      *
-     * @return 등급 코드 (예: "BRONZE", "SILVER", "GOLD", "PLATINUM")
+     * @return 등급 코드 (예: "NORMAL", "BRONZE", "SILVER", "GOLD", "PLATINUM")
      */
     public String getGradeCode() {
-        return this.grade != null ? this.grade.getGradeCode() : "BRONZE";
+        return this.grade != null ? this.grade.getGradeCode() : "NORMAL";
     }
 }
