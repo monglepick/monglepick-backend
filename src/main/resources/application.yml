@@ -142,13 +142,34 @@ server:
       force: true
 
 ## -------------------------------------------------------------------------
+## P6Spy 데이터소스 데코레이터 설정
+## -------------------------------------------------------------------------
+## com.github.gavlyukovskiy:p6spy-spring-boot-starter 가 자동으로 DataSource 를
+## P6SpyDataSource 로 래핑하여 모든 JDBC 호출(JPA + MyBatis)을 인터셉트한다.
+## 로그 메시지 포맷은 {@link com.monglepick.monglepickbackend.global.config.P6SpyConfig}
+## 가 Hibernate BasicFormatterImpl 기반으로 직접 등록한다 (log-format 옵션은 무시됨).
+##
+## 운영 환경에서는 P6SPY_LOGGING=false 로 비활성화 권장 (성능 영향 + 로그 폭증).
+decorator:
+  datasource:
+    p6spy:
+      enable-logging: ${P6SPY_LOGGING:true}
+      ## SLF4J 로거(p6spy)로 출력 → 아래 logging.level.p6spy 로 레벨 제어
+      logging: slf4j
+      ## 멀티라인 SQL 출력 (P6SpyConfig 가 직접 포맷하므로 fallback 용)
+      multiline: true
+
+## -------------------------------------------------------------------------
 ## 로깅 설정
 ## -------------------------------------------------------------------------
 logging:
   level:
     root: INFO
     com.monglepick: DEBUG
-    ## SQL 디버깅 시 아래 주석 해제
+    ## P6Spy SQL 로그 (P6SpyConfig 가 Hibernate 포맷터로 정리한 SQL 출력)
+    ## 운영에서 끄려면 P6SPY_LOG_LEVEL=OFF 또는 위 P6SPY_LOGGING=false
+    p6spy: ${P6SPY_LOG_LEVEL:INFO}
+    ## SQL 디버깅 시 아래 주석 해제 (Hibernate 직접 출력 — P6Spy 와 중복되므로 보통 OFF)
     # org.hibernate.SQL: DEBUG
     # org.hibernate.orm.jdbc.bind: TRACE
 
