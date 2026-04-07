@@ -116,4 +116,16 @@ public class GenreMaster extends BaseAuditEntity {
     public void decrementContentsCount() {
         this.contentsCount = Math.max(0, (this.contentsCount == null ? 0 : this.contentsCount) - 1);
     }
+
+    /**
+     * 장르 한국어명을 변경한다 (관리자 마스터 관리용).
+     *
+     * <p>장르 코드(genre_code)는 시스템 식별자이므로 변경 불가.
+     * 표시명만 수정 가능하다.</p>
+     *
+     * @param genreName 변경할 한국어 장르명
+     */
+    public void updateName(String genreName) {
+        this.genreName = genreName;
+    }
 }

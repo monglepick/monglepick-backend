@@ -75,4 +75,28 @@ public class PointPackPrice extends BaseAuditEntity {
     @Column(name = "sort_order")
     @Builder.Default
     private Integer sortOrder = 0;
+
+    // ─────────────────────────────────────────────
+    // 도메인 메서드 (관리자 CRUD 전용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 포인트팩 메타 정보를 일괄 수정한다 (PK 제외).
+     *
+     * <p>가격(price)/지급포인트(pointsAmount) 변경은 결제 검증과 직결되므로 신중하게 사용한다.
+     * 운영 중인 팩의 가격을 변경하면 진행 중인 주문에 영향을 줄 수 있다.</p>
+     */
+    public void updateInfo(String packName, Integer price, Integer pointsAmount,
+                           Boolean isActive, Integer sortOrder) {
+        this.packName = packName;
+        this.price = price;
+        this.pointsAmount = pointsAmount;
+        this.isActive = isActive != null ? isActive : true;
+        this.sortOrder = sortOrder != null ? sortOrder : 0;
+    }
+
+    /** 활성 상태 토글 */
+    public void updateActive(boolean active) {
+        this.isActive = active;
+    }
 }

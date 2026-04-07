@@ -111,9 +111,60 @@ public class RoadmapCourse extends BaseAuditEntity {
     @Builder.Default
     private Boolean quizEnabled = false;
 
+    /**
+     * 코스 활성화 여부 (관리자 비활성화 토글용, 기본값 true).
+     *
+     * <p>false이면 사용자 측 {@code GET /api/v1/roadmap/courses}에서 노출되지 않으며,
+     * 신규 시작도 불가하다. 기존에 진행 중인 사용자의 진행 기록은 보존된다.</p>
+     *
+     * <p>JPA {@code ddl-auto=update}로 자동 컬럼 추가됨.</p>
+     */
+    @Column(name = "is_active")
+    @Builder.Default
+    private Boolean isActive = true;
+
     /* createdBy 수동 필드 제거 — BaseAuditEntity에서 @CreatedBy로 자동 관리 */
     /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
+
+    // ─────────────────────────────────────────────
+    // 도메인 메서드 (관리자 CRUD 전용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 코스 메타 정보를 수정한다 (관리자 전용).
+     *
+     * <p>코스 슬러그(course_id)는 사용자 진행 기록과 연결된 식별자이므로 변경 불가.
+     * 표시명/설명/테마/영화목록/난이도/퀴즈활성화만 수정 가능하다.</p>
+     *
+     * @param title       변경할 제목
+     * @param description 변경할 설명
+     * @param theme       변경할 테마
+     * @param movieIds    변경할 영화 ID JSON 배열 문자열
+     * @param movieCount  변경할 영화 수
+     * @param difficulty  변경할 난이도
+     * @param quizEnabled 변경할 퀴즈 활성화 여부
+     */
+    public void updateInfo(String title, String description, String theme,
+                           String movieIds, Integer movieCount,
+                           Difficulty difficulty, Boolean quizEnabled) {
+        this.title = title;
+        this.description = description;
+        this.theme = theme;
+        this.movieIds = movieIds;
+        this.movieCount = movieCount;
+        this.difficulty = difficulty;
+        this.quizEnabled = quizEnabled;
+    }
+
+    /**
+     * 코스 활성/비활성 상태를 변경한다 (관리자 토글용).
+     *
+     * @param active true=활성, false=비활성
+     */
+    public void updateActiveStatus(boolean active) {
+        this.isActive = active;
+    }
 
     /**
      * 코스 난이도 열거형.

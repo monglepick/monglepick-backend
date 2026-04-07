@@ -423,34 +423,41 @@ public class AdminContentService {
     // ─────────────────────────────────────────────
 
     /**
-     * 리뷰 목록을 영화 ID·최소 평점 필터로 조회한다.
+     * 리뷰 목록을 영화 ID·최소 평점·카테고리 필터로 조회한다.
      *
      * <p>필터 조합:
      * <ul>
-     *   <li>movieId만 있음 → 해당 영화의 전체 리뷰 페이징</li>
+     *   <li>movieId 단독 → 해당 영화의 전체 리뷰</li>
      *   <li>movieId + minRating → 해당 영화의 평점 이상 리뷰</li>
-     *   <li>movieId=null, minRating=null → 전체 리뷰 최신순</li>
+     *   <li>categoryCode 단독 (예: "COURSE") → 도장깨기 인증 리뷰 모니터링</li>
+     *   <li>모두 null → 전체 리뷰 최신순</li>
      * </ul>
-     * ReviewRepository에 복합 필터 메서드가 없으므로 movieId 단독 필터는 기존 메서드를,
-     * 전체 조회는 findAll(Pageable)을 활용하고 minRating 필터는 Java 스트림으로 후처리한다.</p>
+     * MyBatis 동적 필터(<if>)로 SQL 레벨에서 처리하며 인메모리 필터링은 사용하지 않는다.</p>
      *
-     * <p><b>성능 주의:</b> minRating 필터는 현재 인메모리 필터링이므로,
-     * 데이터가 많아지면 JPQL 쿼리로 전환을 권장한다.</p>
+     * <h3>도장깨기 인증 리뷰 모니터링</h3>
+     * <p>관리자 화면에서 {@code categoryCode="COURSE"}로 필터링하면
+     * {@link com.monglepick.monglepickbackend.domain.review.entity.ReviewCategoryCode#COURSE}로
+     * 작성된 리뷰만 조회되어, 도장깨기 단계 인증 리뷰를 모아 검수할 수 있다.</p>
      *
-     * @param movieId   영화 ID 필터 (null이면 전체 영화)
-     * @param minRating 최소 평점 필터 (null이면 무제한)
-     * @param pageable  페이지 정보
+     * @param movieId      영화 ID 필터 (null이면 전체 영화)
+     * @param minRating    최소 평점 필터 (null이면 무제한)
+     * @param categoryCode 작성 카테고리 enum 이름 필터 (null이면 전체)
+     * @param pageable     페이지 정보
      * @return 리뷰 목록 페이지
      */
-    public Page<ReviewResponse> getReviews(String movieId, Double minRating, Pageable pageable) {
+    public Page<ReviewResponse> getReviews(String movieId, Double minRating,
+                                           String categoryCode, Pageable pageable) {
         // 빈 문자열은 null로 통일하여 MyBatis <if> 동적 필터 조건 적용
-        String movieIdParam = (movieId != null && !movieId.isBlank()) ? movieId : null;
+        String movieIdParam      = (movieId      != null && !movieId.isBlank())      ? movieId      : null;
+        String categoryCodeParam = (categoryCode != null && !categoryCode.isBlank()) ? categoryCode : null;
 
         int offset = (int) pageable.getOffset();
         int limit  = pageable.getPageSize();
 
-        List<Review> reviews = reviewMapper.searchAdminReviews(movieIdParam, minRating, offset, limit);
-        long total = reviewMapper.countAdminReviews(movieIdParam, minRating);
+        List<Review> reviews = reviewMapper.searchAdminReviews(
+                movieIdParam, minRating, categoryCodeParam, offset, limit);
+        long total = reviewMapper.countAdminReviews(
+                movieIdParam, minRating, categoryCodeParam);
 
         List<ReviewResponse> content = reviews.stream()
                 .map(review -> new ReviewResponse(
@@ -463,6 +470,9 @@ public class AdminContentService {
                         review.isBlinded(),
                         review.isSpoiler(),
                         review.getLikeCount(),
+                        review.getReviewSource(),
+                        review.getReviewCategoryCode() != null
+                                ? review.getReviewCategoryCode().name() : null,
                         review.getCreatedAt()
                 ))
                 .toList();

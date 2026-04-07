@@ -249,4 +249,50 @@ public class Movie extends BaseAuditEntity {
         this.awards = awards;
         this.filmingLocation = filmingLocation;
     }
+
+    // ─────────────────────────────────────────────
+    // 도메인 메서드 (관리자 CRUD 전용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 관리자 영화 메타 정보 일괄 수정.
+     *
+     * <p>movie_id(PK)와 tmdb_id, source는 변경 불가 (외부 시스템 연결 식별자).
+     * KOBIS/KMDb 관련 외부 출처 컬럼도 별도 동기화 파이프라인이 책임지므로 제외.</p>
+     *
+     * <p>JPA dirty checking이 동작하므로 호출 후 별도 save()는 불필요.</p>
+     */
+    public void updateInfo(String title, String titleEn, String overview,
+                           String genres, Integer releaseYear, LocalDate releaseDate,
+                           Integer runtime, Double rating, String posterPath,
+                           String castMembers, String director, String keywords,
+                           String ottPlatforms, String moodTags, String certification,
+                           String trailerUrl, String tagline, String originalLanguage,
+                           String backdropPath, Boolean adult,
+                           String awards, String filmingLocation) {
+        this.title = title;
+        this.titleEn = titleEn;
+        this.overview = overview;
+        this.genres = genres;
+        this.releaseYear = releaseYear;
+        this.releaseDate = releaseDate;
+        this.runtime = runtime;
+        this.rating = rating;
+        this.posterPath = posterPath;
+        this.castMembers = castMembers;
+        this.director = director;
+        this.keywords = keywords;
+        this.ottPlatforms = ottPlatforms;
+        this.moodTags = moodTags;
+        this.certification = certification;
+        this.trailerUrl = trailerUrl;
+        this.tagline = tagline;
+        this.originalLanguage = originalLanguage;
+        this.backdropPath = backdropPath;
+        if (adult != null) {
+            this.adult = adult;
+        }
+        this.awards = awards;
+        this.filmingLocation = filmingLocation;
+    }
 }

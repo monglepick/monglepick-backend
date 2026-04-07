@@ -1,6 +1,7 @@
 package com.monglepick.monglepickbackend.domain.community.controller;
 
 import com.monglepick.monglepickbackend.domain.community.dto.PostCreateRequest;
+import com.monglepick.monglepickbackend.domain.community.dto.PostReportRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
 import com.monglepick.monglepickbackend.domain.community.service.PostService;
 import com.monglepick.monglepickbackend.global.constants.AppConstants;
@@ -260,4 +261,58 @@ public class PostController {
         PostResponse post = postService.publishDraft(id, userId);
         return ResponseEntity.ok(post);
     }
+
+    // ──────────────────────────────────────────────
+    // 게시글 신고 (사용자 → 관리자)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 게시글 신고 API (인증 필요).
+     *
+     * <p>사용자가 부적절한 게시글을 신고하면 {@code post_declaration} 테이블에
+     * 새 신고 레코드가 생성된다(status="pending"). 관리자는 별도 화면에서 검토/조치한다.</p>
+     *
+     * <h3>유효성/멱등성</h3>
+     * <ul>
+     *   <li>본인이 작성한 게시글은 신고 불가 (400 SELF_REPORT_NOT_ALLOWED)</li>
+     *   <li>동일 사용자의 중복 신고는 차단 (409 DUPLICATE_REPORT)</li>
+     * </ul>
+     *
+     * @param id      신고 대상 게시글 ID
+     * @param request 신고 사유 DTO
+     * @param userId  JWT에서 추출한 신고자 사용자 ID
+     * @return 201 Created + 생성된 신고 레코드 ID (post_declaration_id)
+     */
+    @Operation(
+            summary = "게시글 신고",
+            description = "게시글을 신고합니다 (JWT 필수). 본인 게시글 신고/중복 신고는 차단됩니다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "신고 접수 성공"),
+            @ApiResponse(responseCode = "400", description = "본인 게시글 신고 불가"),
+            @ApiResponse(responseCode = "401", description = "인증 필요"),
+            @ApiResponse(responseCode = "404", description = "게시글 없음"),
+            @ApiResponse(responseCode = "409", description = "중복 신고")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PostMapping("/{id}/report")
+    public ResponseEntity<PostReportResponse> reportPost(
+            @PathVariable Long id,
+            @Valid @RequestBody PostReportRequest request,
+            @AuthenticationPrincipal String userId) {
+
+        log.info("게시글 신고 요청 — postId:{}, userId:{}", id, userId);
+        Long declarationId = postService.reportPost(id, request, userId);
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(new PostReportResponse(declarationId, "pending"));
+    }
+
+    /**
+     * 게시글 신고 응답 DTO (인라인).
+     *
+     * @param reportId 생성된 신고 레코드 ID (post_declaration_id)
+     * @param status   초기 처리 상태 (항상 "pending")
+     */
+    public record PostReportResponse(Long reportId, String status) {}
 }

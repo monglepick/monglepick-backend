@@ -1,6 +1,8 @@
 package com.monglepick.monglepickbackend.domain.roadmap.repository;
 
 import com.monglepick.monglepickbackend.domain.roadmap.entity.RoadmapCourse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -45,4 +47,22 @@ public interface RoadmapCourseRepository extends JpaRepository<RoadmapCourse, Lo
      * @return 해당 테마의 코스 목록 (순서 보장 없음)
      */
     List<RoadmapCourse> findByTheme(String theme);
+
+    /**
+     * 코스 슬러그(course_id) 중복 여부 검사 (관리자 신규 등록 시).
+     *
+     * <p>course_id 컬럼에 UNIQUE 제약이 있으므로 INSERT 전에 사전 검증한다.</p>
+     *
+     * @param courseId 검사할 코스 슬러그
+     * @return 이미 존재하면 true
+     */
+    boolean existsByCourseId(String courseId);
+
+    /**
+     * 관리자용 — 코스 전체 페이징 조회 (활성/비활성 모두 포함).
+     *
+     * <p>정렬은 호출자의 {@link Pageable}이 결정한다. 사용자 노출용 조회는
+     * is_active=true 필터가 필요하지만, 관리자 화면에서는 모든 코스를 표시한다.</p>
+     */
+    Page<RoadmapCourse> findAll(Pageable pageable);
 }

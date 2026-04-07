@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.community.mapper;
 import com.monglepick.monglepickbackend.domain.community.entity.CommentLike;
 import com.monglepick.monglepickbackend.domain.community.entity.Post;
 import com.monglepick.monglepickbackend.domain.community.entity.PostComment;
+import com.monglepick.monglepickbackend.domain.community.entity.PostDeclaration;
 import com.monglepick.monglepickbackend.domain.community.entity.PostLike;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -211,4 +212,28 @@ public interface PostMapper {
     /** CommentLike 삭제 (hard-delete) */
     void deleteCommentLikeByCommentIdAndUserId(@Param("commentId") Long commentId,
                                                  @Param("userId") String userId);
+
+    // ═══ PostDeclaration (게시글 신고) ═══
+
+    /**
+     * 게시글 신고 INSERT — useGeneratedKeys로 postDeclarationId 자동 세팅.
+     *
+     * <p>사용자가 부적절한 게시글을 신고할 때 호출된다. 동일 사용자가 동일 게시글을
+     * 중복 신고하지 못하도록 호출자 측에서 {@link #existsDeclarationByPostIdAndUserId}로
+     * 사전 검증해야 한다.</p>
+     */
+    void insertDeclaration(PostDeclaration declaration);
+
+    /**
+     * 동일 사용자의 동일 게시글에 대한 신고 존재 여부.
+     *
+     * <p>중복 신고 방지(멱등 보장)를 위해 reportPost() 트랜잭션 진입 시 검사한다.
+     * 처리 상태(status)와 무관하게 한 번이라도 접수된 적이 있으면 true 반환.</p>
+     *
+     * @param postId 신고 대상 게시글 ID
+     * @param userId 신고자 사용자 ID
+     * @return 중복 신고가 이미 존재하면 true
+     */
+    boolean existsDeclarationByPostIdAndUserId(@Param("postId") Long postId,
+                                                @Param("userId") String userId);
 }

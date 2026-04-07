@@ -173,6 +173,12 @@ public enum ErrorCode {
     /** 게시글 수정/삭제 시 작성자 본인이 아닌 경우. */
     POST_ACCESS_DENIED(HttpStatus.FORBIDDEN, "POST002", "게시글 수정/삭제 권한이 없습니다"),
 
+    /** 같은 사용자가 같은 게시글을 여러 번 신고하려는 경우(멱등 보장). */
+    DUPLICATE_REPORT(HttpStatus.CONFLICT, "POST003", "이미 신고한 게시글입니다"),
+
+    /** 자신이 작성한 게시글을 본인이 신고하려는 경우. */
+    SELF_REPORT_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "POST004", "본인이 작성한 게시글은 신고할 수 없습니다"),
+
     // ─────────────────────────────────────────────
     // 리뷰 (REV0xx)
     // ─────────────────────────────────────────────
@@ -186,6 +192,57 @@ public enum ErrorCode {
 
     /** 영화 ID에 해당하는 영화를 찾을 수 없음. */
     MOVIE_NOT_FOUND(HttpStatus.NOT_FOUND, "MOV001", "영화를 찾을 수 없습니다"),
+
+    /** 관리자 — 영화 ID(movie_id) 중복 등록 시도. */
+    DUPLICATE_MOVIE_ID(HttpStatus.CONFLICT, "MOV002", "이미 사용 중인 영화 ID입니다"),
+
+    /** 관리자 — TMDB ID 중복 등록 시도. */
+    DUPLICATE_TMDB_ID(HttpStatus.CONFLICT, "MOV003", "이미 등록된 TMDB ID입니다"),
+
+    /** 관리자 — 장르 ID에 해당하는 장르 마스터를 찾을 수 없음. */
+    GENRE_NOT_FOUND(HttpStatus.NOT_FOUND, "GEN001", "장르를 찾을 수 없습니다"),
+
+    /** 관리자 — 장르 코드 중복 등록 시도. */
+    DUPLICATE_GENRE_CODE(HttpStatus.CONFLICT, "GEN002", "이미 사용 중인 장르 코드입니다"),
+
+    /** 관리자 — OCR 이벤트 ID에 해당하는 이벤트를 찾을 수 없음. */
+    OCR_EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "OCR001", "OCR 인증 이벤트를 찾을 수 없습니다"),
+
+    /** 관리자 — OCR 이벤트 시작/종료일이 잘못된 경우 (end &lt; start). */
+    INVALID_OCR_EVENT_PERIOD(HttpStatus.BAD_REQUEST, "OCR002", "이벤트 종료일은 시작일 이후여야 합니다"),
+
+    /** 관리자 — 인기 검색어 키워드를 찾을 수 없음. */
+    POPULAR_SEARCH_NOT_FOUND(HttpStatus.NOT_FOUND, "PSK001", "인기 검색어 항목을 찾을 수 없습니다"),
+
+    /** 관리자 — 인기 검색어 키워드 중복 등록 시도. */
+    DUPLICATE_POPULAR_KEYWORD(HttpStatus.CONFLICT, "PSK002", "이미 등록된 인기 검색어입니다"),
+
+    /** 관리자 — 월드컵 후보 영화를 찾을 수 없음. */
+    WORLDCUP_CANDIDATE_NOT_FOUND(HttpStatus.NOT_FOUND, "WCC001", "월드컵 후보 영화를 찾을 수 없습니다"),
+
+    /** 관리자 — 월드컵 후보 영화 중복 등록 시도(같은 movieId+category). */
+    DUPLICATE_WORLDCUP_CANDIDATE(HttpStatus.CONFLICT, "WCC002", "이미 등록된 월드컵 후보 영화입니다"),
+
+    /** 관리자 — 포인트팩(point_pack_prices) 마스터를 찾을 수 없음. */
+    POINT_PACK_NOT_FOUND(HttpStatus.NOT_FOUND, "PPK001", "포인트팩을 찾을 수 없습니다"),
+
+    /** 관리자 — (price, pointsAmount) 조합 중복 등록 시도. */
+    DUPLICATE_POINT_PACK(HttpStatus.CONFLICT, "PPK002", "이미 등록된 포인트팩 조합입니다"),
+
+    /** 관리자 — 게시글 카테고리(상위/하위)를 찾을 수 없음. */
+    CATEGORY_NOT_FOUND(HttpStatus.NOT_FOUND, "CAT001", "카테고리를 찾을 수 없습니다"),
+
+    /** 관리자 — 상위 카테고리명(up_category) 중복 등록 시도. */
+    DUPLICATE_CATEGORY_NAME(HttpStatus.CONFLICT, "CAT002", "이미 사용 중인 카테고리명입니다"),
+
+    /** 관리자 — 같은 상위 카테고리 내 하위 카테고리명 중복 등록 시도. */
+    DUPLICATE_CATEGORY_CHILD(HttpStatus.CONFLICT, "CAT003", "이미 사용 중인 하위 카테고리명입니다"),
+
+    /** 관리자 — 리워드 정책(policy_id 또는 action_type)을 찾을 수 없음. */
+    REWARD_POLICY_NOT_FOUND(HttpStatus.NOT_FOUND, "RWP001", "리워드 정책을 찾을 수 없습니다"),
+
+    /** 관리자 — action_type 중복 등록 시도. */
+    DUPLICATE_REWARD_POLICY(HttpStatus.CONFLICT, "RWP002", "이미 등록된 활동 코드입니다"),
 
     // ─────────────────────────────────────────────
     // 위시리스트 (WISH0xx)
@@ -222,6 +279,12 @@ public enum ErrorCode {
 
     /** 본인 업적이 아닌 경우 접근 거부. */
     ACHIEVEMENT_ACCESS_DENIED(HttpStatus.FORBIDDEN, "ACH002", "업적 조회 권한이 없습니다"),
+
+    /** AchievementType 마스터 — 업적 코드 중복 (관리자 신규 등록 시). */
+    DUPLICATE_ACHIEVEMENT_CODE(HttpStatus.CONFLICT, "ACH003", "이미 사용 중인 업적 코드입니다"),
+
+    /** AchievementType 마스터 — 업적 유형 ID에 해당하는 마스터를 찾을 수 없음. */
+    ACHIEVEMENT_TYPE_NOT_FOUND(HttpStatus.NOT_FOUND, "ACH004", "업적 유형을 찾을 수 없습니다"),
 
     // ─────────────────────────────────────────────
     // 채팅 (CHAT0xx)
@@ -276,7 +339,16 @@ public enum ErrorCode {
     ROADMAP_COURSE_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD001", "존재하지 않는 도장깨기 코스입니다"),
 
     /** quizId에 해당하는 퀴즈가 존재하지 않거나 PUBLISHED 상태가 아님. */
-    QUIZ_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD002", "존재하지 않거나 출제 중이 아닌 퀴즈입니다");
+    QUIZ_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD002", "존재하지 않거나 출제 중이 아닌 퀴즈입니다"),
+
+    /** 관리자 — 코스 슬러그(course_id) 중복 등록 시도. */
+    DUPLICATE_COURSE_ID(HttpStatus.CONFLICT, "ROAD003", "이미 사용 중인 코스 ID입니다"),
+
+    /** 관리자 — movie_ids JSON 직렬화 실패. */
+    INVALID_COURSE_MOVIE_IDS(HttpStatus.BAD_REQUEST, "ROAD004", "코스 영화 ID 형식이 올바르지 않습니다"),
+
+    /** 관리자 — 허용되지 않은 퀴즈 상태 전이 시도. */
+    INVALID_QUIZ_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "ROAD005", "허용되지 않은 퀴즈 상태 전이입니다");
 
     // ─────────────────────────────────────────────
     // 필드

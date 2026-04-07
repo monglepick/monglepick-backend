@@ -289,15 +289,20 @@ public class AdminContentController {
      * <p>영화 ID·최소 평점 필터로 조회한다.
      * 파라미터를 생략하면 전체 리뷰를 반환한다.</p>
      *
-     * @param movieId   영화 ID 필터 (생략 시 전체 영화)
-     * @param minRating 최소 평점 필터 (1.0~5.0, 생략 시 무제한)
-     * @param page      페이지 번호 (기본값 0)
-     * @param size      페이지 크기 (기본값 20)
+     * <h3>도장깨기 인증 리뷰 모니터링</h3>
+     * <p>{@code categoryCode="COURSE"}로 필터링하면 도장깨기(course) 단계 인증 리뷰만
+     * 조회된다. 기타 카테고리: THEATER_RECEIPT/WORLDCUP/WISHLIST/AI_RECOMMEND/PLAYLIST.</p>
+     *
+     * @param movieId      영화 ID 필터 (생략 시 전체 영화)
+     * @param minRating    최소 평점 필터 (1.0~5.0, 생략 시 무제한)
+     * @param categoryCode 작성 카테고리 enum 이름 (COURSE/AI_RECOMMEND/... 생략 시 전체)
+     * @param page         페이지 번호 (기본값 0)
+     * @param size         페이지 크기 (기본값 20)
      * @return 리뷰 목록 페이지
      */
     @Operation(
             summary = "리뷰 목록 조회",
-            description = "movieId(특정 영화), minRating(최소 평점 이상) 필터. 모두 생략 시 전체 조회"
+            description = "movieId / minRating / categoryCode 필터. categoryCode='COURSE'로 도장깨기 인증 리뷰 모니터링 가능"
     )
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공")
     @GetMapping("/reviews")
@@ -306,13 +311,16 @@ public class AdminContentController {
             @RequestParam(required = false) String movieId,
             @Parameter(description = "최소 평점 필터 (1.0~5.0, 생략 시 무제한)")
             @RequestParam(required = false) Double minRating,
+            @Parameter(description = "카테고리 enum 이름 필터 (THEATER_RECEIPT/COURSE/WORLDCUP/WISHLIST/AI_RECOMMEND/PLAYLIST, 생략 시 전체)")
+            @RequestParam(required = false) String categoryCode,
             @Parameter(description = "페이지 번호 (0부터 시작)")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기")
             @RequestParam(defaultValue = "20") int size
     ) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<ReviewResponse> result = adminContentService.getReviews(movieId, minRating, pageable);
+        Page<ReviewResponse> result = adminContentService.getReviews(
+                movieId, minRating, categoryCode, pageable);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 

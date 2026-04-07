@@ -188,18 +188,20 @@ public class ContentDto {
      *
      * <p>Review 엔티티의 실제 필드 기준:
      * reviewId, user(→userId), movieId, rating, content,
-     * isDeleted, isBlinded, spoiler, likeCount, createdAt</p>
+     * isDeleted, isBlinded, spoiler, likeCount, reviewSource, reviewCategoryCode, createdAt</p>
      *
-     * @param reviewId  리뷰 고유 ID
-     * @param userId    작성자 사용자 ID
-     * @param movieId   대상 영화 ID (movies.movie_id VARCHAR(50))
-     * @param rating    평점 (1.0~5.0, 0.5 단위)
-     * @param content   리뷰 본문
-     * @param isDeleted 소프트 삭제 여부
-     * @param isBlinded 신고 블라인드 여부
-     * @param spoiler   스포일러 포함 여부
-     * @param likeCount 좋아요 수 (비정규화)
-     * @param createdAt 작성 시각
+     * @param reviewId           리뷰 고유 ID
+     * @param userId             작성자 사용자 ID
+     * @param movieId            대상 영화 ID (movies.movie_id VARCHAR(50))
+     * @param rating             평점 (1.0~5.0, 0.5 단위)
+     * @param content            리뷰 본문
+     * @param isDeleted          소프트 삭제 여부
+     * @param isBlinded          신고 블라인드 여부
+     * @param spoiler            스포일러 포함 여부
+     * @param likeCount          좋아요 수 (비정규화)
+     * @param reviewSource       리뷰 작성 출처(참조 ID, 예: chat_ses_001 / cup_mch_005, nullable)
+     * @param reviewCategoryCode 작성 카테고리 enum 이름 (THEATER_RECEIPT/COURSE/WORLDCUP/WISHLIST/AI_RECOMMEND/PLAYLIST, nullable)
+     * @param createdAt          작성 시각
      */
     public record ReviewResponse(
             Long reviewId,
@@ -211,6 +213,8 @@ public class ContentDto {
             boolean isBlinded,
             boolean spoiler,
             int likeCount,
+            String reviewSource,
+            String reviewCategoryCode,
             LocalDateTime createdAt
     ) {}
 }

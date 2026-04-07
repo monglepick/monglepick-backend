@@ -175,8 +175,11 @@ public class RoadmapService {
                 ? courseRepo.findByTheme(theme)
                 : courseRepo.findAll();
 
-        // 각 코스에 사용자 진행률 매핑
+        // 각 코스에 사용자 진행률 매핑.
+        // is_active=false (관리자가 비활성화한) 코스는 사용자 측 노출에서 제외한다.
+        // 기존 진행 기록은 보존되지만, 신규 시작과 목록 노출만 차단된다.
         return courses.stream()
+                .filter(course -> Boolean.TRUE.equals(course.getIsActive()))
                 .map(course -> {
                     double progress = resolveProgressPercent(userId, course.getCourseId());
                     return CourseListResponse.from(course, progress);

@@ -100,18 +100,24 @@ public interface ReviewMapper {
     // ═══ Review 관리자 동적 검색 ═══
 
     /**
-     * 관리자 리뷰 동적 검색 (movieId + minRating, 페이징, 닉네임 포함).
+     * 관리자 리뷰 동적 검색 (movieId + minRating + categoryCode, 페이징, 닉네임 포함).
      *
      * <p>각 파라미터가 null이면 해당 필터를 건너뛴다.</p>
+     *
+     * <p>{@code categoryCode}는 {@link com.monglepick.monglepickbackend.domain.review.entity.ReviewCategoryCode}
+     * enum 이름 문자열(THEATER_RECEIPT/COURSE/WORLDCUP/WISHLIST/AI_RECOMMEND/PLAYLIST)이며,
+     * 도장깨기 인증 리뷰 모니터링 화면에서 "COURSE" 필터로 활용된다.</p>
      */
     List<Review> searchAdminReviews(@Param("movieId") String movieId,
                                      @Param("minRating") Double minRating,
+                                     @Param("categoryCode") String categoryCode,
                                      @Param("offset") int offset,
                                      @Param("limit") int limit);
 
-    /** 관리자 리뷰 동적 검색 총 건수 */
+    /** 관리자 리뷰 동적 검색 총 건수 (movieId + minRating + categoryCode) */
     long countAdminReviews(@Param("movieId") String movieId,
-                            @Param("minRating") Double minRating);
+                            @Param("minRating") Double minRating,
+                            @Param("categoryCode") String categoryCode);
 
     /** 관리자 리뷰 전체 페이징 조회 (필터 없음, 최신순, 닉네임 포함) */
     List<Review> findAllAdminReviews(@Param("offset") int offset,

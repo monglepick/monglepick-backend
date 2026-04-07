@@ -428,4 +428,58 @@
           AND user_id = #{userId}
     </delete>
 
+    <!-- ═══ PostDeclaration (게시글 신고) ═══ -->
+
+    <!--
+        게시글 신고 INSERT — useGeneratedKeys로 post_declaration_id 자동 세팅.
+
+        주의:
+          - status 기본값 "pending", target_type 기본값 "post"는 호출자(Service)에서 세팅
+          - toxicity_score는 비동기 AI 분석 후에 별도 UPDATE (현재는 NULL 저장)
+          - created_by/updated_by는 BaseAuditEntity AuditorAware로 자동 세팅 안 되므로 명시 INSERT
+            (현재 세션의 userId를 호출자에서 declaration.userId 와 동일하게 전달)
+    -->
+    <insert id="insertDeclaration" useGeneratedKeys="true" keyProperty="postDeclarationId">
+        INSERT INTO post_declaration (
+            post_id,
+            category_id,
+            user_id,
+            reported_user_id,
+            target_type,
+            declaration_content,
+            toxicity_score,
+            status,
+            created_at,
+            updated_at,
+            created_by,
+            updated_by
+        ) VALUES (
+            #{postId},
+            #{categoryId},
+            #{userId},
+            #{reportedUserId},
+            #{targetType},
+            #{declarationContent},
+            #{toxicityScore},
+            #{status},
+            NOW(),
+            NOW(),
+            #{userId},
+            #{userId}
+        )
+    </insert>
+
+    <!--
+        동일 사용자의 동일 게시글 중복 신고 여부 (멱등 검증).
+        처리 상태(status)와 무관하게 한 번이라도 접수된 적이 있으면 true.
+        target_type='post' 만 검사 (댓글 신고는 별도 호환 위해 분리 불필요).
+    -->
+    <select id="existsDeclarationByPostIdAndUserId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM post_declaration
+        WHERE post_id = #{postId}
+          AND user_id = #{userId}
+          AND target_type = 'post'
+    </select>
+
 </mapper>

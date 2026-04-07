@@ -83,6 +83,32 @@ public class OcrEvent extends BaseAuditEntity {
     }
 
     /**
+     * 이벤트 메타 정보 수정 (관리자 마스터 관리용).
+     *
+     * <p>이벤트 ID(event_id)와 생성자 admin_id는 변경 불가.
+     * 영화/시작일/종료일만 수정 가능하다.</p>
+     *
+     * @param movieId   대상 영화 ID
+     * @param startDate 이벤트 시작일
+     * @param endDate   이벤트 종료일
+     */
+    public void updateInfo(String movieId, LocalDateTime startDate, LocalDateTime endDate) {
+        this.movieId = movieId;
+        this.startDate = startDate;
+        this.endDate = endDate;
+    }
+
+    /**
+     * 이벤트 상태를 임의로 변경한다 (관리자 토글).
+     *
+     * <p>activate/close 도메인 메서드와 달리, 관리자가 임의로 READY ↔ ACTIVE ↔ CLOSED
+     * 상태를 변경할 수 있도록 허용한다. 잘못된 전이 검증은 호출자(Service)가 책임진다.</p>
+     */
+    public void changeStatus(OcrEventStatus newStatus) {
+        this.status = newStatus;
+    }
+
+    /**
      * 실관람 인증 이벤트 상태
      *
      * <ul>

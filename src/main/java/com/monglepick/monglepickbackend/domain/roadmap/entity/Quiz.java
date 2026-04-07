@@ -157,6 +157,32 @@ public class Quiz extends BaseAuditEntity {
     }
 
     /**
+     * 관리자 퀴즈 본문/메타 정보를 수정한다.
+     *
+     * <p>상태(status)는 본 메서드에서 변경하지 않는다.
+     * 상태 전이는 {@link #approve()}, {@link #reject()}, {@link #publish()}로 별도 처리한다.</p>
+     *
+     * @param movieId       대상 영화 ID (nullable)
+     * @param question      문제 본문
+     * @param explanation   해설 (nullable)
+     * @param correctAnswer 정답 문자열
+     * @param options       선택지 JSON 문자열 (nullable — 주관식)
+     * @param rewardPoint   보상 포인트
+     * @param quizDate      출제 예정일 (nullable)
+     */
+    public void updateInfo(String movieId, String question, String explanation,
+                           String correctAnswer, String options, Integer rewardPoint,
+                           LocalDate quizDate) {
+        this.movieId = movieId;
+        this.question = question;
+        this.explanation = explanation;
+        this.correctAnswer = correctAnswer;
+        this.options = options;
+        this.rewardPoint = rewardPoint != null ? rewardPoint : this.rewardPoint;
+        this.quizDate = quizDate;
+    }
+
+    /**
      * 퀴즈 상태 열거형.
      *
      * <p>퀴즈 파이프라인의 진행 단계를 나타낸다.</p>

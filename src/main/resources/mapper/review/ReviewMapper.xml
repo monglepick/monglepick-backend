@@ -224,6 +224,13 @@
         <if test="minRating != null">
             AND r.rating >= #{minRating}
         </if>
+        <!--
+            도장깨기 인증 리뷰 모니터링 — review_category_code 필터.
+            enum.name() 문자열 비교 (THEATER_RECEIPT/COURSE/WORLDCUP/WISHLIST/AI_RECOMMEND/PLAYLIST)
+        -->
+        <if test="categoryCode != null and categoryCode != ''">
+            AND r.review_category_code = #{categoryCode}
+        </if>
     </sql>
 
     <select id="searchAdminReviews" resultMap="reviewWithNicknameResultMap">

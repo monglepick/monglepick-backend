@@ -73,4 +73,14 @@ public class CategoryChild extends BaseAuditEntity {
 
     /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
+
+    /**
+     * 하위 카테고리명을 변경한다 (관리자 마스터 관리 전용).
+     *
+     * <p>(category_id, category_child) UNIQUE 제약이 있으므로
+     * 호출자(Service)에서 중복 검증 필수.</p>
+     */
+    public void updateName(String categoryChild) {
+        this.categoryChild = categoryChild;
+    }
 }

@@ -1,6 +1,8 @@
 package com.monglepick.monglepickbackend.domain.roadmap.repository;
 
 import com.monglepick.monglepickbackend.domain.roadmap.entity.AchievementType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -56,4 +58,26 @@ public interface AchievementTypeRepository extends JpaRepository<AchievementType
      * @return 해당 카테고리의 활성 업적 유형 리스트
      */
     List<AchievementType> findByCategoryAndIsActiveTrue(String category);
+
+    /**
+     * 업적 코드 중복 확인 (관리자 신규 등록 시 사전 검증).
+     *
+     * <p>achievement_code 컬럼에 UNIQUE 제약이 있으므로, INSERT 전에 이 메서드로
+     * 중복 여부를 사전 확인하여 사용자 친화적인 409 응답을 반환한다.</p>
+     *
+     * @param achievementCode 검사할 업적 코드
+     * @return 이미 존재하면 true
+     */
+    boolean existsByAchievementCode(String achievementCode);
+
+    /**
+     * 관리자용 — 업적 유형 전체 페이징 조회 (활성/비활성 모두 포함).
+     *
+     * <p>활성 상태에 관계없이 모든 업적 유형을 페이징하여 조회한다.
+     * 정렬은 호출자의 {@link Pageable}이 결정한다.</p>
+     *
+     * @param pageable 페이지 정보 (page/size/sort)
+     * @return 업적 유형 페이지
+     */
+    Page<AchievementType> findAll(Pageable pageable);
 }

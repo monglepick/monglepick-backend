@@ -1,8 +1,10 @@
 package com.monglepick.monglepickbackend.domain.community.service;
 
 import com.monglepick.monglepickbackend.domain.community.dto.PostCreateRequest;
+import com.monglepick.monglepickbackend.domain.community.dto.PostReportRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
 import com.monglepick.monglepickbackend.domain.community.entity.Post;
+import com.monglepick.monglepickbackend.domain.community.entity.PostDeclaration;
 import com.monglepick.monglepickbackend.domain.community.entity.PostLike;
 import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
@@ -282,6 +284,77 @@ public class PostService {
         log.debug("게시글 좋아요 토글 — userId:{}, postId:{}, liked:{}, count:{}", userId, postId, liked, count);
 
         return LikeToggleResponse.of(liked, count);
+    }
+
+    // ──────────────────────────────────────────────
+    // 게시글 신고 (사용자 측)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 게시글 신고를 접수한다.
+     *
+     * <p>사용자가 부적절한 게시글을 신고하면 {@code post_declaration} 테이블에
+     * 새 신고 레코드를 INSERT 한다. 처리 상태는 "pending"으로 시작하며,
+     * 관리자는 {@code AdminContentService.processReport()}로 검토/조치한다.</p>
+     *
+     * <h3>비즈니스 규칙</h3>
+     * <ul>
+     *   <li>대상 게시글이 없으면 404 (POST_NOT_FOUND)</li>
+     *   <li>본인이 작성한 게시글은 신고 불가 (400 SELF_REPORT_NOT_ALLOWED)</li>
+     *   <li>동일 사용자가 동일 게시글을 중복 신고하면 409 (DUPLICATE_REPORT) — 멱등 보장</li>
+     *   <li>이미 소프트 삭제된 게시글도 신고 가능(악의적 작성자 추적용)</li>
+     * </ul>
+     *
+     * <p>{@code categoryId}는 PostDeclaration 컬럼이지만 현재 Post.Category는
+     * enum 기반이라 별도의 카테고리 마스터 ID가 없으므로 null로 저장한다.
+     * (Phase 5-2 카테고리 관리 작업 시 Category 마스터 PK로 매핑 예정)</p>
+     *
+     * <p>AI 독성 분석은 비동기로 별도 워커가 처리하므로 INSERT 시점에는
+     * {@code toxicity_score = NULL}로 저장된다.</p>
+     *
+     * @param postId  신고 대상 게시글 ID
+     * @param request 신고 사유 DTO
+     * @param userId  신고자 사용자 ID (JWT에서 추출)
+     * @return 생성된 신고 레코드의 ID (post_declaration_id)
+     * @throws BusinessException 게시글 없음 / 본인 신고 / 중복 신고
+     */
+    @Transactional
+    public Long reportPost(Long postId, PostReportRequest request, String userId) {
+        // 1) 대상 게시글 존재 검증 (소프트 삭제 포함 — 악의적 작성자 추적용)
+        Post target = postMapper.findById(postId);
+        if (target == null) {
+            throw new BusinessException(ErrorCode.POST_NOT_FOUND);
+        }
+
+        // 2) 본인이 작성한 게시글 신고 차단
+        if (target.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.SELF_REPORT_NOT_ALLOWED);
+        }
+
+        // 3) 중복 신고 차단 (멱등 보장 — 처리 상태 무관)
+        if (postMapper.existsDeclarationByPostIdAndUserId(postId, userId)) {
+            throw new BusinessException(ErrorCode.DUPLICATE_REPORT);
+        }
+
+        // 4) 신고 INSERT — status="pending", target_type="post", toxicity_score=null
+        //    categoryId는 Category 마스터 미연동 상태이므로 null 저장 (Phase 5-2 이후 매핑 예정)
+        PostDeclaration declaration = PostDeclaration.builder()
+                .postId(postId)
+                .categoryId(null)
+                .userId(userId)
+                .reportedUserId(target.getUserId())
+                .targetType("post")
+                .declarationContent(request.reason())
+                .toxicityScore(null)
+                .status("pending")
+                .build();
+
+        postMapper.insertDeclaration(declaration);
+
+        log.info("게시글 신고 접수 — postId:{}, reporterId:{}, reportedUserId:{}, declarationId:{}",
+                postId, userId, target.getUserId(), declaration.getPostDeclarationId());
+
+        return declaration.getPostDeclarationId();
     }
 
     // ──────────────────────────────────────────────

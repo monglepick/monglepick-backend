@@ -68,6 +68,14 @@ public class WorldcupService {
     /** 영화 레포지토리 — 후보 영화 랜덤 선택 및 결과 조회 시 상세 정보 조회 */
     private final MovieRepository movieRepo;
 
+    /**
+     * 월드컵 후보 풀 레포지토리 — 관리자가 큐레이션한 활성 후보 영화 조회.
+     *
+     * <p>resolveCandidates() 진입 시 활성 후보 풀에서 우선 선택하고,
+     * 부족한 경우 기존 movieRepo.findRandomMovieIdsByGenre() fallback.</p>
+     */
+    private final com.monglepick.monglepickbackend.domain.search.repository.WorldcupCandidateRepository
+            worldcupCandidateRepo;
 
     /** 리워드 서비스 — 완주 시 포인트 지급 위임 */
     private final RewardService rewardService;
@@ -289,11 +297,41 @@ public class WorldcupService {
     private List<String> resolveCandidates(String genreFilter, int roundSize,
                                             List<String> candidateMovieIds) {
         if (candidateMovieIds == null || candidateMovieIds.isEmpty()) {
-            // Frontend가 candidateMovieIds를 전달하지 않은 경우 — DB에서 랜덤 선택
-            log.info("candidateMovieIds 미제공 — DB에서 랜덤 선택: genreFilter={}, roundSize={}",
+            // Frontend가 candidateMovieIds를 전달하지 않은 경우 — 후보 풀 우선 사용
+            log.info("candidateMovieIds 미제공 — 후보 풀 우선 + DB fallback: genreFilter={}, roundSize={}",
                     genreFilter, roundSize);
 
-            // 빈 문자열 genreFilter는 null로 변환 (네이티브 쿼리의 :genre IS NULL 조건 활용)
+            // ① 1차: WorldcupCandidate 활성 풀에서 우선 조회
+            //   - genreFilter가 있으면 카테고리로 매칭, 없으면 전체 활성 후보
+            //   - 풀 크기가 roundSize 이상이면 셔플 후 앞쪽 roundSize개 사용
+            String poolCategory = (genreFilter != null && !genreFilter.isBlank())
+                    ? genreFilter : null;
+            List<String> poolIds = worldcupCandidateRepo.findActiveMovieIds(poolCategory);
+
+            if (poolIds.size() >= roundSize) {
+                java.util.List<String> mutable = new java.util.ArrayList<>(poolIds);
+                java.util.Collections.shuffle(mutable);
+                List<String> selected = mutable.subList(0, roundSize);
+                log.info("월드컵 후보 풀 사용 — category={}, poolSize={}, selected={}",
+                        poolCategory, poolIds.size(), roundSize);
+                return selected;
+            }
+
+            // 풀에 후보가 부족하면 카테고리 무시하고 전체 활성 풀 재시도
+            if (poolCategory != null) {
+                List<String> allPoolIds = worldcupCandidateRepo.findActiveMovieIds(null);
+                if (allPoolIds.size() >= roundSize) {
+                    java.util.List<String> mutable = new java.util.ArrayList<>(allPoolIds);
+                    java.util.Collections.shuffle(mutable);
+                    List<String> selected = mutable.subList(0, roundSize);
+                    log.info("월드컵 후보 풀(전체) 사용 — poolSize={}, selected={}",
+                            allPoolIds.size(), roundSize);
+                    return selected;
+                }
+            }
+
+            // ② 2차 fallback: 기존 Movie 랜덤 조회 (후보 풀이 비어 있거나 부족할 때)
+            log.info("월드컵 후보 풀 부족({}) — Movie 랜덤 조회로 fallback", poolIds.size());
             String genre = (genreFilter != null && !genreFilter.isBlank()) ? genreFilter : null;
             List<String> randomIds = movieRepo.findRandomMovieIdsByGenre(genre, roundSize);
 

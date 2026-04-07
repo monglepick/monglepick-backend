@@ -32,4 +32,11 @@ public interface PointPackPriceRepository extends JpaRepository<PointPackPrice, 
      * 활성 포인트팩 전체 목록을 정렬 순서로 조회한다 (클라이언트 상점 표시용).
      */
     List<PointPackPrice> findByIsActiveTrueOrderBySortOrderAsc();
+
+    /**
+     * 관리자 — 동일한 (price, pointsAmount) 조합 중복 등록 검증.
+     *
+     * <p>활성/비활성 무관하게 중복 가격 조합은 차단한다.</p>
+     */
+    boolean existsByPriceAndPointsAmount(Integer price, Integer pointsAmount);
 }
