@@ -261,4 +261,75 @@ public final class PaymentDto {
             Object data
     ) {
     }
+
+    // ──────────────────────────────────────────────
+    // 환불 처리 (사용자 → Backend)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 주문 환불 요청.
+     *
+     * <p>COMPLETED 상태 주문에 대해 사용자가 환불을 요청할 때 사용한다.
+     * 실제 Toss Payments 취소 API 호출과 포인트 회수가 함께 수행된다.</p>
+     *
+     * <h4>환불 정책</h4>
+     * <ul>
+     *   <li>POINT_PACK: 지급된 포인트를 회수하고 결제 금액을 환불한다. 잔액 부족 시 환불 불가.</li>
+     *   <li>SUBSCRIPTION: 구독 혜택 포인트는 회수하지 않는다 (서비스 이용 대가).</li>
+     *   <li>COMPLETED 상태에서만 환불 가능. 이미 REFUNDED이면 멱등 처리.</li>
+     * </ul>
+     *
+     * @param reason 환불 사유 (사용자 입력, nullable — null이면 "사용자 환불 요청"으로 기록)
+     */
+    public record RefundRequest(
+            String reason
+    ) {
+    }
+
+    /**
+     * 주문 환불 응답.
+     *
+     * @param success      환불 성공 여부
+     * @param orderId      환불 처리된 주문 UUID
+     * @param refundAmount 환불 금액 (KRW 원 단위)
+     * @param message      처리 결과 안내 메시지
+     */
+    public record RefundResponse(
+            boolean success,
+            String orderId,
+            int refundAmount,
+            String message
+    ) {
+    }
+
+    // ──────────────────────────────────────────────
+    // 구독 연장 (관리자 → Backend)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 구독 연장 요청 (관리자 전용).
+     *
+     * <p>장애 보상, 프로모션, 수동 연장 등 관리자가 특정 구독을 1주기 연장할 때 사용한다.
+     * 연장 주기는 구독 상품의 {@code periodType}(MONTHLY/YEARLY)에 따라 자동 결정된다.</p>
+     *
+     * @param adminNote 연장 사유 메모 (감사 로그용, nullable — null이면 "관리자 연장"으로 기록)
+     */
+    public record ExtendSubscriptionRequest(
+            String adminNote
+    ) {
+    }
+
+    /**
+     * 구독 연장 응답.
+     *
+     * @param success      연장 성공 여부
+     * @param newExpiresAt 연장 후 새 만료 일시
+     * @param message      처리 결과 안내 메시지
+     */
+    public record ExtendSubscriptionResponse(
+            boolean success,
+            LocalDateTime newExpiresAt,
+            String message
+    ) {
+    }
 }

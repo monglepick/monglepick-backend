@@ -1,6 +1,5 @@
 package com.monglepick.monglepickbackend.domain.roadmap.entity;
 
-import com.monglepick.monglepickbackend.domain.user.entity.Admin;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -39,7 +38,7 @@ import java.time.LocalDateTime;
  * <h3>주요 필드</h3>
  * <ul>
  *   <li>{@code quiz} — 검수 대상 퀴즈 (FK → quizzes.quiz_id, LAZY)</li>
- *   <li>{@code admin} — 검수 담당 관리자 (FK → admin.admin_id, LAZY, nullable)</li>
+ *   <li>{@code adminId} — 검수 담당 관리자 ID (Long FK → admin.admin_id, JPA/MyBatis 하이브리드 §15.4)</li>
  *   <li>{@code reviewStatus} — 검수 결과 (ReviewStatus enum, 기본값: PENDING)</li>
  *   <li>{@code reviewerComment} — 검수 의견 (TEXT, nullable)</li>
  *   <li>{@code reviewedAt} — 검수 완료 시각 (DATETIME, nullable)</li>
@@ -76,14 +75,15 @@ public class QuizReview extends BaseAuditEntity {
     private Quiz quiz;
 
     /**
-     * 검수 담당 관리자 (FK → admin.admin_id, LAZY, nullable).
-     * 자동화 검수나 배정 전 상태이면 null이 될 수 있다.
-     * Admin 엔티티는 user/entity/Admin.java에 정의되어 있으며
-     * admin 테이블의 admin_id(BIGINT)를 참조한다.
+     * 검수 담당 관리자 ID — admin.admin_id를 Long으로 직접 참조한다.
+     *
+     * <p>자동화 검수나 배정 전 상태이면 null이 될 수 있다.
+     * admin 테이블의 쓰기 소유는 김민규(MyBatis user 도메인)이므로 JPA @ManyToOne 매핑을
+     * 두지 않고 Long FK로만 보관한다 (설계서 §15.4). Quiz 참조는 같은 roadmap 도메인이므로
+     * @ManyToOne 유지한다.</p>
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "admin_id", nullable = true)
-    private Admin admin;
+    @Column(name = "admin_id")
+    private Long adminId;
 
     /**
      * 검수 결과 상태 (ReviewStatus enum, 기본값: PENDING).

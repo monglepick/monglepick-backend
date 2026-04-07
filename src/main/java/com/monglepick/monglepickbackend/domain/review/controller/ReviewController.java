@@ -2,8 +2,10 @@ package com.monglepick.monglepickbackend.domain.review.controller;
 
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewCreateRequest;
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewResponse;
+import com.monglepick.monglepickbackend.domain.review.dto.ReviewUpdateRequest;
 import com.monglepick.monglepickbackend.domain.review.service.ReviewService;
 import com.monglepick.monglepickbackend.global.constants.AppConstants;
+import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -89,6 +92,76 @@ public class ReviewController {
         log.info("리뷰 작성 요청 - userId: {}, movieId: {}", userId, movieId);
         ReviewResponse review = reviewService.createReview(movieId, request, userId);
         return ResponseEntity.status(HttpStatus.CREATED).body(review);
+    }
+
+    /**
+     * 리뷰 좋아요 토글 API (인스타그램 스타일, JWT 필수).
+     *
+     * <p>한 번 호출로 좋아요 등록/취소를 전환한다.
+     * 좋아요가 없으면 INSERT, 있으면 hard DELETE 처리된다.
+     * movieId 는 경로 일관성을 위해 포함되며, 실제 좋아요 처리는 reviewId 기준으로 수행된다.</p>
+     *
+     * @param movieId  영화 ID (경로 일관성용)
+     * @param reviewId 좋아요 대상 리뷰 ID
+     * @param userId   JWT에서 추출한 사용자 ID
+     * @return 200 OK + { liked, likeCount }
+     */
+    @Operation(summary = "리뷰 좋아요 토글",
+            description = "리뷰 좋아요를 토글합니다 (인스타그램 스타일 — 한 번 클릭으로 등록/취소). JWT 필수.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "좋아요 토글 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PostMapping("/{reviewId}/like")
+    public ResponseEntity<LikeToggleResponse> toggleReviewLike(
+            @PathVariable String movieId,
+            @PathVariable Long reviewId,
+            @AuthenticationPrincipal String userId) {
+
+        log.info("리뷰 좋아요 토글 — userId:{}, movieId:{}, reviewId:{}", userId, movieId, reviewId);
+        LikeToggleResponse response = reviewService.toggleReviewLike(userId, reviewId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 리뷰 수정 API (작성자만).
+     *
+     * <p>클라이언트 {@code reviewApi.updateReview(movieId, reviewId, { content, rating })}와
+     * 1:1 대응된다. 요청 바디에는 수정할 평점과 내용만 포함되며,
+     * 리뷰 식별자는 경로 변수로 전달된다.</p>
+     *
+     * <h3>응답 코드</h3>
+     * <ul>
+     *   <li>200 OK — 수정 성공 (변경된 리뷰 반환)</li>
+     *   <li>403 — 작성자 본인이 아님</li>
+     *   <li>404 — 리뷰 없음 또는 {@code movieId} 불일치</li>
+     * </ul>
+     *
+     * @param movieId  영화 ID (경로 일관성용 — 실제 검증에도 사용)
+     * @param reviewId 수정 대상 리뷰 ID
+     * @param request  수정 요청 DTO (rating 필수, content nullable)
+     * @param userId   JWT에서 추출한 사용자 ID
+     * @return 200 OK + 수정된 리뷰 정보
+     */
+    @Operation(summary = "리뷰 수정", description = "리뷰 내용/평점 수정 (작성자 본인만 가능)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "리뷰 수정 성공"),
+            @ApiResponse(responseCode = "400", description = "잘못된 요청 (평점 범위 초과 등)"),
+            @ApiResponse(responseCode = "403", description = "수정 권한 없음"),
+            @ApiResponse(responseCode = "404", description = "리뷰 없음 또는 영화 불일치")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PutMapping("/{reviewId}")
+    public ResponseEntity<ReviewResponse> updateReview(
+            @PathVariable String movieId,
+            @PathVariable Long reviewId,
+            @Valid @RequestBody ReviewUpdateRequest request,
+            @AuthenticationPrincipal String userId) {
+
+        log.info("리뷰 수정 요청 - userId: {}, movieId: {}, reviewId: {}", userId, movieId, reviewId);
+        ReviewResponse updated = reviewService.updateReview(movieId, reviewId, request, userId);
+        return ResponseEntity.ok(updated);
     }
 
     /**

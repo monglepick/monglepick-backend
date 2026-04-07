@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.community.controller;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCommentCreateRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCommentResponse;
 import com.monglepick.monglepickbackend.domain.community.service.PostCommentService;
+import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -114,6 +115,42 @@ public class PostCommentController {
         log.info("[Comment API] 댓글 작성 요청: postId={}, userId={}", postId, userId);
         PostCommentResponse response = postCommentService.createComment(userId, postId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    // ─────────────────────────────────────────────
+    // 댓글 좋아요 토글 (JWT 인증 필요)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 댓글 좋아요 토글 API (인스타그램 스타일, JWT 필수).
+     *
+     * <p>한 번 호출로 좋아요 등록/취소를 전환한다.
+     * 좋아요가 없으면 INSERT, 있으면 hard DELETE 처리된다.
+     * postId는 경로 일관성을 위해 포함되며, 실제 좋아요 처리는 commentId 기준으로 수행된다.</p>
+     *
+     * @param postId    게시글 ID (경로 일관성용)
+     * @param commentId 좋아요 대상 댓글 ID
+     * @param userId    JWT에서 추출한 사용자 ID
+     * @return 200 OK + { liked, likeCount }
+     */
+    @Operation(summary = "댓글 좋아요 토글",
+            description = "댓글 좋아요를 토글합니다 (인스타그램 스타일 — 한 번 클릭으로 등록/취소). JWT 필수.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "좋아요 토글 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요"),
+            @ApiResponse(responseCode = "404", description = "댓글 없음")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PostMapping("/{commentId}/like")
+    public ResponseEntity<LikeToggleResponse> toggleCommentLike(
+            @PathVariable Long postId,
+            @PathVariable Long commentId,
+            @AuthenticationPrincipal String userId) {
+
+        log.info("[Comment Like] 댓글 좋아요 토글 — userId:{}, postId:{}, commentId:{}",
+                userId, postId, commentId);
+        LikeToggleResponse response = postCommentService.toggleCommentLike(userId, commentId);
+        return ResponseEntity.ok(response);
     }
 
     // ─────────────────────────────────────────────

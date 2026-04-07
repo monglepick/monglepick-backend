@@ -46,7 +46,7 @@ public class StatsDto {
      * @param mau            월간 활성 사용자 수 (최근 30일 내 로그인)
      * @param newUsersWeek   이번 주 신규 가입자 수 (최근 7일)
      * @param totalReviews   전체 리뷰 수
-     * @param avgRating      전체 평균 평점 (1.0~5.0, mock 또는 WatchHistory 기반)
+     * @param avgRating      전체 평균 평점 (1.0~5.0, reviews 테이블 기반)
      * @param totalPosts     전체 게시글 수 (PUBLISHED 상태만)
      */
     public record OverviewResponse(
@@ -201,7 +201,7 @@ public class StatsDto {
     /**
      * 사용자 행동 패턴 분석 응답.
      *
-     * @param genrePreferences 장르 선호도 분포 (WatchHistory 기반)
+     * @param genrePreferences 장르 선호도 분포 (reviews + movies JOIN 기반, watch_history 폐기)
      * @param hourlyActivity   시간대별 활동량 (0~23시)
      */
     public record BehaviorResponse(
@@ -212,9 +212,9 @@ public class StatsDto {
     /**
      * 장르별 사용자 선호도 단건.
      *
-     * <p>WatchHistory의 시청 이력에서 영화 메타데이터를 조인하여 집계하는 것이 이상적이나,
-     * 현재 watch_history 테이블에 장르 컬럼이 없으므로 mock 또는
-     * movie 테이블 조인이 필요한 경우 TODO로 처리한다.</p>
+     * <p>"리뷰 작성 = 시청 완료" 단일 진실 원본 원칙에 따라 reviews 테이블의
+     * movie_id를 movies 테이블과 JOIN하여 장르를 집계해야 한다 (현재는 mock).
+     * watch_history 도메인은 폐기되었다 (2026-04-08).</p>
      *
      * @param genre      장르명
      * @param count      해당 장르 시청 건수

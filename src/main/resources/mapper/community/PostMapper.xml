@@ -3,18 +3,26 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <!--
-    커뮤니티 게시글/댓글(posts, post_comment) Mapper XML.
-    테이블: posts, post_comment
-    담당: 이민수 (community 도메인)
+    커뮤니티 통합 Mapper XML — 이민수 + admin 영역 포괄.
+
+    테이블: posts, post_comment, post_likes, comment_likes
+    담당: 이민수 (community 도메인), admin 동적 검색은 윤형주 유지보수
+
+    설계:
+      - @Entity는 DDL 정의 전용, 데이터 R/W는 100% 이 Mapper (§15)
+      - Post는 String userId + @Transient String nickname 구조
+      - 목록/상세는 JOIN users로 nickname 로드
+      - view/like/comment 카운트는 원자적 DB UPDATE (race 방지)
+      - 소프트 삭제 필터(is_deleted=false)는 목록 조회의 기본값
 -->
 <mapper namespace="com.monglepick.monglepickbackend.domain.community.mapper.PostMapper">
 
-    <!-- ═══ ResultMap ═══ -->
+    <!-- ═══ ResultMaps ═══ -->
 
-    <!-- 게시글 기본 매핑 -->
+    <!-- 게시글 기본 매핑 (nickname 없음) -->
     <resultMap id="postResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post">
         <id property="postId" column="post_id"/>
-        <!-- user는 별도 association으로 매핑 -->
+        <result property="userId" column="user_id"/>
         <result property="title" column="title"/>
         <result property="content" column="content"/>
         <result property="category" column="category"/>
@@ -31,15 +39,10 @@
         <result property="updatedBy" column="updated_by"/>
     </resultMap>
 
-    <!-- 게시글 + 작성자 JOIN 매핑 -->
-    <resultMap id="postWithUserResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post"
+    <!-- 게시글 + JOIN users.nickname 매핑 (상세/목록용) -->
+    <resultMap id="postWithNicknameResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post"
                extends="postResultMap">
-        <association property="user" javaType="com.monglepick.monglepickbackend.domain.user.entity.User">
-            <id property="userId" column="user_id"/>
-            <result property="nickname" column="nickname"/>
-            <result property="profileImage" column="profile_image"/>
-            <result property="email" column="email"/>
-        </association>
+        <result property="nickname" column="nickname"/>
     </resultMap>
 
     <!-- 댓글 매핑 -->
@@ -56,62 +59,74 @@
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
-    <!-- ═══ Post SELECT ═══ -->
+    <!-- 게시글 좋아요 매핑 -->
+    <resultMap id="postLikeResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.PostLike">
+        <id property="postLikeId" column="post_like_id"/>
+        <result property="postId" column="post_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
 
-    <!-- PK로 게시글 조회 -->
+    <!-- 댓글 좋아요 매핑 -->
+    <resultMap id="commentLikeResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.CommentLike">
+        <id property="commentLikeId" column="comment_like_id"/>
+        <result property="commentId" column="comment_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <!-- ═══ 공통 SELECT 컬럼 ═══ -->
+
+    <sql id="postColumns">
+        p.post_id, p.user_id, p.title, p.content, p.category,
+        p.view_count, p.status, p.like_count, p.comment_count,
+        p.is_deleted, p.deleted_at, p.is_blinded,
+        p.created_at, p.updated_at, p.created_by, p.updated_by
+    </sql>
+
+    <!-- ═══ Post 단건 조회 ═══ -->
+
     <select id="findById" resultMap="postResultMap">
-        SELECT p.post_id, p.user_id, p.title, p.content, p.category,
-               p.view_count, p.status, p.like_count, p.comment_count,
-               p.is_deleted, p.deleted_at, p.is_blinded,
-               p.created_at, p.updated_at, p.created_by, p.updated_by
+        SELECT <include refid="postColumns"/>
         FROM posts p
         WHERE p.post_id = #{postId}
     </select>
 
-    <!-- 게시글 + 작성자 JOIN 조회 (N+1 방지) -->
-    <select id="findByIdWithUser" resultMap="postWithUserResultMap">
-        SELECT p.post_id, p.title, p.content, p.category,
-               p.view_count, p.status, p.like_count, p.comment_count,
-               p.is_deleted, p.deleted_at, p.is_blinded,
-               p.created_at, p.updated_at, p.created_by, p.updated_by,
-               u.user_id, u.nickname, u.profile_image, u.email
+    <select id="findByIdWithNickname" resultMap="postWithNicknameResultMap">
+        SELECT <include refid="postColumns"/>,
+               u.nickname AS nickname
         FROM posts p
-        INNER JOIN users u ON p.user_id = u.user_id
+        LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.post_id = #{postId}
     </select>
 
-    <!-- 상태별 게시글 목록 + 작성자 (페이징) -->
-    <select id="findByStatusWithUser" resultMap="postWithUserResultMap">
-        SELECT p.post_id, p.title, p.content, p.category,
-               p.view_count, p.status, p.like_count, p.comment_count,
-               p.is_deleted, p.deleted_at, p.is_blinded,
-               p.created_at, p.updated_at, p.created_by, p.updated_by,
-               u.user_id, u.nickname, u.profile_image, u.email
+    <!-- ═══ Post 목록 조회 (JOIN users) ═══ -->
+
+    <select id="findByStatusWithNickname" resultMap="postWithNicknameResultMap">
+        SELECT <include refid="postColumns"/>,
+               u.nickname AS nickname
         FROM posts p
-        INNER JOIN users u ON p.user_id = u.user_id
+        LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.status = #{status}
           AND p.is_deleted = false
         ORDER BY p.created_at DESC
-        LIMIT #{limit} OFFSET #{offset}
+        LIMIT #{offset}, #{limit}
     </select>
 
-    <!-- 카테고리 + 상태별 게시글 목록 + 작성자 (페이징) -->
-    <select id="findByCategoryAndStatusWithUser" resultMap="postWithUserResultMap">
-        SELECT p.post_id, p.title, p.content, p.category,
-               p.view_count, p.status, p.like_count, p.comment_count,
-               p.is_deleted, p.deleted_at, p.is_blinded,
-               p.created_at, p.updated_at, p.created_by, p.updated_by,
-               u.user_id, u.nickname, u.profile_image, u.email
+    <select id="findByCategoryAndStatusWithNickname" resultMap="postWithNicknameResultMap">
+        SELECT <include refid="postColumns"/>,
+               u.nickname AS nickname
         FROM posts p
-        INNER JOIN users u ON p.user_id = u.user_id
+        LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.category = #{category}
           AND p.status = #{status}
           AND p.is_deleted = false
         ORDER BY p.created_at DESC
-        LIMIT #{limit} OFFSET #{offset}
+        LIMIT #{offset}, #{limit}
     </select>
 
-    <!-- 상태별 총 건수 -->
     <select id="countByStatus" resultType="long">
         SELECT COUNT(*)
         FROM posts
@@ -119,7 +134,6 @@
           AND is_deleted = false
     </select>
 
-    <!-- 카테고리 + 상태별 총 건수 -->
     <select id="countByCategoryAndStatus" resultType="long">
         SELECT COUNT(*)
         FROM posts
@@ -128,22 +142,40 @@
           AND is_deleted = false
     </select>
 
-    <!-- 사용자 + 상태별 게시글 목록 (임시저장 목록, 마이페이지) -->
+    <!-- ═══ 사용자별 Post ═══ -->
+
+    <select id="findByUserId" resultMap="postResultMap">
+        SELECT <include refid="postColumns"/>
+        FROM posts p
+        WHERE p.user_id = #{userId}
+        ORDER BY p.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countByUserId" resultType="long">
+        SELECT COUNT(*)
+        FROM posts
+        WHERE user_id = #{userId}
+    </select>
+
     <select id="findByUserIdAndStatus" resultMap="postResultMap">
-        SELECT post_id, user_id, title, content, category,
-               view_count, status, like_count, comment_count,
-               is_deleted, deleted_at, is_blinded,
-               created_at, updated_at, created_by, updated_by
+        SELECT <include refid="postColumns"/>
+        FROM posts p
+        WHERE p.user_id = #{userId}
+          AND p.status = #{status}
+        ORDER BY p.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countByUserIdAndStatus" resultType="long">
+        SELECT COUNT(*)
         FROM posts
         WHERE user_id = #{userId}
           AND status = #{status}
-        ORDER BY created_at DESC
-        LIMIT #{limit} OFFSET #{offset}
     </select>
 
-    <!-- ═══ Post INSERT / UPDATE / DELETE ═══ -->
+    <!-- ═══ Post 쓰기 ═══ -->
 
-    <!-- 게시글 등록 -->
     <insert id="insert" useGeneratedKeys="true" keyProperty="postId">
         INSERT INTO posts (
             user_id, title, content, category, status,
@@ -151,14 +183,13 @@
             is_deleted, is_blinded,
             created_at, updated_at, created_by, updated_by
         ) VALUES (
-            #{user.userId}, #{title}, #{content}, #{category}, #{status},
+            #{userId}, #{title}, #{content}, #{category}, #{status},
             0, 0, 0,
             false, false,
             NOW(), NOW(), #{createdBy}, #{updatedBy}
         )
     </insert>
 
-    <!-- 게시글 수정 -->
     <update id="update">
         UPDATE posts
         SET title      = #{title},
@@ -170,47 +201,133 @@
         WHERE post_id = #{postId}
     </update>
 
-    <!-- 게시글 삭제 -->
+    <update id="updateAdminStatus">
+        UPDATE posts
+        SET is_deleted = #{isDeleted},
+            deleted_at = #{deletedAt},
+            is_blinded = #{isBlinded},
+            updated_at = NOW(),
+            updated_by = #{updatedBy}
+        WHERE post_id = #{postId}
+    </update>
+
     <delete id="deleteById">
         DELETE FROM posts
         WHERE post_id = #{postId}
     </delete>
 
-    <!-- 조회수 원자적 1 증가 -->
     <update id="incrementViewCount">
         UPDATE posts
         SET view_count = view_count + 1
         WHERE post_id = #{postId}
     </update>
 
-    <!-- 좋아요 수 원자적 증가/감소 (delta: +1 또는 -1) -->
     <update id="updateLikeCount">
         UPDATE posts
-        SET like_count = GREATEST(like_count + #{delta}, 0)
+        SET like_count = GREATEST(like_count + #{delta}, 0),
+            updated_at = NOW()
         WHERE post_id = #{postId}
     </update>
 
-    <!-- 댓글 수 원자적 증가/감소 (delta: +1 또는 -1) -->
     <update id="updateCommentCount">
         UPDATE posts
-        SET comment_count = GREATEST(comment_count + #{delta}, 0)
+        SET comment_count = GREATEST(comment_count + #{delta}, 0),
+            updated_at = NOW()
         WHERE post_id = #{postId}
     </update>
+
+    <!-- ═══ Post 관리자 통계 ═══ -->
+
+    <select id="countByCreatedAtBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM posts
+        WHERE created_at BETWEEN #{start} AND #{end}
+    </select>
+
+    <select id="countByStatusAndCreatedAtBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM posts
+        WHERE status = #{status}
+          AND created_at BETWEEN #{start} AND #{end}
+    </select>
+
+    <!-- ═══ Post 관리자 동적 검색 ═══ -->
+
+    <sql id="adminPostWhere">
+        WHERE 1 = 1
+        <if test="keyword != null and keyword != ''">
+            AND (LOWER(p.title) LIKE LOWER(CONCAT('%', #{keyword}, '%'))
+                 OR LOWER(p.content) LIKE LOWER(CONCAT('%', #{keyword}, '%')))
+        </if>
+        <if test="category != null and category != ''">
+            AND p.category = #{category}
+        </if>
+        <if test="status != null and status != ''">
+            AND p.status = #{status}
+        </if>
+    </sql>
+
+    <select id="searchAdminPosts" resultMap="postWithNicknameResultMap">
+        SELECT <include refid="postColumns"/>,
+               u.nickname AS nickname
+        FROM posts p
+        LEFT JOIN users u ON p.user_id = u.user_id
+        <include refid="adminPostWhere"/>
+        ORDER BY p.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countAdminPosts" resultType="long">
+        SELECT COUNT(*)
+        FROM posts p
+        <include refid="adminPostWhere"/>
+    </select>
 
     <!-- ═══ PostComment ═══ -->
 
-    <!-- 게시글의 댓글 목록 (최신순) -->
-    <select id="findCommentsByPostId" resultMap="commentResultMap">
-        SELECT post_comment_id, post_id, category_id, user_id,
-               parent_comment_id, content, is_deleted, like_count,
-               created_at, updated_at
+    <sql id="commentColumns">
+        post_comment_id, post_id, category_id, user_id,
+        parent_comment_id, content, is_deleted, like_count,
+        created_at, updated_at
+    </sql>
+
+    <select id="findCommentById" resultMap="commentResultMap">
+        SELECT <include refid="commentColumns"/>
         FROM post_comment
-        WHERE post_id = #{postId}
-        ORDER BY created_at ASC
-        LIMIT #{limit} OFFSET #{offset}
+        WHERE post_comment_id = #{postCommentId}
     </select>
 
-    <!-- 댓글 등록 -->
+    <select id="findCommentsByPostIdAndIsDeletedFalse" resultMap="commentResultMap">
+        SELECT <include refid="commentColumns"/>
+        FROM post_comment
+        WHERE post_id = #{postId}
+          AND is_deleted = false
+        ORDER BY created_at ASC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countCommentsByPostIdAndIsDeletedFalse" resultType="long">
+        SELECT COUNT(*)
+        FROM post_comment
+        WHERE post_id = #{postId}
+          AND is_deleted = false
+    </select>
+
+    <select id="findCommentsByUserId" resultMap="commentResultMap">
+        SELECT <include refid="commentColumns"/>
+        FROM post_comment
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countCommentsByUserIdAndIsDeletedFalse" resultType="long">
+        SELECT COUNT(*)
+        FROM post_comment
+        WHERE user_id = #{userId}
+          AND is_deleted = false
+    </select>
+
     <insert id="insertComment" useGeneratedKeys="true" keyProperty="postCommentId">
         INSERT INTO post_comment (
             post_id, category_id, user_id, parent_comment_id,
@@ -223,12 +340,92 @@
         )
     </insert>
 
-    <!-- 댓글 소프트 삭제 -->
     <update id="softDeleteComment">
         UPDATE post_comment
         SET is_deleted = true,
             updated_at = NOW()
         WHERE post_comment_id = #{postCommentId}
     </update>
+
+    <select id="existsCommentById" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM post_comment
+        WHERE post_comment_id = #{postCommentId}
+    </select>
+
+    <update id="updateCommentLikeCount">
+        UPDATE post_comment
+        SET like_count = GREATEST(like_count + #{delta}, 0),
+            updated_at = NOW()
+        WHERE post_comment_id = #{postCommentId}
+    </update>
+
+    <!-- ═══ PostLike ═══ -->
+
+    <select id="findPostLikeByPostIdAndUserId" resultMap="postLikeResultMap">
+        SELECT post_like_id, post_id, user_id, created_at, updated_at
+        FROM post_likes
+        WHERE post_id = #{postId}
+          AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <select id="existsPostLikeByPostIdAndUserId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM post_likes
+        WHERE post_id = #{postId}
+          AND user_id = #{userId}
+    </select>
+
+    <select id="countPostLikeByPostId" resultType="long">
+        SELECT COUNT(*)
+        FROM post_likes
+        WHERE post_id = #{postId}
+    </select>
+
+    <insert id="insertPostLike" useGeneratedKeys="true" keyProperty="postLikeId">
+        INSERT INTO post_likes (post_id, user_id, created_at, updated_at)
+        VALUES (#{postId}, #{userId}, NOW(), NOW())
+    </insert>
+
+    <delete id="deletePostLikeByPostIdAndUserId">
+        DELETE FROM post_likes
+        WHERE post_id = #{postId}
+          AND user_id = #{userId}
+    </delete>
+
+    <!-- ═══ CommentLike ═══ -->
+
+    <select id="findCommentLikeByCommentIdAndUserId" resultMap="commentLikeResultMap">
+        SELECT comment_like_id, comment_id, user_id, created_at, updated_at
+        FROM comment_likes
+        WHERE comment_id = #{commentId}
+          AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <select id="existsCommentLikeByCommentIdAndUserId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM comment_likes
+        WHERE comment_id = #{commentId}
+          AND user_id = #{userId}
+    </select>
+
+    <select id="countCommentLikeByCommentId" resultType="long">
+        SELECT COUNT(*)
+        FROM comment_likes
+        WHERE comment_id = #{commentId}
+    </select>
+
+    <insert id="insertCommentLike" useGeneratedKeys="true" keyProperty="commentLikeId">
+        INSERT INTO comment_likes (comment_id, user_id, created_at, updated_at)
+        VALUES (#{commentId}, #{userId}, NOW(), NOW())
+    </insert>
+
+    <delete id="deleteCommentLikeByCommentIdAndUserId">
+        DELETE FROM comment_likes
+        WHERE comment_id = #{commentId}
+          AND user_id = #{userId}
+    </delete>
 
 </mapper>

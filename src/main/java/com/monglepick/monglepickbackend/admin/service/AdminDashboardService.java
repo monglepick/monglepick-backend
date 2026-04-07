@@ -1,13 +1,14 @@
 package com.monglepick.monglepickbackend.admin.service;
 
 import com.monglepick.monglepickbackend.admin.dto.DashboardDto;
+import com.monglepick.monglepickbackend.admin.repository.AdminChatSessionRepository;
 import com.monglepick.monglepickbackend.admin.repository.AdminReportRepository;
 import com.monglepick.monglepickbackend.domain.community.entity.PostDeclaration;
 import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
 import com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription;
 import com.monglepick.monglepickbackend.domain.payment.repository.PaymentOrderRepository;
 import com.monglepick.monglepickbackend.domain.payment.repository.UserSubscriptionRepository;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -44,8 +45,8 @@ import java.util.List;
 @Transactional(readOnly = true) // 모든 메서드 기본 읽기 전용
 public class AdminDashboardService {
 
-    /** 사용자 수 카운트, 날짜 범위 조회 */
-    private final UserRepository userRepository;
+    /** 사용자 수 카운트, 날짜 범위 조회 — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
+    private final UserMapper userMapper;
 
     /** 결제 금액 합계, 날짜 범위 조회 */
     private final PaymentOrderRepository paymentOrderRepository;
@@ -55,6 +56,9 @@ public class AdminDashboardService {
 
     /** 미처리 신고 수 카운트, 최근 신고 조회 */
     private final AdminReportRepository adminReportRepository;
+
+    /** AI 채팅 세션 카운트 — 오늘의 채팅 요청 수 집계 (Phase 4 mock 제거) */
+    private final AdminChatSessionRepository adminChatSessionRepository;
 
     /** 날짜 포맷 (yyyy-MM-dd) — 추이 차트 date 필드에 사용 */
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -80,11 +84,11 @@ public class AdminDashboardService {
         LocalDateTime yesterdayStart = todayStart.minusDays(1);
 
         // 1. 전체 회원 수 (탈퇴 회원 포함 — 관리자는 전수 파악 필요)
-        long totalUsers = userRepository.count();
+        long totalUsers = userMapper.count();
 
         // 2. 오늘/어제 신규 가입 수
-        long newUsersToday     = userRepository.countByCreatedAtBetween(todayStart, todayEnd);
-        long newUsersYesterday = userRepository.countByCreatedAtBetween(yesterdayStart, todayStart);
+        long newUsersToday     = userMapper.countByCreatedAtBetween(todayStart, todayEnd);
+        long newUsersYesterday = userMapper.countByCreatedAtBetween(yesterdayStart, todayStart);
 
         // 3. 현재 활성 구독 수 (status = ACTIVE)
         long activeSubscriptions = userSubscriptionRepository.countByStatus(UserSubscription.Status.ACTIVE);
@@ -101,8 +105,11 @@ public class AdminDashboardService {
         // 5. 미처리 신고 수 (status = "pending")
         long pendingReports = adminReportRepository.countByStatus("pending");
 
-        // 6. 오늘 AI 채팅 요청 수 — 별도 테이블 미구현, 추후 구현 시 교체
-        long todayChatRequests = 0L;
+        // 6. 오늘 AI 채팅 요청 수 — chat_session_archive 의 created_at 기준 카운트
+        //    (Phase 4: 기존 하드코딩 0 제거. "오늘 신규 채팅 세션 수"를 의미한다.
+        //    더 정밀한 턴 기반 측정은 향후 EventLog 통합 시 보강.)
+        long todayChatRequests = adminChatSessionRepository
+                .countByCreatedAtBetween(todayStart, todayEnd);
 
         log.debug("[대시보드 KPI] totalUsers={}, newUsersToday={}, activeSubscriptions={}, "
                         + "todayPayment={}원, pendingReports={}",
@@ -152,15 +159,16 @@ public class AdminDashboardService {
             LocalDateTime end   = start.plusDays(1);
 
             // 해당 날짜 신규 가입 수
-            long newUsers = userRepository.countByCreatedAtBetween(start, end);
+            long newUsers = userMapper.countByCreatedAtBetween(start, end);
 
             // 해당 날짜 결제 완료 금액 합계 (null → 0)
             Long amountRaw = paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
                     PaymentOrder.OrderStatus.COMPLETED, start, end);
             long paymentAmount = amountRaw != null ? amountRaw : 0L;
 
-            // AI 채팅 요청 수 — 별도 테이블 미구현, 추후 구현 시 교체
-            long chatRequests = 0L;
+            // AI 채팅 요청 수 — chat_session_archive 의 created_at 기준 카운트
+            // (Phase 4: 기존 하드코딩 0 제거. 일별 신규 채팅 세션 수)
+            long chatRequests = adminChatSessionRepository.countByCreatedAtBetween(start, end);
 
             trends.add(new DashboardDto.DailyTrend(
                     date.format(DATE_FORMATTER),

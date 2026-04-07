@@ -82,5 +82,16 @@ public class UserAttendance extends BaseAuditEntity {
     @Builder.Default
     private Integer streakCount = 1;
 
+    // ========== Excel Table 기준 추가 컬럼 (1개) ==========
+
+    /**
+     * 이 출석으로 적립된 포인트 (기본값: 0).
+     * RewardService가 출석 체크 시 등급 배율 적용 후 실제 지급된 포인트를 기록한다.
+     * 출석 이력 조회 시 날짜별 적립 포인트를 표시하는 데 활용된다.
+     */
+    @Column(name = "reward_point")
+    @Builder.Default
+    private Integer rewardPoint = 0;
+
     /* 수동 createdAt 필드 제거됨 — BaseAuditEntity가 created_at 컬럼을 자동 관리 */
 }

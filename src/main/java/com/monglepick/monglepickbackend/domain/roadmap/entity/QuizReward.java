@@ -1,6 +1,5 @@
 package com.monglepick.monglepickbackend.domain.roadmap.entity;
 
-import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -37,7 +36,7 @@ import java.time.LocalDateTime;
  * <h3>주요 필드</h3>
  * <ul>
  *   <li>{@code quiz} — 리워드 대상 퀴즈 (FK → quizzes.quiz_id, LAZY)</li>
- *   <li>{@code user} — 리워드 수령 사용자 (FK → users.user_id, LAZY)</li>
+ *   <li>{@code userId} — 리워드 수령 사용자 ID (String FK → users.user_id, JPA/MyBatis 하이브리드 §15.4)</li>
  *   <li>{@code rewardPoints} — 실제 지급된 포인트 수 (INT)</li>
  *   <li>{@code rewardedAt} — 포인트 지급 시각 (DATETIME)</li>
  * </ul>
@@ -80,12 +79,15 @@ public class QuizReward extends BaseAuditEntity {
     private Quiz quiz;
 
     /**
-     * 리워드 수령 사용자 (FK → users.user_id, LAZY, 필수).
-     * 포인트를 지급받은 사용자를 식별한다.
+     * 리워드 수령 사용자 ID — users.user_id를 String으로 직접 참조한다.
+     *
+     * <p>포인트를 지급받은 사용자를 식별한다.
+     * users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA @ManyToOne 매핑을 두지 않고
+     * String FK로만 보관한다 (설계서 §15.4). Quiz 참조는 같은 roadmap 도메인이므로
+     * @ManyToOne 유지한다.</p>
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false, length = 50)
+    private String userId;
 
     /**
      * 실제 지급된 포인트 수 (INT, 필수).

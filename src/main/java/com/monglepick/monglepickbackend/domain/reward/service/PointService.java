@@ -8,9 +8,11 @@ import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.HistoryRespon
 import com.monglepick.monglepickbackend.domain.reward.dto.QuotaDto.QuotaCheckResult;
 import com.monglepick.monglepickbackend.domain.reward.entity.Grade;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
+import com.monglepick.monglepickbackend.domain.reward.entity.UserAiQuota;
 import com.monglepick.monglepickbackend.domain.reward.entity.UserPoint;
 import com.monglepick.monglepickbackend.domain.reward.repository.GradeRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRepository;
+import com.monglepick.monglepickbackend.domain.reward.repository.UserAiQuotaRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserPointRepository;
 
 import java.math.BigDecimal;
@@ -73,13 +75,22 @@ public class PointService {
      * 등급별 쿼터 서비스 (Phase R-3 추가).
      *
      * <p>AI 추천 일일/월간 사용 횟수 제한 및 무료 사용 관리를 담당한다.
-     * {@link QuotaService}는 {@link UserPointRepository}만 주입받으므로
+     * {@link QuotaService}는 {@link UserAiQuotaRepository}를 직접 주입받으므로
      * 순환 참조가 발생하지 않는다.</p>
      */
     private final QuotaService quotaService;
 
     /** 등급 마스터 리포지토리 (누적 포인트 기반 등급 조회) */
     private final GradeRepository gradeRepository;
+
+    /**
+     * 사용자 AI 쿼터 리포지토리 (v3.3 신규).
+     *
+     * <p>회원가입 시 user_points와 함께 user_ai_quota 초기 레코드를 생성한다.
+     * AI 쿼터 4컬럼(daily_ai_used/monthly_coupon_used/monthly_reset/purchased_ai_tokens)이
+     * user_points에서 분리되었으므로, initializePoint()에서 두 테이블에 모두 INSERT해야 한다.</p>
+     */
+    private final UserAiQuotaRepository userAiQuotaRepository;
 
     // ──────────────────────────────────────────────
     // 입력 검증 헬퍼
@@ -375,6 +386,23 @@ public class PointService {
             // flush 없이는 트랜잭션 커밋 시점까지 DB 왕복이 지연되어
             // catch 블록 진입 전에 메서드가 종료될 수 있다.
             userPointRepository.flush();
+
+            // ── v3.3: user_ai_quota 초기 레코드 동시 생성 ───────────────────────
+            // user_points INSERT 성공 직후 user_ai_quota도 INSERT한다.
+            // user_points의 UK 위반이 없었음이 확인된 시점이므로 AI 쿼터도 신규 생성 대상.
+            // AI 쿼터 UK 위반은 user_points UK 위반과 동일한 catch 블록에서 처리된다.
+            if (!userAiQuotaRepository.existsByUserId(userId)) {
+                UserAiQuota userAiQuota = UserAiQuota.builder()
+                        .userId(userId)
+                        // 모든 카운터 초기값 0, 날짜 필드는 null (첫 요청 시 lazy reset)
+                        .dailyAiUsed(0)
+                        .monthlyCouponUsed(0)
+                        .purchasedAiTokens(0)
+                        .freeDailyGranted(0)
+                        .build();
+                userAiQuotaRepository.save(userAiQuota);
+                log.debug("AI 쿼터 레코드 초기화 완료: userId={}", userId);
+            }
 
         } catch (DataIntegrityViolationException e) {
             // userId UK 제약 위반 → 다른 스레드/요청이 이미 레코드를 생성한 상태.

@@ -8,30 +8,36 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>{@code application.yml}의 {@code app.quota} 하위 설정을 바인딩한다.
  * QuotaService에서 이 프로퍼티 클래스를 주입받아 등급별 쿼터를 초기화한다.</p>
  *
- * <h3>application.yml 구조 (설계서 v2.3 §4.5 — 5등급 체계)</h3>
+ * <h3>application.yml 구조 (설계서 v3.2 §4.5 — 6등급 팝콘 테마)</h3>
  * <pre>{@code
  * app:
  *   quota:
  *     normal:
  *       daily-limit: 3
- *       monthly-limit: 30
- *       free-daily: 0
  *       max-input-length: 200
  *     bronze:
  *       daily-limit: 5
- *       monthly-limit: 80
- *       free-daily: 1
- *       max-input-length: 300
- *     silver: ...
- *     gold: ...
- *     platinum: ...
+ *       max-input-length: 400
+ *     silver:
+ *       daily-limit: 7
+ *       max-input-length: 500
+ *     gold:
+ *       daily-limit: 10
+ *       max-input-length: 800
+ *     platinum:
+ *       daily-limit: 15
+ *       max-input-length: 3000
+ *     diamond:
+ *       daily-limit: -1
+ *       max-input-length: -1
  * }</pre>
  *
- * @param normal   NORMAL 등급 설정 (nullable — 미정의 시 QuotaService에서 기본값 적용)
- * @param bronze   BRONZE 등급 설정
- * @param silver   SILVER 등급 설정
- * @param gold     GOLD 등급 설정
- * @param platinum PLATINUM 등급 설정
+ * @param normal   알갱이(NORMAL) 등급 설정 (nullable — 미정의 시 QuotaService에서 기본값 적용)
+ * @param bronze   강냉이(BRONZE) 등급 설정
+ * @param silver   팝콘(SILVER) 등급 설정
+ * @param gold     카라멜팝콘(GOLD) 등급 설정
+ * @param platinum 몽글팝콘(PLATINUM) 등급 설정
+ * @param diamond  몽아일체(DIAMOND) 등급 설정 (nullable — 미정의 시 무제한 기본값 적용)
  */
 @ConfigurationProperties(prefix = "app.quota")
 public record QuotaProperties(
@@ -39,7 +45,8 @@ public record QuotaProperties(
         GradeConfig bronze,
         GradeConfig silver,
         GradeConfig gold,
-        GradeConfig platinum
+        GradeConfig platinum,
+        GradeConfig diamond
 ) {
     /**
      * 단일 등급의 쿼터 설정.

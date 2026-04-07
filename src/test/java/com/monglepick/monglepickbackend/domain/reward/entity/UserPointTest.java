@@ -12,14 +12,17 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * UserPoint 엔티티 단위 테스트.
  *
- * <p>설계서 v2.3 §4.1 기준으로 다음을 검증한다:
+ * <p>설계서 v3.3 §4.1 기준으로 다음을 검증한다:
  * <ul>
  *   <li>정합성 공식: balance = total_earned - total_spent</li>
  *   <li>addPoints(isActivityReward) — earned_by_activity, daily_cap_used 분기</li>
- *   <li>lazy reset (일일/월간)</li>
+ *   <li>lazy reset (일일 — dailyEarned/dailyCapUsed만. AI 쿼터는 UserAiQuota로 분리됨)</li>
  *   <li>deductPoints — 잔액 부족 예외</li>
  *   <li>getGradeCode — NORMAL fallback</li>
  * </ul>
+ *
+ * <p>v3.3 변경: AI 쿼터 관련 테스트(incrementAiUsage, resetMonthlyIfNeeded,
+ * dailyAiUsed 등)는 {@code UserAiQuotaTest}로 이동하였다.</p>
  */
 class UserPointTest {
 
@@ -32,11 +35,8 @@ class UserPointTest {
                 .totalSpent(0)
                 .dailyEarned(0)
                 .dailyReset(LocalDate.now())
-                .monthlyReset(LocalDate.now())
                 .earnedByActivity(500)
                 .dailyCapUsed(0)
-                .dailyAiUsed(0)
-                .monthlyAiUsed(0)
                 .build();
     }
 
@@ -154,15 +154,12 @@ class UserPointTest {
     class LazyResetTest {
 
         @Test
-        @DisplayName("일일 리셋 — 날짜 변경 시 dailyEarned, dailyAiUsed, dailyCapUsed 모두 0")
+        @DisplayName("일일 리셋 — 날짜 변경 시 dailyEarned, dailyCapUsed 리셋 (v3.3: dailyAiUsed는 UserAiQuota로 분리)")
         void resetDailyIfNeeded_nextDay() {
             UserPoint up = createDefault();
             up.addPoints(50, LocalDate.now(), true); // dailyEarned=50, dailyCapUsed=50
-            // dailyAiUsed 증가
-            up.incrementAiUsage(); // dailyAiUsed=1
 
             assertEquals(50, up.getDailyEarned());
-            assertEquals(1, up.getDailyAiUsed());
             assertEquals(50, up.getDailyCapUsed());
 
             // 다음 날로 리셋
@@ -170,7 +167,6 @@ class UserPointTest {
             up.resetDailyIfNeeded(tomorrow);
 
             assertEquals(0, up.getDailyEarned(), "일일 획득 리셋");
-            assertEquals(0, up.getDailyAiUsed(), "일일 AI 사용 리셋");
             assertEquals(0, up.getDailyCapUsed(), "일일 cap 리셋");
             assertEquals(tomorrow, up.getDailyReset(), "리셋 기준일 갱신");
         }
@@ -186,30 +182,7 @@ class UserPointTest {
             assertEquals(50, up.getDailyEarned(), "같은 날이므로 리셋 안 함");
         }
 
-        @Test
-        @DisplayName("월간 리셋 — 월 변경 시 monthlyAiUsed 0")
-        void resetMonthlyIfNeeded_nextMonth() {
-            UserPoint up = createDefault();
-            up.incrementAiUsage(); // monthlyAiUsed=1
-
-            // 다음 달로 리셋
-            LocalDate nextMonth = LocalDate.now().plusMonths(1);
-            up.resetMonthlyIfNeeded(nextMonth);
-
-            assertEquals(0, up.getMonthlyAiUsed(), "월간 AI 사용 리셋");
-            assertEquals(nextMonth, up.getMonthlyReset(), "월간 리셋 기준일 갱신");
-        }
-
-        @Test
-        @DisplayName("월간 리셋 — 같은 달이면 리셋 안 함")
-        void resetMonthlyIfNeeded_sameMonth() {
-            UserPoint up = createDefault();
-            up.incrementAiUsage(); // monthlyAiUsed=1
-
-            up.resetMonthlyIfNeeded(LocalDate.now());
-
-            assertEquals(1, up.getMonthlyAiUsed(), "같은 달이므로 리셋 안 함");
-        }
+        // v3.3: 월간 AI 리셋(resetMonthlyIfNeeded) 테스트는 UserAiQuotaTest로 이동
     }
 
     // ──────────────────────────────────────────────
@@ -251,18 +224,6 @@ class UserPointTest {
         }
     }
 
-    // ──────────────────────────────────────────────
-    // AI 사용 횟수 테스트
-    // ──────────────────────────────────────────────
-
-    @Test
-    @DisplayName("incrementAiUsage — dailyAiUsed, monthlyAiUsed 각 1 증가")
-    void incrementAiUsage() {
-        UserPoint up = createDefault();
-        up.incrementAiUsage();
-        up.incrementAiUsage();
-
-        assertEquals(2, up.getDailyAiUsed());
-        assertEquals(2, up.getMonthlyAiUsed());
-    }
+    // v3.3: AI 사용 횟수 테스트(incrementAiUsage/getDailyAiUsed/getMonthlyAiUsed)는
+    //        UserAiQuotaTest로 이동하였다.
 }

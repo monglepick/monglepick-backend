@@ -3,8 +3,7 @@ package com.monglepick.monglepickbackend.domain.user.controller;
 import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.UserPreference;
-import com.monglepick.monglepickbackend.domain.watchhistory.dto.WatchHistoryResponse;
-import com.monglepick.monglepickbackend.domain.watchhistory.dto.WishlistResponse;
+import com.monglepick.monglepickbackend.domain.wishlist.dto.WishlistResponse;
 import com.monglepick.monglepickbackend.domain.user.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -88,26 +87,6 @@ public class UserController {
         log.info("프로필 수정 요청 - userId: {}", userId);
         UserResponse updated = userService.updateProfile(userId, request);
         return ResponseEntity.ok(updated);
-    }
-
-    /**
-     * 시청 이력 조회 API
-     *
-     * @param userId JWT에서 추출한 사용자 ID
-     * @param pageable 페이징 정보 (기본: 20건, 시청일 역순)
-     * @return 200 OK + 페이지 단위의 시청 이력
-     */
-    @Operation(summary = "시청 이력 조회", description = "사용자의 시청 이력을 최신순으로 페이징 조회")
-    @ApiResponse(responseCode = "200", description = "시청 이력 조회 성공")
-    @SecurityRequirement(name = "BearerAuth")
-    @GetMapping("/watch-history")
-    public ResponseEntity<Page<WatchHistoryResponse>> getWatchHistory(
-            @AuthenticationPrincipal String userId,
-            @PageableDefault(size = 20, sort = "watchedAt", direction = Sort.Direction.DESC)
-            Pageable pageable) {
-
-        Page<WatchHistoryResponse> history = userService.getWatchHistory(userId, pageable);
-        return ResponseEntity.ok(history);
     }
 
     /**

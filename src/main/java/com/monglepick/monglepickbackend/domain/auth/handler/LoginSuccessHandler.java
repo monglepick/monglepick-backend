@@ -4,7 +4,7 @@ package com.monglepick.monglepickbackend.domain.auth.handler;
 import tools.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.security.CookieUtil;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,7 +38,8 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtService jwtService;
-    private final UserRepository userRepository;
+    /** 사용자 조회 — MyBatis Mapper (설계서 §15) */
+    private final UserMapper userMapper;
 
     /** JSON 직렬화용 ObjectMapper (Spring Bean 주입) */
     private final ObjectMapper objectMapper;
@@ -82,9 +83,11 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
         /* principal은 AuthService.loadUserByUsername()에서 반환한 username(= email) */
         String email = authentication.getName();
 
-        /* 이메일로 User 엔티티 조회 → userId로 JWT 생성 */
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("로그인 성공 후 사용자 조회 실패: " + email));
+        /* 이메일로 User 엔티티 조회 → userId로 JWT 생성 (MyBatis, null 반환 시 예외) */
+        User user = userMapper.findByEmail(email);
+        if (user == null) {
+            throw new RuntimeException("로그인 성공 후 사용자 조회 실패: " + email);
+        }
 
         /* Access Token + Refresh Token 생성 */
         String accessToken = jwtTokenProvider.generateAccessToken(user.getUserId(), user.getUserRole().name());

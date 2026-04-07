@@ -6,8 +6,6 @@ import com.monglepick.monglepickbackend.domain.recommendation.entity.Recommendat
 import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationLog;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationFeedbackRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationLogRepository;
-import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -24,11 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <h3>UPSERT 처리 흐름</h3>
  * <ol>
- *   <li>User 조회 — userId로 users 테이블 조회</li>
  *   <li>RecommendationLog 조회 — recommendationLogId로 추천 로그 조회</li>
  *   <li>기존 피드백 확인 — (userId, recommendationLogId) 조합으로 조회</li>
  *   <li>존재하면 update(), 없으면 새 엔티티 생성 후 save()</li>
  * </ol>
+ *
+ * <p>users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA에서 fetch 하지 않고
+ * String userId만 보관한다 (설계서 §15.4). 사용자 존재 검증은 JWT/ServiceKey 인증
+ * 단계에서 이미 수행되었으므로 이 서비스 내부 검증은 생략한다.</p>
  */
 @Service
 @Slf4j
@@ -42,8 +43,10 @@ public class RecommendationFeedbackService {
     /** 추천 로그 JPA 리포지토리 (피드백 대상 로그 존재 여부 확인용) */
     private final RecommendationLogRepository recommendationLogRepository;
 
-    /** 사용자 JPA 리포지토리 (사용자 존재 여부 확인 및 FK 연결용) */
-    private final UserRepository userRepository;
+    /*
+     * users 테이블 쓰기 소유는 김민규(MyBatis)이므로 UserRepository 의존성을 제거하고
+     * String userId만 보관한다 (설계서 §15.4). 사용자 존재 검증은 인증 단계에서 완료된다.
+     */
 
     /**
      * 추천 피드백을 제출한다 (UPSERT).
@@ -65,10 +68,8 @@ public class RecommendationFeedbackService {
             Long recommendationLogId,
             RecommendationFeedbackRequest request) {
 
-        // 1. 사용자 조회 — UserRepository PK가 String(userId)이므로 findById 사용
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-        log.debug("피드백 제출 사용자 확인: userId={}", userId);
+        // 1. 사용자 존재 검증은 인증 단계에서 이미 처리됨 — String userId 그대로 사용
+        //    (JPA/MyBatis 하이브리드 §15.4)
 
         // 2. 추천 로그 조회 — 피드백 대상 로그가 실제로 존재하는지 확인
         RecommendationLog recommendationLog = recommendationLogRepository.findById(recommendationLogId)
@@ -78,7 +79,7 @@ public class RecommendationFeedbackService {
 
         // 3. 기존 피드백 여부 확인 (UPSERT 분기)
         RecommendationFeedback feedback = feedbackRepository
-                .findByUser_UserIdAndRecommendationLog_RecommendationLogId(userId, recommendationLogId)
+                .findByUserIdAndRecommendationLog_RecommendationLogId(userId, recommendationLogId)
                 .map(existing -> {
                     // 3-a. 기존 피드백이 있으면 유형과 코멘트를 갱신 (dirty checking으로 자동 UPDATE)
                     log.info("기존 피드백 업데이트: feedbackId={}, userId={}, recommendationLogId={}, newType={}",
@@ -93,7 +94,7 @@ public class RecommendationFeedbackService {
                             userId, recommendationLogId, request.feedbackType());
                     return feedbackRepository.save(
                             RecommendationFeedback.builder()
-                                    .user(user)
+                                    .userId(userId)
                                     .recommendationLog(recommendationLog)
                                     .feedbackType(request.feedbackType())
                                     .comment(request.comment())

@@ -18,28 +18,29 @@ import java.util.List;
  * <p>애플리케이션 시작 시 {@code point_items} 테이블에 시드 아이템이 없으면 INSERT한다.
  * 이미 존재하는 아이템(itemName 기준)은 건너뛰어 멱등(idempotent) 동작을 보장한다.</p>
  *
- * <h3>v3.0 AI 3-소스 모델 — 아이템 설계 원칙</h3>
+ * <h3>v3.2 AI 3-소스 모델 — 아이템 설계 원칙</h3>
  * <p>포인트 상점에서 "AI 이용권"을 판매하여 grade 일일 한도와 구독 보너스 풀이
  * 모두 소진된 사용자에게 추가 AI 사용 경로를 제공한다 (source="PURCHASED").</p>
  *
- * <h3>AI 이용권 가격 설계 (구독 유도) — v3.1 인상</h3>
+ * <h3>v3.2 AI 이용권 가격 설계 (1P=10원 통일, 구독 유도)</h3>
  * <p>포인트팩 기준 1P = 10원으로 환산하면:</p>
  * <ul>
- *   <li>AI 이용권 5회 (200P = 2,000원) → 400원/회</li>
- *   <li>AI 이용권 20회 (700P = 7,000원) → 350원/회 (볼륨 할인)</li>
- *   <li>AI 이용권 50회 (1,600P = 16,000원) → 320원/회 (볼륨 할인)</li>
- *   <li>monthly_basic 구독 → 49원/회 (이용권 대비 85% 저렴)</li>
- *   <li>→ 이용권은 긴급/단발성 용도, 지속 사용자는 구독으로 강하게 유도 ✓</li>
- *   <li>인상 이유: 구 가격(80P/5회=16P/회)이 너무 저렴해 구독 가치 희석. 평균 사용자가
- *       월 리워드만으로 100회 추가 구매 가능 → 구독 불필요 상황 발생.</li>
+ *   <li>AI 이용권 1회 (10P = 100원) — 단발성, 긴급 사용</li>
+ *   <li>AI 이용권 5회 (50P = 500원) → 100원/회</li>
+ *   <li>AI 이용권 20회 (200P = 2,000원) → 100원/회 (볼륨 동일)</li>
+ *   <li>AI 이용권 50회 (500P = 5,000원) → 100원/회 (볼륨 동일)</li>
+ *   <li>monthly_basic 구독 (2,900원/30회) → 96.7원/회 (이용권 대비 3% 저렴 + 포인트 지급)</li>
+ *   <li>→ 이용권과 구독 단가가 유사하나 구독은 포인트까지 지급 → 구독 강력 유도 ✓</li>
  * </ul>
  *
- * <h3>시드 데이터 (5개 아이템)</h3>
+ * <h3>시드 데이터 (7개 아이템)</h3>
  * <table border="1">
  *   <tr><th>아이템명</th><th>카테고리</th><th>가격</th><th>설명</th></tr>
- *   <tr><td>AI 이용권 5회</td><td>ai</td><td>200P</td><td>grade 한도 초과 AI 5회 (30일 유효)</td></tr>
- *   <tr><td>AI 이용권 20회</td><td>ai</td><td>700P</td><td>grade 한도 초과 AI 20회 (30일 유효)</td></tr>
- *   <tr><td>AI 이용권 50회</td><td>ai</td><td>1,600P</td><td>grade 한도 초과 AI 50회 (60일 유효)</td></tr>
+ *   <tr><td>AI 이용권 1회</td><td>COUPON</td><td>10P</td><td>grade 한도 초과 AI 1회 (30일 유효)</td></tr>
+ *   <tr><td>AI 이용권 5회</td><td>COUPON</td><td>50P</td><td>grade 한도 초과 AI 5회 (30일 유효)</td></tr>
+ *   <tr><td>AI 이용권 20회</td><td>COUPON</td><td>200P</td><td>grade 한도 초과 AI 20회 (30일 유효)</td></tr>
+ *   <tr><td>AI 이용권 50회</td><td>COUPON</td><td>500P</td><td>grade 한도 초과 AI 50회 (60일 유효)</td></tr>
+ *   <tr><td>영화 티켓 응모권</td><td>APPLY</td><td>150P</td><td>CGV/롯데시네마 영화 티켓 응모 1회</td></tr>
  *   <tr><td>프로필 아바타 - 몽글이</td><td>avatar</td><td>150P</td><td>몽글이 캐릭터 프로필 이미지</td></tr>
  *   <tr><td>프리미엄 배지 (1개월)</td><td>coupon</td><td>100P</td><td>1개월간 프로필 프리미엄 배지</td></tr>
  * </table>
@@ -49,6 +50,7 @@ import java.util.List;
  *   <li>사용자가 포인트 상점에서 AI 이용권 구매 → PointItemService에서 처리</li>
  *   <li>포인트 차감 (deductPoints) + {@code UserPoint.addPurchasedTokens(count)} 호출</li>
  *   <li>AI 요청 시 grade 한도/구독 보너스 소진 후 → {@code UserPoint.consumePurchasedToken()} 호출</li>
+ *   <li>v3.2: consumePurchasedToken()에서 monthly_coupon_used도 자동 증가</li>
  * </ol>
  *
  * <h3>실행 순서</h3>
@@ -74,7 +76,7 @@ public class PointItemInitializer implements ApplicationRunner {
     /**
      * 애플리케이션 시작 시 포인트 상점 아이템 시드 데이터를 적재한다.
      *
-     * <p>5개 아이템을 itemName 기준으로 확인하여 없는 경우에만 INSERT한다.
+     * <p>7개 아이템을 itemName 기준으로 확인하여 없는 경우에만 INSERT한다.
      * 이미 존재하는 아이템은 건너뛰어 멱등성을 보장한다.</p>
      *
      * @param args 애플리케이션 인자 (미사용)
@@ -82,7 +84,7 @@ public class PointItemInitializer implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        log.info("포인트 상점 아이템 초기화 시작 — point_items 테이블 시드 데이터 확인 (v3.0)");
+        log.info("포인트 상점 아이템 초기화 시작 — point_items 테이블 시드 데이터 확인 (v3.2)");
 
         List<PointItem> items = buildDefaultItems();
 
@@ -116,51 +118,85 @@ public class PointItemInitializer implements ApplicationRunner {
     }
 
     /**
-     * v3.0 기본 포인트 상점 아이템 5개를 PointItem 엔티티 리스트로 생성한다.
+     * v3.2 기본 포인트 상점 아이템 7개를 PointItem 엔티티 리스트로 생성한다.
      *
-     * <p>설계서 v3.0 §4.10 시드 데이터 기준.
-     * AI 이용권 3종 + 아바타 1종 + 배지 1종.</p>
+     * <p>설계서 v3.2 §4.6 시드 데이터 기준.
+     * AI 이용권 4종(category=COUPON) + 영화티켓응모권 1종(APPLY) + 아바타 1종(avatar) + 배지 1종(coupon).</p>
+     *
+     * <h4>v3.2 AI 이용권 가격 (1P=10원 통일)</h4>
+     * <ul>
+     *   <li>1회: 10P (100원) — 볼륨 할인 없음, 모두 100원/회</li>
+     *   <li>5회: 50P (500원)</li>
+     *   <li>20회: 200P (2,000원)</li>
+     *   <li>50회: 500P (5,000원)</li>
+     * </ul>
      *
      * @return 초기화할 PointItem 엔티티 목록 (가격 오름차순)
      */
     private List<PointItem> buildDefaultItems() {
         return List.of(
 
-                // ── AI 이용권 (category="ai") ────────────────────────────
+                // ── AI 이용권 (category="COUPON") ────────────────────────────
+                // v3.2: 카테고리명 "ai" → "COUPON" (이용권 역할 명확화)
                 // grade 일일 한도 + 구독 보너스 풀 소진 후 사용 (source="PURCHASED")
                 // UserPoint.addPurchasedTokens(count) 로 횟수 적립
-                // UserPoint.consumePurchasedToken() 으로 1회씩 차감
+                // UserPoint.consumePurchasedToken() 으로 1회씩 차감 (monthly_coupon_used++ 포함)
 
-                // AI 이용권 5회 — 200P (2,000원 환산, 400원/회)
-                // 소량 구매 / 급할 때 단발성 용도. 구독 미가입자가 일시적으로 초과 시 사용
+                // AI 이용권 1회 — 10P (100원, 100원/회)
+                // 단발성, 긴급 사용. 포인트가 충분치 않은 경우 선택지
+                PointItem.builder()
+                        .itemName("AI 이용권 1회")
+                        .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 1회. 구매 후 30일 이내 사용. "
+                                + "단발성·긴급 사용 시 적합. 구독 가입 시 월 30~67회 기본 포함.")
+                        .itemPrice(10)                  // v3.2: 10P = 100원 (1P=10원 통일)
+                        .itemCategory("COUPON")         // v3.2: ai → COUPON
+                        .isActive(true)
+                        .build(),
+
+                // AI 이용권 5회 — 50P (500원, 100원/회)
+                // 소량 패키지. 1회권(10P) × 5 = 50P로 볼륨 할인 없음 (1P=10원 통일)
                 PointItem.builder()
                         .itemName("AI 이용권 5회")
                         .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 5회. 구매 후 30일 이내 사용. "
-                                + "월간 Basic 구독(49원/회) 대비 약 8배 비싸므로, 지속 사용 시 구독 강력 권장.")
-                        .itemPrice(200)                 // 200P = 2,000원 환산, 400원/회
-                        .itemCategory("ai")
+                                + "월간 Basic 구독(2,900원/30회=96.7원/회) 대비 약 3% 비싸나 포인트 지급 없음 — 구독 권장.")
+                        .itemPrice(50)                  // v3.2: 50P = 500원 (1P=10원 통일)
+                        .itemCategory("COUPON")         // v3.2: ai → COUPON
                         .isActive(true)
                         .build(),
 
-                // AI 이용권 20회 — 700P (7,000원 환산, 350원/회)
-                // 볼륨 할인 적용 (5회 대비 12.5% 저렴), 중간 사용자 대상
+                // AI 이용권 20회 — 200P (2,000원, 100원/회)
+                // 중간 패키지. 볼륨 할인 없음 (1P=10원 통일)
                 PointItem.builder()
                         .itemName("AI 이용권 20회")
                         .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 20회. 구매 후 30일 이내 사용. "
-                                + "5회권(400원/회) 대비 볼륨 할인 적용(350원/회).")
-                        .itemPrice(700)                 // 700P = 7,000원 환산, 350원/회
-                        .itemCategory("ai")
+                                + "월간 Premium 구독(5,900원/60회=98.3원/회)보다 단가 약간 저렴하나 포인트 지급 없음 — 구독 권장.")
+                        .itemPrice(200)                 // v3.2: 200P = 2,000원 (1P=10원 통일)
+                        .itemCategory("COUPON")         // v3.2: ai → COUPON
                         .isActive(true)
                         .build(),
 
-                // AI 이용권 50회 — 1,600P (16,000원 환산, 320원/회)
-                // 최대 볼륨 할인. 그래도 구독보다 6배 이상 비싸므로 구독 유도 효과 강력
+                // AI 이용권 50회 — 500P (5,000원, 100원/회)
+                // 대량 패키지. 볼륨 할인 없음 (1P=10원 통일)
                 PointItem.builder()
                         .itemName("AI 이용권 50회")
                         .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 50회. 구매 후 60일 이내 사용. "
-                                + "최대 볼륨 할인(320원/회). 월간 Basic 구독(49원/회) 대비 약 6.5배 비쌈 — 구독 전환 강력 권장.")
-                        .itemPrice(1600)                // 1,600P = 16,000원 환산, 320원/회
-                        .itemCategory("ai")
+                                + "구독 대비 포인트 지급 없음 — 구독 전환 권장.")
+                        .itemPrice(500)                 // v3.2: 500P = 5,000원 (1P=10원 통일)
+                        .itemCategory("COUPON")         // v3.2: ai → COUPON
+                        .isActive(true)
+                        .build(),
+
+                // ── 응모권 (category="APPLY") ─────────────────────────────────
+                // v3.2 신규: 영화 티켓 응모권 — 소비처 다양화
+                // CGV/롯데시네마 등 제휴 영화 티켓 추첨 참여 1회권
+
+                // 영화 티켓 응모권 — 150P (1,500원 환산)
+                PointItem.builder()
+                        .itemName("영화 티켓 응모권")
+                        .itemDescription("CGV, 롯데시네마 등 제휴 영화관 무료 티켓 추첨에 참여할 수 있는 응모권 1회. "
+                                + "매월 말 추첨 진행. 당첨 시 문자 발송.")
+                        .itemPrice(150)                 // v3.2: 150P = 1,500원 환산
+                        .itemCategory("APPLY")          // v3.2 신규 카테고리
                         .isActive(true)
                         .build(),
 

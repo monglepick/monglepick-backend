@@ -1,9 +1,9 @@
 package com.monglepick.monglepickbackend.domain.auth.service;
 
 import com.monglepick.monglepickbackend.domain.auth.entity.RefreshEntity;
-import com.monglepick.monglepickbackend.domain.auth.repository.RefreshRepository;
+import com.monglepick.monglepickbackend.domain.auth.mapper.RefreshMapper;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
@@ -25,6 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
  * 쿠키 읽기/쓰기 로직을 서비스 레이어에서 제거하고 JwtController에서 CookieUtil로 처리한다.
  * refreshRotate() 반환타입을 JwtResponseDto → JwtRefreshResult로 교체하여
  * refreshToken이 서비스 바깥으로 전달되지 않도록 명시적으로 분리한다.</p>
+ *
+ * <p><b>JPA/MyBatis 하이브리드 (2026-04-08, 설계서 §15)</b>: auth 도메인은 김민규 영역으로
+ * MyBatis Mapper를 사용한다. {@link RefreshEntity}는 {@code @Entity}로 선언되어 있지만
+ * Hibernate에 DDL 정의 메타모델만 등록될 뿐이며, 데이터 R/W는 100% {@link RefreshMapper}로
+ * 처리한다. JpaRepository는 사용하지 않는다 (1차 캐시 충돌 방지).</p>
  */
 @Slf4j
 @Service
@@ -33,8 +38,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class JwtService {
 
     private final JwtTokenProvider jwtTokenProvider;
-    private final RefreshRepository refreshRepository;
-    private final UserRepository userRepository;
+    /** Refresh Token 화이트리스트 — MyBatis Mapper로 직접 SQL 호출 */
+    private final RefreshMapper refreshMapper;
+    /** 사용자 조회 — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
+    private final UserMapper userMapper;
 
     /**
      * Refresh Token 로테이션 결과를 담는 불변 record.
@@ -75,10 +82,12 @@ public class JwtService {
             throw new BusinessException(ErrorCode.REFRESH_TOKEN_NOT_FOUND);
         }
 
-        /* 3. userId 추출 및 사용자 조회 */
+        /* 3. userId 추출 및 사용자 조회 (MyBatis — null 반환 시 USER_NOT_FOUND) */
         String userId = parsed.userId();
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
 
         /* 4. 새 토큰 쌍 생성 */
         String newAccessToken = jwtTokenProvider.generateAccessToken(userId, user.getUserRole().name());
@@ -96,6 +105,9 @@ public class JwtService {
 
     /**
      * Refresh Token을 DB 화이트리스트에 추가한다.
+     *
+     * <p>{@code RefreshMapper.insert}는 {@code useGeneratedKeys=true keyProperty="id"}로
+     * 자동 증가 PK를 RefreshEntity에 set한다. {@code created_at}은 SQL {@code NOW()}로 채워진다.</p>
      */
     @Transactional
     public void addRefresh(String userId, String refreshToken) {
@@ -103,14 +115,14 @@ public class JwtService {
                 .userId(userId)
                 .refreshToken(refreshToken)
                 .build();
-        refreshRepository.save(entity);
+        refreshMapper.insert(entity);
     }
 
     /**
      * 해당 Refresh Token이 화이트리스트에 존재하는지 확인한다.
      */
     public boolean existsRefresh(String refreshToken) {
-        return refreshRepository.existsByRefreshToken(refreshToken);
+        return refreshMapper.existsByRefreshToken(refreshToken);
     }
 
     /**
@@ -118,7 +130,7 @@ public class JwtService {
      */
     @Transactional
     public void removeRefresh(String refreshToken) {
-        refreshRepository.deleteByRefreshToken(refreshToken);
+        refreshMapper.deleteByRefreshToken(refreshToken);
     }
 
     /**
@@ -126,6 +138,6 @@ public class JwtService {
      */
     @Transactional
     public void removeAllRefreshByUser(String userId) {
-        refreshRepository.deleteByUserId(userId);
+        refreshMapper.deleteByUserId(userId);
     }
 }

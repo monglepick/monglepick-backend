@@ -3,77 +3,102 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <!--
-    영화 리뷰(reviews) Mapper XML.
-    테이블: reviews
-    담당: 이민수 (review 도메인)
+    리뷰 통합 Mapper XML.
+    테이블: reviews, review_likes, review_votes
+    담당: 이민수 (review 도메인) + admin 동적 검색은 윤형주 유지보수
+
+    설계:
+      - @Entity는 DDL 정의 전용, 데이터 R/W는 100% 이 Mapper (§15)
+      - Review는 String userId + @Transient String nickname 구조
+      - 목록/상세는 JOIN users로 nickname 로드
+      - 엑셀 5번 reviews DB 컬럼명 반영: contents, is_spoiler, review_category_code
 -->
 <mapper namespace="com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper">
 
-    <!-- ═══ ResultMap ═══ -->
+    <!-- ═══ ResultMaps ═══ -->
 
-    <!-- 리뷰 기본 매핑 -->
+    <!-- 리뷰 기본 매핑 (nickname 없음) -->
     <resultMap id="reviewResultMap" type="com.monglepick.monglepickbackend.domain.review.entity.Review">
         <id property="reviewId" column="review_id"/>
+        <result property="userId" column="user_id"/>
         <result property="movieId" column="movie_id"/>
         <result property="rating" column="rating"/>
-        <result property="content" column="content"/>
+        <result property="content" column="contents"/>
         <result property="isDeleted" column="is_deleted"/>
         <result property="isBlinded" column="is_blinded"/>
-        <result property="spoiler" column="spoiler"/>
+        <result property="spoiler" column="is_spoiler"/>
         <result property="likeCount" column="like_count"/>
+        <result property="reviewSource" column="review_source"/>
+        <result property="reviewCategoryCode" column="review_category_code"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
         <result property="createdBy" column="created_by"/>
         <result property="updatedBy" column="updated_by"/>
     </resultMap>
 
-    <!-- 리뷰 + 작성자 JOIN 매핑 -->
-    <resultMap id="reviewWithUserResultMap" type="com.monglepick.monglepickbackend.domain.review.entity.Review"
+    <!-- 리뷰 + JOIN users.nickname 매핑 -->
+    <resultMap id="reviewWithNicknameResultMap" type="com.monglepick.monglepickbackend.domain.review.entity.Review"
                extends="reviewResultMap">
-        <association property="user" javaType="com.monglepick.monglepickbackend.domain.user.entity.User">
-            <id property="userId" column="user_id"/>
-            <result property="nickname" column="nickname"/>
-            <result property="profileImage" column="profile_image"/>
-        </association>
+        <result property="nickname" column="nickname"/>
     </resultMap>
 
-    <!-- ═══ SELECT ═══ -->
+    <!-- 리뷰 좋아요 매핑 -->
+    <resultMap id="reviewLikeResultMap" type="com.monglepick.monglepickbackend.domain.review.entity.ReviewLike">
+        <id property="reviewLikeId" column="review_like_id"/>
+        <result property="reviewId" column="review_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
 
-    <!-- PK로 리뷰 조회 -->
+    <!-- 리뷰 투표 매핑 -->
+    <resultMap id="reviewVoteResultMap" type="com.monglepick.monglepickbackend.domain.review.entity.ReviewVote">
+        <id property="reviewVoteId" column="review_vote_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="reviewId" column="review_id"/>
+        <result property="helpful" column="helpful"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <!-- ═══ 공통 SELECT 컬럼 ═══ -->
+
+    <sql id="reviewColumns">
+        r.review_id, r.user_id, r.movie_id, r.rating, r.contents,
+        r.is_deleted, r.is_blinded, r.is_spoiler, r.like_count,
+        r.review_source, r.review_category_code,
+        r.created_at, r.updated_at, r.created_by, r.updated_by
+    </sql>
+
+    <!-- ═══ Review 단건 조회 ═══ -->
+
     <select id="findById" resultMap="reviewResultMap">
-        SELECT review_id, user_id, movie_id, rating, content,
-               is_deleted, is_blinded, spoiler, like_count,
-               created_at, updated_at, created_by, updated_by
-        FROM reviews
-        WHERE review_id = #{reviewId}
-    </select>
-
-    <!-- 리뷰 + 작성자 JOIN 조회 -->
-    <select id="findByIdWithUser" resultMap="reviewWithUserResultMap">
-        SELECT r.review_id, r.movie_id, r.rating, r.content,
-               r.is_deleted, r.is_blinded, r.spoiler, r.like_count,
-               r.created_at, r.updated_at, r.created_by, r.updated_by,
-               u.user_id, u.nickname, u.profile_image
+        SELECT <include refid="reviewColumns"/>
         FROM reviews r
-        INNER JOIN users u ON r.user_id = u.user_id
         WHERE r.review_id = #{reviewId}
     </select>
 
-    <!-- 영화별 리뷰 목록 + 작성자 (페이징, 최신순) -->
-    <select id="findByMovieIdWithUser" resultMap="reviewWithUserResultMap">
-        SELECT r.review_id, r.movie_id, r.rating, r.content,
-               r.is_deleted, r.is_blinded, r.spoiler, r.like_count,
-               r.created_at, r.updated_at, r.created_by, r.updated_by,
-               u.user_id, u.nickname, u.profile_image
+    <select id="findByIdWithNickname" resultMap="reviewWithNicknameResultMap">
+        SELECT <include refid="reviewColumns"/>,
+               u.nickname AS nickname
         FROM reviews r
-        INNER JOIN users u ON r.user_id = u.user_id
+        LEFT JOIN users u ON r.user_id = u.user_id
+        WHERE r.review_id = #{reviewId}
+    </select>
+
+    <!-- ═══ Review 목록 조회 ═══ -->
+
+    <select id="findByMovieIdWithNickname" resultMap="reviewWithNicknameResultMap">
+        SELECT <include refid="reviewColumns"/>,
+               u.nickname AS nickname
+        FROM reviews r
+        LEFT JOIN users u ON r.user_id = u.user_id
         WHERE r.movie_id = #{movieId}
           AND r.is_deleted = false
         ORDER BY r.created_at DESC
-        LIMIT #{limit} OFFSET #{offset}
+        LIMIT #{offset}, #{limit}
     </select>
 
-    <!-- 영화별 리뷰 총 건수 -->
     <select id="countByMovieId" resultType="long">
         SELECT COUNT(*)
         FROM reviews
@@ -81,19 +106,22 @@
           AND is_deleted = false
     </select>
 
-    <!-- 사용자별 리뷰 목록 (마이페이지) -->
     <select id="findByUserId" resultMap="reviewResultMap">
-        SELECT review_id, user_id, movie_id, rating, content,
-               is_deleted, is_blinded, spoiler, like_count,
-               created_at, updated_at, created_by, updated_by
+        SELECT <include refid="reviewColumns"/>
+        FROM reviews r
+        WHERE r.user_id = #{userId}
+          AND r.is_deleted = false
+        ORDER BY r.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countByUserId" resultType="long">
+        SELECT COUNT(*)
         FROM reviews
         WHERE user_id = #{userId}
           AND is_deleted = false
-        ORDER BY created_at DESC
-        LIMIT #{limit} OFFSET #{offset}
     </select>
 
-    <!-- 중복 리뷰 확인 -->
     <select id="existsByUserIdAndMovieId" resultType="boolean">
         SELECT COUNT(*) > 0
         FROM reviews
@@ -101,33 +129,31 @@
           AND movie_id = #{movieId}
     </select>
 
-    <!-- ═══ INSERT ═══ -->
+    <!-- ═══ Review 쓰기 ═══ -->
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="reviewId">
         INSERT INTO reviews (
-            user_id, movie_id, rating, content,
-            is_deleted, is_blinded, spoiler, like_count,
+            user_id, movie_id, rating, contents,
+            is_deleted, is_blinded, is_spoiler, like_count,
+            review_source, review_category_code,
             created_at, updated_at, created_by, updated_by
         ) VALUES (
-            #{user.userId}, #{movieId}, #{rating}, #{content},
-            false, false, #{spoiler}, 0,
+            #{userId}, #{movieId}, #{rating}, #{content},
+            false, false, #{spoiler}, #{likeCount},
+            #{reviewSource}, #{reviewCategoryCode},
             NOW(), NOW(), #{createdBy}, #{updatedBy}
         )
     </insert>
 
-    <!-- ═══ UPDATE ═══ -->
-
-    <!-- 리뷰 수정 (평점, 본문) -->
     <update id="update">
         UPDATE reviews
         SET rating     = #{rating},
-            content    = #{content},
+            contents   = #{content},
             updated_at = NOW(),
             updated_by = #{updatedBy}
         WHERE review_id = #{reviewId}
     </update>
 
-    <!-- 소프트 삭제 -->
     <update id="softDelete">
         UPDATE reviews
         SET is_deleted = true,
@@ -135,7 +161,13 @@
         WHERE review_id = #{reviewId}
     </update>
 
-    <!-- 블라인드 처리 -->
+    <update id="restore">
+        UPDATE reviews
+        SET is_deleted = false,
+            updated_at = NOW()
+        WHERE review_id = #{reviewId}
+    </update>
+
     <update id="blind">
         UPDATE reviews
         SET is_blinded = true,
@@ -143,11 +175,150 @@
         WHERE review_id = #{reviewId}
     </update>
 
-    <!-- ═══ DELETE ═══ -->
+    <update id="unblind">
+        UPDATE reviews
+        SET is_blinded = false,
+            updated_at = NOW()
+        WHERE review_id = #{reviewId}
+    </update>
 
     <delete id="deleteById">
         DELETE FROM reviews
         WHERE review_id = #{reviewId}
     </delete>
+
+    <!-- ═══ Review 통계 ═══ -->
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM reviews
+    </select>
+
+    <select id="countByCreatedAtBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM reviews
+        WHERE created_at BETWEEN #{start} AND #{end}
+    </select>
+
+    <select id="findAverageRating" resultType="java.lang.Double">
+        SELECT AVG(rating)
+        FROM reviews
+        WHERE rating IS NOT NULL
+          AND is_deleted = false
+    </select>
+
+    <select id="findAverageRatingBetween" resultType="java.lang.Double">
+        SELECT AVG(rating)
+        FROM reviews
+        WHERE rating IS NOT NULL
+          AND is_deleted = false
+          AND created_at BETWEEN #{start} AND #{end}
+    </select>
+
+    <!-- ═══ Review 관리자 동적 검색 ═══ -->
+
+    <sql id="adminReviewWhere">
+        WHERE 1 = 1
+        <if test="movieId != null and movieId != ''">
+            AND r.movie_id = #{movieId}
+        </if>
+        <if test="minRating != null">
+            AND r.rating >= #{minRating}
+        </if>
+    </sql>
+
+    <select id="searchAdminReviews" resultMap="reviewWithNicknameResultMap">
+        SELECT <include refid="reviewColumns"/>,
+               u.nickname AS nickname
+        FROM reviews r
+        LEFT JOIN users u ON r.user_id = u.user_id
+        <include refid="adminReviewWhere"/>
+        ORDER BY r.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countAdminReviews" resultType="long">
+        SELECT COUNT(*)
+        FROM reviews r
+        <include refid="adminReviewWhere"/>
+    </select>
+
+    <select id="findAllAdminReviews" resultMap="reviewWithNicknameResultMap">
+        SELECT <include refid="reviewColumns"/>,
+               u.nickname AS nickname
+        FROM reviews r
+        LEFT JOIN users u ON r.user_id = u.user_id
+        ORDER BY r.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- ═══ ReviewLike ═══ -->
+
+    <select id="findReviewLikeByReviewIdAndUserId" resultMap="reviewLikeResultMap">
+        SELECT review_like_id, review_id, user_id, created_at, updated_at
+        FROM review_likes
+        WHERE review_id = #{reviewId}
+          AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <select id="existsReviewLikeByReviewIdAndUserId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM review_likes
+        WHERE review_id = #{reviewId}
+          AND user_id = #{userId}
+    </select>
+
+    <select id="countReviewLikeByReviewId" resultType="long">
+        SELECT COUNT(*)
+        FROM review_likes
+        WHERE review_id = #{reviewId}
+    </select>
+
+    <insert id="insertReviewLike" useGeneratedKeys="true" keyProperty="reviewLikeId">
+        INSERT INTO review_likes (review_id, user_id, created_at, updated_at)
+        VALUES (#{reviewId}, #{userId}, NOW(), NOW())
+    </insert>
+
+    <delete id="deleteReviewLikeByReviewIdAndUserId">
+        DELETE FROM review_likes
+        WHERE review_id = #{reviewId}
+          AND user_id = #{userId}
+    </delete>
+
+    <!-- ═══ ReviewVote ═══ -->
+
+    <select id="findReviewVoteByUserIdAndReviewId" resultMap="reviewVoteResultMap">
+        SELECT review_vote_id, user_id, review_id, helpful, created_at, updated_at
+        FROM review_votes
+        WHERE user_id = #{userId}
+          AND review_id = #{reviewId}
+        LIMIT 1
+    </select>
+
+    <select id="countReviewVoteByReviewIdAndHelpfulTrue" resultType="long">
+        SELECT COUNT(*)
+        FROM review_votes
+        WHERE review_id = #{reviewId}
+          AND helpful = true
+    </select>
+
+    <select id="countReviewVoteByReviewIdAndHelpfulFalse" resultType="long">
+        SELECT COUNT(*)
+        FROM review_votes
+        WHERE review_id = #{reviewId}
+          AND helpful = false
+    </select>
+
+    <insert id="insertReviewVote" useGeneratedKeys="true" keyProperty="reviewVoteId">
+        INSERT INTO review_votes (user_id, review_id, helpful, created_at, updated_at)
+        VALUES (#{userId}, #{reviewId}, #{helpful}, NOW(), NOW())
+    </insert>
+
+    <update id="updateReviewVoteHelpful">
+        UPDATE review_votes
+        SET helpful = #{helpful},
+            updated_at = NOW()
+        WHERE review_vote_id = #{reviewVoteId}
+    </update>
 
 </mapper>

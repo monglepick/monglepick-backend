@@ -8,10 +8,8 @@ import com.monglepick.monglepickbackend.domain.recommendation.entity.UserBehavio
 import com.monglepick.monglepickbackend.domain.recommendation.repository.EventLogRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationImpactRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.UserBehaviorProfileRepository;
-import com.monglepick.monglepickbackend.domain.watchhistory.repository.WatchHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,14 +28,19 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <h3>처리 단계</h3>
  * <ol>
- *   <li>최근 90일 내 활동 유저 ID 목록 조회 (watch_history + event_logs UNION)</li>
- *   <li>유저별 장르·감독 친화도 계산 (최근 100건 시청 이력 기반)</li>
+ *   <li>최근 90일 내 활동 유저 ID 목록 조회 (reviews + event_logs UNION)</li>
+ *   <li>유저별 장르·감독 친화도 계산 (최근 100건 리뷰 작성 기반 — "봤다" 단일 진실 원본)</li>
  *   <li>취향 일관성 지수 계산 (Shannon Entropy 역산)</li>
  *   <li>추천 수용률 집계 (RecommendationImpact clicked+watched / total)</li>
  *   <li>평균 탐색 깊이 집계 (세션별 클릭 카드 수 평균)</li>
  *   <li>활동 수준 판정 (최근 30일 이벤트 수 기준 4단계)</li>
  *   <li>UPSERT (기존 프로필 갱신 또는 신규 생성)</li>
  * </ol>
+ *
+ * <h3>watch_history 폐기 (2026-04-08)</h3>
+ * <p>장르·감독 친화도 계산의 입력을 {@code watch_history} 테이블에서 {@code reviews} 테이블로
+ * 전환했다. WatchHistory 도메인은 폐기되었으며, "리뷰 작성 = 시청 완료 확인"이라는 단일 진실
+ * 원본 원칙에 따라 reviews 테이블이 모든 시청 행동의 기준이 된다.</p>
  *
  * <h3>에러 전파 정책</h3>
  * <p>개별 유저 처리 실패 시 해당 유저만 skip하고 전체 배치는 중단하지 않는다.</p>
@@ -56,14 +59,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class BehaviorProfileScheduler {
 
     private final UserBehaviorProfileRepository behaviorProfileRepository;
-    private final WatchHistoryRepository watchHistoryRepository;
     private final EventLogRepository eventLogRepository;
     private final RecommendationImpactRepository recommendationImpactRepository;
     private final MovieRepository movieRepository;
     private final ObjectMapper objectMapper;
 
-    /** 장르·감독 친화도 계산에 사용할 최근 시청 이력 최대 건수 */
-    private static final int WATCH_HISTORY_LIMIT = 100;
+    /** 장르·감독 친화도 계산에 사용할 최근 리뷰 작성 이력 최대 건수 */
+    private static final int RECENT_REVIEW_LIMIT = 100;
 
     /** 활동 유저 기준: 최근 90일 이내 활동 */
     private static final int ACTIVE_PERIOD_DAYS = 90;
@@ -86,7 +88,7 @@ public class BehaviorProfileScheduler {
         log.info("[BehaviorProfileScheduler] 행동 프로필 배치 시작");
         LocalDateTime since = LocalDateTime.now().minusDays(ACTIVE_PERIOD_DAYS);
 
-        // 최근 90일 내 활동이 있는 유저 ID 목록 (watch_history + event_logs UNION)
+        // 최근 90일 내 활동이 있는 유저 ID 목록 (reviews + event_logs UNION)
         List<String> activeUserIds = behaviorProfileRepository.findActiveUserIdsSince(since);
         log.info("[BehaviorProfileScheduler] 처리 대상 유저 수: {}명", activeUserIds.size());
 
@@ -122,9 +124,10 @@ public class BehaviorProfileScheduler {
     @Transactional
     public void computeProfileForUser(String userId) {
 
-        // ── 1. 최근 100건 시청 영화 ID 목록 조회 ──────────────────────────────
-        List<String> recentMovieIds = watchHistoryRepository.findRecentMovieIdsByUserId(
-                userId, PageRequest.of(0, WATCH_HISTORY_LIMIT));
+        // ── 1. 최근 100건 리뷰 작성 영화 ID 목록 조회 ────────────────────────
+        // "봤다" 단일 진실 원본 = reviews 테이블 (watch_history 폐기, 2026-04-08)
+        List<String> recentMovieIds = behaviorProfileRepository.findRecentReviewedMovieIdsByUserId(
+                userId, RECENT_REVIEW_LIMIT);
 
         // ── 2. 영화 메타데이터 일괄 조회 (IN 절, N+1 방지) ────────────────────
         Map<String, Movie> movieMap = new HashMap<>();

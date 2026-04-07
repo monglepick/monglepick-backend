@@ -7,25 +7,25 @@ import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.RoleUpdateRe
 import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.SuspendRequest;
 import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.UserDetailResponse;
 import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.UserListResponse;
-import com.monglepick.monglepickbackend.admin.repository.AdminUserRepository;
+import com.monglepick.monglepickbackend.admin.mapper.AdminUserMapper;
 import com.monglepick.monglepickbackend.domain.community.entity.PostComment;
-import com.monglepick.monglepickbackend.domain.community.repository.PostCommentRepository;
-import com.monglepick.monglepickbackend.domain.community.repository.PostRepository;
+import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
 import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
 import com.monglepick.monglepickbackend.domain.payment.repository.PaymentOrderRepository;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
 import com.monglepick.monglepickbackend.domain.reward.entity.UserPoint;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserPointRepository;
-import com.monglepick.monglepickbackend.domain.review.repository.ReviewRepository;
+import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.constants.UserRole;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,11 +59,11 @@ import java.util.List;
 public class AdminUserService {
 
     // ── 의존성 주입 ──
-    /** 기존 도메인 UserRepository — 단일 사용자 조회(findById)에 사용 */
-    private final UserRepository userRepository;
+    /** 사용자 CRUD — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
+    private final UserMapper userMapper;
 
-    /** 관리자 전용 UserRepository — 검색/필터 페이징 쿼리에 사용 */
-    private final AdminUserRepository adminUserRepository;
+    /** 관리자 전용 사용자 검색 — MyBatis Mapper (동적 SQL <if> 기반 통합 쿼리) */
+    private final AdminUserMapper adminUserMapper;
 
     /** 사용자 포인트 잔액·등급 조회 */
     private final UserPointRepository userPointRepository;
@@ -74,14 +74,11 @@ public class AdminUserService {
     /** 결제 주문 이력 조회 */
     private final PaymentOrderRepository paymentOrderRepository;
 
-    /** 게시글 수 카운트 및 게시글 목록 조회 */
-    private final PostRepository postRepository;
+    /** 게시글·댓글 통합 Mapper — 관리자 활동 조회 (JpaRepository 폐기, 설계서 §15) */
+    private final PostMapper postMapper;
 
-    /** 리뷰 수 카운트 조회 */
-    private final ReviewRepository reviewRepository;
-
-    /** 댓글 수 카운트 및 댓글 목록 조회 */
-    private final PostCommentRepository postCommentRepository;
+    /** 리뷰 수 카운트/활동 조회 — MyBatis Mapper (§15) */
+    private final ReviewMapper reviewMapper;
 
     // ──────────────────────────────────────────────
     // 조회 메서드 (readOnly = true 상속)
@@ -139,44 +136,23 @@ public class AdminUserService {
             }
         }
 
-        // 필터 조합에 맞는 Repository 쿼리 선택
-        Page<User> userPage;
+        /*
+         * AdminUserMapper로 통합 동적 SQL 호출 (JPA/MyBatis 하이브리드 §15).
+         *  - 기존 8개 분기(case 1~8)는 XML의 <if> 조건 조합으로 한 번에 처리된다.
+         *  - Spring Page 대신 List + count를 받아 PageImpl로 직접 조립한다.
+         */
+        String normalizedKeyword = hasKeyword ? keyword : null;
+        int offset = (int) pageable.getOffset();
+        int size   = pageable.getPageSize();
 
-        if (hasKeyword && hasStatus && hasRole) {
-            // 케이스 1: 키워드 + 상태 + 역할 3중 복합 검색
-            userPage = adminUserRepository.searchUsersByStatusAndRole(keyword, statusEnum, roleEnum, pageable);
+        List<User> users = adminUserMapper.searchUsers(normalizedKeyword, statusEnum, roleEnum, offset, size);
+        long total = adminUserMapper.countSearchUsers(normalizedKeyword, statusEnum, roleEnum);
 
-        } else if (hasKeyword && hasStatus) {
-            // 케이스 2: 키워드 + 상태
-            userPage = adminUserRepository.searchUsersByStatus(keyword, statusEnum, pageable);
+        List<UserListResponse> content = users.stream()
+                .map(this::toUserListResponse)
+                .toList();
 
-        } else if (hasKeyword && hasRole) {
-            // 케이스 3: 키워드 + 역할
-            userPage = adminUserRepository.searchUsersByRole(keyword, roleEnum, pageable);
-
-        } else if (hasKeyword) {
-            // 케이스 4: 키워드만
-            userPage = adminUserRepository.searchUsers(keyword, pageable);
-
-        } else if (hasStatus && hasRole) {
-            // 케이스 5: 상태 + 역할
-            userPage = adminUserRepository.findByStatusAndUserRoleAndIsDeletedFalse(statusEnum, roleEnum, pageable);
-
-        } else if (hasStatus) {
-            // 케이스 6: 상태만
-            userPage = adminUserRepository.findByStatusAndIsDeletedFalse(statusEnum, pageable);
-
-        } else if (hasRole) {
-            // 케이스 7: 역할만
-            userPage = adminUserRepository.findByUserRoleAndIsDeletedFalse(roleEnum, pageable);
-
-        } else {
-            // 케이스 8: 필터 없음 — 전체 조회 (탈퇴 제외)
-            userPage = adminUserRepository.findAllByIsDeletedFalse(pageable);
-        }
-
-        // User 엔티티 → UserListResponse DTO 변환
-        return userPage.map(this::toUserListResponse);
+        return new PageImpl<>(content, pageable, total);
     }
 
     /**
@@ -190,10 +166,12 @@ public class AdminUserService {
      * @throws BusinessException USER_NOT_FOUND — 해당 userId의 사용자가 없거나 탈퇴한 경우
      */
     public UserDetailResponse getUserDetail(String userId) {
-        // 사용자 조회 — 탈퇴 회원 포함 조회 후 isDeleted 체크
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND,
-                        "사용자를 찾을 수 없습니다: " + userId));
+        // 사용자 조회 — 탈퇴 회원 포함 조회 후 isDeleted 체크 (MyBatis, null 반환 시 예외)
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND,
+                    "사용자를 찾을 수 없습니다: " + userId);
+        }
 
         if (user.isDeleted()) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND,
@@ -207,10 +185,10 @@ public class AdminUserService {
         // grade가 null이면 getGradeCode()가 "NORMAL"을 반환하므로 안전
         String gradeName   = (userPoint != null) ? userPoint.getGradeCode() : "NORMAL";
 
-        // 활동 카운트 집계 — 게시글·리뷰는 전체, 댓글은 소프트 삭제 제외
-        long postCount    = postRepository.findByUser_UserId(userId, Pageable.unpaged()).getTotalElements();
-        long reviewCount  = reviewRepository.findByUser_UserId(userId, Pageable.unpaged()).getTotalElements();
-        long commentCount = postCommentRepository.countByUserIdAndIsDeletedFalse(userId);
+        // 활동 카운트 집계 — 게시글·리뷰는 전체, 댓글은 소프트 삭제 제외 (MyBatis §15.4)
+        long postCount    = postMapper.countByUserId(userId);
+        long reviewCount  = reviewMapper.countByUserId(userId);
+        long commentCount = postMapper.countCommentsByUserIdAndIsDeletedFalse(userId);
 
         log.debug("[AdminUserService] getUserDetail — userId={}, balance={}, grade={}, posts={}, reviews={}, comments={}",
                 userId, balance, gradeName, postCount, reviewCount, commentCount);
@@ -267,18 +245,14 @@ public class AdminUserService {
                     "유효하지 않은 역할 값입니다: " + request.role() + " (허용값: USER, ADMIN)");
         }
 
-        // User 엔티티에는 userRole 필드에 대한 별도 setter가 없으므로
-        // 리플렉션 없이 도메인 메서드를 통해 변경한다.
-        // User 엔티티에 updateUserRole() 도메인 메서드가 없으면 직접 필드 접근이 불가하므로
-        // 아래와 같이 새 User 빌더로 merging하는 대신, 엔티티에 메서드를 추가하는 것이 권장되나
-        // 현재 User 엔티티 구조상 updateUserRole 메서드가 없어 영속성 컨텍스트 dirty checking을
-        // 활용하기 위해 리플렉션 없이 처리하는 방법을 사용한다.
-        // → User 엔티티에 updateUserRole() 추가를 권장하나, 지금은 별도 헬퍼 메서드 호출로 처리
+        // 도메인 메서드로 in-memory 변경 후 MyBatis UPDATE 명시 호출
+        // (JPA/MyBatis 하이브리드 §15 — MyBatis는 dirty checking 미지원)
         user.updateUserRole(newRole);
+        userMapper.update(user);
 
         log.info("[AdminUserService] 역할 변경 — userId={}, newRole={}", userId, newRole);
 
-        // 저장 후 상세 정보 반환 (dirty checking으로 자동 UPDATE)
+        // 저장 후 상세 정보 반환
         return getUserDetail(userId);
     }
 
@@ -302,8 +276,10 @@ public class AdminUserService {
                 : "관리자에 의해 정지되었습니다";
         user.suspend(reason);
 
+        // MyBatis는 dirty checking 미지원 — 명시적으로 UPDATE 호출 (§15)
+        userMapper.update(user);
+
         log.info("[AdminUserService] 계정 정지 — userId={}, reason={}", userId, reason);
-        // 더티 체킹으로 트랜잭션 종료 시 자동 UPDATE
     }
 
     /**
@@ -317,10 +293,12 @@ public class AdminUserService {
      */
     @Transactional
     public void activateUser(String userId) {
-        // 탈퇴 회원은 복구 불가이므로 findActiveUser 대신 탈퇴 여부만 체크
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND,
-                        "사용자를 찾을 수 없습니다: " + userId));
+        // 탈퇴 회원은 복구 불가이므로 findActiveUser 대신 탈퇴 여부만 체크 (MyBatis, null → 예외)
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND,
+                    "사용자를 찾을 수 없습니다: " + userId);
+        }
 
         if (user.isDeleted()) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND,
@@ -330,8 +308,10 @@ public class AdminUserService {
         // User 엔티티의 도메인 메서드 activate() 호출 — status=ACTIVE, suspendedAt/suspendReason 초기화
         user.activate();
 
+        // MyBatis는 dirty checking 미지원 — 명시적으로 UPDATE 호출 (§15)
+        userMapper.update(user);
+
         log.info("[AdminUserService] 계정 복구 — userId={}", userId);
-        // 더티 체킹으로 트랜잭션 종료 시 자동 UPDATE
     }
 
     // ──────────────────────────────────────────────
@@ -359,9 +339,11 @@ public class AdminUserService {
 
         List<ActivityResponse> activities = new ArrayList<>();
 
-        // 게시글 활동 조회 — 제목과 카테고리를 description으로 제공
-        postRepository.findByUser_UserId(userId, pageable)
-                .getContent()
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
+
+        // 게시글 활동 조회 — MyBatis Mapper (§15.4)
+        postMapper.findByUserId(userId, offset, limit)
                 .forEach(post -> activities.add(new ActivityResponse(
                         "POST",
                         post.getTitle(),
@@ -370,9 +352,8 @@ public class AdminUserService {
                         post.getCreatedAt()
                 )));
 
-        // 리뷰 활동 조회 — movieId를 title로, 별점(Double)을 description으로 제공
-        reviewRepository.findByUser_UserId(userId, pageable)
-                .getContent()
+        // 리뷰 활동 조회 — MyBatis Mapper (§15)
+        reviewMapper.findByUserId(userId, offset, limit)
                 .forEach(review -> activities.add(new ActivityResponse(
                         "REVIEW",
                         review.getMovieId(),
@@ -383,9 +364,8 @@ public class AdminUserService {
                         review.getCreatedAt()
                 )));
 
-        // 댓글 활동 조회 — 내용 앞 30자를 title로 제공, 소프트 삭제 포함
-        postCommentRepository.findByUserId(userId, pageable)
-                .getContent()
+        // 댓글 활동 조회 — MyBatis Mapper (소프트 삭제 포함)
+        postMapper.findCommentsByUserId(userId, offset, limit)
                 .forEach(comment -> {
                     // 댓글 내용 앞 30자 추출 (긴 내용 truncate)
                     String content = comment.getContent();
@@ -464,9 +444,11 @@ public class AdminUserService {
      * @throws BusinessException USER_NOT_FOUND — 사용자가 없거나 탈퇴한 경우
      */
     private User findActiveUser(String userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND,
-                        "사용자를 찾을 수 없습니다: " + userId));
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND,
+                    "사용자를 찾을 수 없습니다: " + userId);
+        }
 
         if (user.isDeleted()) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND,
@@ -485,7 +467,7 @@ public class AdminUserService {
      * @throws BusinessException USER_NOT_FOUND — 사용자가 존재하지 않는 경우
      */
     private void validateUserExists(String userId) {
-        if (!userRepository.existsById(userId)) {
+        if (!userMapper.existsById(userId)) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND,
                     "사용자를 찾을 수 없습니다: " + userId);
         }

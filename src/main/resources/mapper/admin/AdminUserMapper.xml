@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    관리자 사용자 관리 전용 Mapper XML — admin 패키지 소유 (윤형주 유지보수).
+
+    테이블: users
+    용도: AdminUserService의 사용자 검색·필터 페이징 조회
+
+    설계:
+      - 기존 AdminUserRepository (JpaRepository)의 8개 메서드를
+        단일 searchUsers + countSearchUsers 로 통합.
+      - MyBatis <if> 동적 SQL로 WHERE 절을 조건부로 조합.
+      - 키워드는 nickname OR email 부분 일치 (LOWER로 대소문자 무시).
+      - 탈퇴 회원(is_deleted=true)은 무조건 제외.
+-->
+<mapper namespace="com.monglepick.monglepickbackend.admin.mapper.AdminUserMapper">
+
+    <!-- ═══ ResultMap 재사용 ═══
+         도메인 UserMapper의 resultMap과 동일 컬럼 매핑이 필요하다.
+         단일 소스 원칙을 위해 동일 resultMap을 여기서도 선언한다.
+         (MyBatis는 namespace 간 resultMap 공유가 번거로우므로 별도 정의) -->
+    <resultMap id="adminUserResultMap" type="com.monglepick.monglepickbackend.domain.user.entity.User">
+        <id property="userId" column="user_id"/>
+        <result property="email" column="email"/>
+        <result property="nickname" column="nickname"/>
+        <result property="passwordHash" column="password_hash"/>
+        <result property="profileImage" column="profile_image"/>
+        <result property="provider" column="provider"/>
+        <result property="providerId" column="provider_id"/>
+        <result property="userRole" column="user_role"/>
+        <result property="userBirth" column="user_birth"/>
+        <result property="name" column="name"/>
+        <result property="requiredTerm" column="required_term"/>
+        <result property="optionTerm" column="option_term"/>
+        <result property="marketingAgreed" column="marketing_agreed"/>
+        <result property="status" column="status"/>
+        <result property="suspendedAt" column="suspended_at"/>
+        <result property="suspendReason" column="suspend_reason"/>
+        <result property="isDeleted" column="is_deleted"/>
+        <result property="deletedAt" column="deleted_at"/>
+        <result property="lastLoginAt" column="last_login_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="updatedBy" column="updated_by"/>
+    </resultMap>
+
+    <!-- ═══ 공통 SELECT 컬럼 ═══ -->
+    <sql id="allColumns">
+        user_id, email, nickname, password_hash, profile_image,
+        provider, provider_id, user_role, user_birth, name,
+        required_term, option_term, marketing_agreed,
+        status, suspended_at, suspend_reason,
+        is_deleted, deleted_at, last_login_at,
+        created_at, updated_at, created_by, updated_by
+    </sql>
+
+    <!-- ═══ 공통 WHERE 절 (동적) ═══
+         keyword, status, userRole이 각각 null/빈값이 아닌 경우에만 조건 추가.
+         탈퇴 회원(is_deleted=true)은 항상 제외. -->
+    <sql id="searchWhereClause">
+        WHERE is_deleted = false
+        <if test="keyword != null and keyword != ''">
+            AND (LOWER(nickname) LIKE LOWER(CONCAT('%', #{keyword}, '%'))
+                 OR LOWER(email) LIKE LOWER(CONCAT('%', #{keyword}, '%')))
+        </if>
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="userRole != null">
+            AND user_role = #{userRole}
+        </if>
+    </sql>
+
+    <!-- ═══ 목록 조회 (페이징) ═══ -->
+    <select id="searchUsers" resultMap="adminUserResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM users
+        <include refid="searchWhereClause"/>
+        ORDER BY created_at DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <!-- ═══ 총 개수 조회 ═══ -->
+    <select id="countSearchUsers" resultType="long">
+        SELECT COUNT(*)
+        FROM users
+        <include refid="searchWhereClause"/>
+    </select>
+
+</mapper>

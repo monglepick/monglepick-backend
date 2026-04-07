@@ -110,10 +110,19 @@ public class SubscriptionPlanInitializer implements ApplicationRunner {
     }
 
     /**
-     * v3.0 기본 구독 상품 4개를 SubscriptionPlan 엔티티 리스트로 생성한다.
+     * v3.2 기본 구독 상품 4개를 SubscriptionPlan 엔티티 리스트로 생성한다.
      *
-     * <p>설계서 v3.0 §4.9 시드 데이터 기준. monthly_ai_bonus 필드 포함.
-     * 포인트 대량 지급 방식(구 3,000P~100,000P) 폐지, AI 쿼터 직접 부여로 전환.</p>
+     * <p>엑셀 DB설계 v4_t2_09_15 Table 49 (subscription_plans) 기준으로 전면 재조정.
+     * 가격 인하 + AI 보너스 현실화로 수지타산 개선. 1P=10원 포인트팩과 환산 일관성 유지.</p>
+     *
+     * <h4>v3.2 수지 구조 (엑셀 Table 49 기준)</h4>
+     * <ul>
+     *   <li>monthly_basic  : 2,900원 / AI 30회/월 / 300P → 단가 96.7원/회</li>
+     *   <li>monthly_premium: 5,900원 / AI 60회/월 / 600P → 단가 98.3원/회</li>
+     *   <li>yearly_basic   : 29,000원/년 / AI 34회/월(연400회) / 340P/월 → 단가 71.1원/회</li>
+     *   <li>yearly_premium : 59,000원/년 / AI 67회/월(연800회) / 670P/월 → 단가 73.4원/회</li>
+     * </ul>
+     * <p>AI 이용권(200P=2,000원, 400원/회) 대비 구독이 4배 이상 저렴 → 구독 유도 구조 유지.</p>
      *
      * @return 초기화할 SubscriptionPlan 엔티티 목록 (가격 오름차순)
      */
@@ -121,64 +130,68 @@ public class SubscriptionPlanInitializer implements ApplicationRunner {
         return List.of(
 
                 // ── 월간 Basic ────────────────────────────────────────────
-                // 가격: 4,900원 / AI 보너스: 월 100회 / 포인트: 200P/월
-                // NORMAL(3/일=90회/월) + 구독(100회) ≈ 190회/월 AI 가능
-                // 단가: 4,900원 ÷ 100회 = 49원/회 (vs AI 이용권 160원/회)
+                // 가격: 2,900원/월 (v3.2: 4,900 → 2,900원 인하, 접근성 강화)
+                // AI 보너스: 월 30회 (v3.2: 100 → 30회, 수지 개선)
+                // 포인트: 300P/월 (v3.2: 200 → 300P 상향)
+                // 단가: 2,900원 ÷ 30회 = 96.7원/회 (vs AI 이용권 400원/회 → 4배 이상 저렴 ✓)
                 SubscriptionPlan.builder()
                         .planCode("monthly_basic")
                         .name("월간 Basic")
                         .periodType(PeriodType.MONTHLY)
-                        .price(4_900)                   // 4,900원/월
-                        .monthlyAiBonus(100)            // 매월 AI 보너스 100회 지급
-                        .pointsPerPeriod(200)           // 매월 보너스 포인트 200P 지급
-                        .description("월간 Basic 구독 — 매월 AI 추천 100회 보너스 + 200P 지급. 일반 사용자의 AI 한도를 약 3배로 확장.")
+                        .price(2_900)                   // v3.2: 2,900원/월 (엑셀 Table 49)
+                        .monthlyAiBonus(30)             // v3.2: 매월 AI 보너스 30회 (수지 개선)
+                        .pointsPerPeriod(300)           // v3.2: 매월 300P 지급 (1P=10원 기준 3,000원 상당)
+                        .description("월간 Basic 구독 — 매월 300 포인트 지급 (AI 추천 30회).")
                         .isActive(true)
                         .build(),
 
                 // ── 월간 Premium ──────────────────────────────────────────
-                // 가격: 9,900원 / AI 보너스: 월 500회 / 포인트: 500P/월
-                // NORMAL(3/일=90회/월) + 구독(500회) ≈ 590회/월 AI 가능
-                // 단가: 9,900원 ÷ 500회 = 19.8원/회 (볼륨 할인 ✓)
+                // 가격: 5,900원/월 (v3.2: 9,900 → 5,900원 인하, 접근성 강화)
+                // AI 보너스: 월 60회 (v3.2: 500 → 60회, 수지 개선)
+                // 포인트: 600P/월 (v3.2: 500 → 600P 상향)
+                // 단가: 5,900원 ÷ 60회 = 98.3원/회 (vs AI 이용권 400원/회 → 4배 이상 저렴 ✓)
                 SubscriptionPlan.builder()
                         .planCode("monthly_premium")
                         .name("월간 Premium")
                         .periodType(PeriodType.MONTHLY)
-                        .price(9_900)                   // 9,900원/월
-                        .monthlyAiBonus(500)            // 매월 AI 보너스 500회 지급
-                        .pointsPerPeriod(500)           // 매월 보너스 포인트 500P 지급
-                        .description("월간 Premium 구독 — 매월 AI 추천 500회 보너스 + 500P 지급. AI를 집중 활용하는 영화 마니아를 위한 플랜.")
+                        .price(5_900)                   // v3.2: 5,900원/월 (엑셀 Table 49)
+                        .monthlyAiBonus(60)             // v3.2: 매월 AI 보너스 60회 (수지 개선)
+                        .pointsPerPeriod(600)           // v3.2: 매월 600P 지급 (1P=10원 기준 6,000원 상당)
+                        .description("월간 Premium 구독 — 매월 600 포인트 지급 (AI 추천 60회).")
                         .isActive(true)
                         .build(),
 
                 // ── 연간 Basic ────────────────────────────────────────────
-                // 가격: 49,000원/년 (monthly_basic×12=58,800원 대비 약 17% 할인)
-                // AI 보너스: 월 150회 (monthly_basic 100회보다 +50회 혜택)
-                // 포인트: 월 300P (연간 총 3,600P 지급)
-                // 단가: 49,000원 ÷ (150회×12월=1,800회) = 27.2원/회
+                // 가격: 29,000원/년 (v3.2: 49,000 → 29,000원 인하)
+                // monthly_basic×12=34,800원 대비 약 17% 할인
+                // AI 보너스: 월 34회 (연 400회 ÷ 12 ≈ 33.3 → 34회)
+                // 포인트: 340P/월 (연간 총 4,080P ≈ "약 4,000 포인트")
+                // 단가: 29,000원 ÷ (34회×12=408회) = 71.1원/회
                 SubscriptionPlan.builder()
                         .planCode("yearly_basic")
                         .name("연간 Basic")
                         .periodType(PeriodType.YEARLY)
-                        .price(49_000)                  // 49,000원/년
-                        .monthlyAiBonus(150)            // 매월 AI 보너스 150회 지급 (연간 1,800회)
-                        .pointsPerPeriod(300)           // 매월 보너스 포인트 300P (연간 3,600P)
-                        .description("연간 Basic 구독 — 월 AI 추천 150회 보너스 + 300P/월 지급. monthly_basic 대비 약 17% 할인 + 월 50회 추가 혜택.")
+                        .price(29_000)                  // v3.2: 29,000원/년 (엑셀 Table 49)
+                        .monthlyAiBonus(34)             // v3.2: 매월 34회 (연 약400회, 34×12=408회)
+                        .pointsPerPeriod(340)           // v3.2: 매월 340P (연간 4,080P ≈ "약 4,000포인트")
+                        .description("연간 Basic 구독 — 연간 약 4,000 포인트 지급 (AI 추천 약400회). monthly_basic 대비 약 17% 할인.")
                         .isActive(true)
                         .build(),
 
                 // ── 연간 Premium ──────────────────────────────────────────
-                // 가격: 99,000원/년 (monthly_premium×12=118,800원 대비 약 17% 할인)
-                // AI 보너스: 월 700회 (monthly_premium 500회보다 +200회 혜택)
-                // 포인트: 월 800P (연간 총 9,600P 지급)
-                // 단가: 99,000원 ÷ (700회×12월=8,400회) = 11.8원/회 (최저가 ✓)
+                // 가격: 59,000원/년 (v3.2: 99,000 → 59,000원 인하)
+                // monthly_premium×12=70,800원 대비 약 17% 할인
+                // AI 보너스: 월 67회 (연 800회 ÷ 12 ≈ 66.7 → 67회)
+                // 포인트: 670P/월 (연간 총 8,040P ≈ "약 8,000 포인트")
+                // 단가: 59,000원 ÷ (67회×12=804회) = 73.4원/회
                 SubscriptionPlan.builder()
                         .planCode("yearly_premium")
                         .name("연간 Premium")
                         .periodType(PeriodType.YEARLY)
-                        .price(99_000)                  // 99,000원/년
-                        .monthlyAiBonus(700)            // 매월 AI 보너스 700회 지급 (연간 8,400회)
-                        .pointsPerPeriod(800)           // 매월 보너스 포인트 800P (연간 9,600P)
-                        .description("연간 Premium 구독 — 월 AI 추천 700회 보너스 + 800P/월 지급. 최고 혜택 플랜, monthly_premium 대비 약 17% 할인 + 월 200회 추가.")
+                        .price(59_000)                  // v3.2: 59,000원/년 (엑셀 Table 49)
+                        .monthlyAiBonus(67)             // v3.2: 매월 67회 (연 약800회, 67×12=804회)
+                        .pointsPerPeriod(670)           // v3.2: 매월 670P (연간 8,040P ≈ "약 8,000포인트")
+                        .description("연간 Premium 구독 — 연간 약 8,000 포인트 지급 (AI 추천 약800회). monthly_premium 대비 약 17% 할인.")
                         .isActive(true)
                         .build()
         );

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 /**
  * 추천 로그 JPA 리포지토리 — recommendation_log 테이블 데이터 접근.
@@ -20,7 +21,7 @@ import java.time.LocalDateTime;
  *   <li>{@link #countByCreatedAtAfter(LocalDateTime)} — 기간 내 추천 총 횟수</li>
  *   <li>{@link #countByClickedTrueAndCreatedAtAfter(LocalDateTime)} — 기간 내 클릭 발생 횟수 (CTR 분자)</li>
  *   <li>{@link #findAverageScoreAfter(LocalDateTime)} — 기간 내 평균 추천 점수</li>
- *   <li>{@link #findAllWithMovieAndUser(Pageable)} — 추천 로그 목록 (N+1 방지, 페이징)</li>
+ *   <li>{@link #findAllWithMovie(Pageable)} — 추천 로그 목록 (N+1 방지, 페이징)</li>
  * </ul>
  */
 public interface RecommendationLogRepository extends JpaRepository<RecommendationLog, Long> {
@@ -58,15 +59,51 @@ public interface RecommendationLogRepository extends JpaRepository<Recommendatio
     Double findAverageScoreAfter(@Param("after") LocalDateTime after);
 
     /**
-     * 추천 로그 전체를 영화 및 사용자와 함께 페이징 조회한다 (N+1 방지).
+     * 추천 로그 전체를 영화와 함께 페이징 조회한다 (N+1 방지).
      *
      * <p>관리자 추천 로그 목록 화면에서 사용한다.
-     * movie와 user를 JOIN FETCH하여 추가 쿼리를 방지한다.</p>
+     * movie를 JOIN FETCH하여 추가 쿼리를 방지한다. user는 String FK 직접 보관 방식이므로
+     * (JPA/MyBatis 하이브리드 §15.4) JOIN FETCH 대상이 아니다.</p>
      *
      * @param pageable 페이징 정보
      * @return 추천 로그 페이지
      */
-    @Query(value = "SELECT r FROM RecommendationLog r JOIN FETCH r.movie JOIN FETCH r.user",
+    @Query(value = "SELECT r FROM RecommendationLog r JOIN FETCH r.movie",
            countQuery = "SELECT COUNT(r) FROM RecommendationLog r")
-    Page<RecommendationLog> findAllWithMovieAndUser(Pageable pageable);
+    Page<RecommendationLog> findAllWithMovie(Pageable pageable);
+
+    // ─────────────────────────────────────────────
+    // 사용자별 추천 이력 조회 (클라이언트 추천 이력 탭용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 특정 사용자의 추천 이력을 최신 순으로 페이징 조회한다 (N+1 방지).
+     *
+     * <p>클라이언트 추천 이력 탭({@code GET /api/v1/recommendations})에서 사용한다.
+     * movie를 JOIN FETCH하여 영화 정보를 한 번에 조회한다.</p>
+     *
+     * @param userId   조회 대상 사용자 ID
+     * @param pageable 페이징 정보 (기본 정렬: createdAt DESC)
+     * @return 해당 사용자의 추천 로그 페이지
+     */
+    @Query(value = "SELECT r FROM RecommendationLog r JOIN FETCH r.movie " +
+                   "WHERE r.userId = :userId",
+           countQuery = "SELECT COUNT(r) FROM RecommendationLog r WHERE r.userId = :userId")
+    Page<RecommendationLog> findByUserIdWithMovie(@Param("userId") String userId, Pageable pageable);
+
+    /**
+     * 특정 사용자의 추천 이력 중 추천 로그 ID로 단건을 조회한다.
+     *
+     * <p>찜/봤어요 토글 API에서 소유권 검증에 사용한다.
+     * userId가 일치하지 않으면 빈 Optional을 반환하여 403 처리에 활용한다.</p>
+     *
+     * @param recommendationLogId 추천 로그 ID
+     * @param userId              소유자 사용자 ID
+     * @return 해당 조건의 추천 로그 (없으면 빈 Optional)
+     */
+    @Query("SELECT r FROM RecommendationLog r JOIN FETCH r.movie " +
+           "WHERE r.recommendationLogId = :recommendationLogId AND r.userId = :userId")
+    Optional<RecommendationLog> findByRecommendationLogIdAndUserId(
+            @Param("recommendationLogId") Long recommendationLogId,
+            @Param("userId") String userId);
 }

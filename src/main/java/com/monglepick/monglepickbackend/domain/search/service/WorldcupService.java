@@ -1,13 +1,18 @@
 package com.monglepick.monglepickbackend.domain.search.service;
 
+import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
+import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupMatchDto;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupPickResponse;
+import com.monglepick.monglepickbackend.domain.search.dto.WorldcupResultResponse;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupStartResponse;
 import com.monglepick.monglepickbackend.domain.search.entity.WorldcupMatch;
+import com.monglepick.monglepickbackend.domain.search.entity.WorldcupResult;
 import com.monglepick.monglepickbackend.domain.search.entity.WorldcupSession;
 import com.monglepick.monglepickbackend.domain.search.entity.WorldcupStatus;
 import com.monglepick.monglepickbackend.domain.search.repository.WorldcupMatchRepository;
+import com.monglepick.monglepickbackend.domain.search.repository.WorldcupResultRepository;
 import com.monglepick.monglepickbackend.domain.search.repository.WorldcupSessionRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
@@ -18,14 +23,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * 이상형 월드컵 게임 서비스.
  *
- * <p>세션 시작, 매치 선택, 완주 처리 및 리워드 지급을 담당한다.</p>
+ * <p>세션 시작, 매치 선택, 완주 처리, 결과 조회 및 리워드 지급을 담당한다.</p>
  *
  * <h3>라운드 진행 흐름</h3>
  * <pre>
@@ -33,11 +37,12 @@ import java.util.stream.Collectors;
  * → ... → 결승(currentRound=2) → 최종 완료(currentRound=1)
  * </pre>
  *
- * <h3>라운드 완료 판정</h3>
- * <p>해당 라운드의 모든 매치({@code winnerMovieId != null})가 완료되면
- * 승자 목록으로 다음 라운드 매치를 자동 생성한다.
- * currentRound == 2인 상태에서 라운드가 완료되면 결승 매치(currentRound=1)를 생성하고,
- * currentRound == 1이 완료되면 세션을 COMPLETED로 전환하고 리워드를 지급한다.</p>
+ * <h3>후보 영화 선택 정책 (v2 — Frontend 호환)</h3>
+ * <ul>
+ *   <li>candidateMovieIds가 null/empty이면 DB에서 랜덤으로 roundSize개 영화를 선택한다
+ *       ({@link MovieRepository#findRandomMovieIdsByGenre(String, int)}).</li>
+ *   <li>candidateMovieIds가 제공되면 크기 검증 후 그대로 사용한다.</li>
+ * </ul>
  *
  * <h3>리워드 지급 정책</h3>
  * <ul>
@@ -57,6 +62,13 @@ public class WorldcupService {
     /** 월드컵 매치 레포지토리 — 매치 생성/조회 */
     private final WorldcupMatchRepository matchRepo;
 
+    /** 월드컵 결과 레포지토리 — 결과 저장/조회 */
+    private final WorldcupResultRepository resultRepo;
+
+    /** 영화 레포지토리 — 후보 영화 랜덤 선택 및 결과 조회 시 상세 정보 조회 */
+    private final MovieRepository movieRepo;
+
+
     /** 리워드 서비스 — 완주 시 포인트 지급 위임 */
     private final RewardService rewardService;
 
@@ -69,31 +81,30 @@ public class WorldcupService {
      *
      * <h4>처리 흐름</h4>
      * <ol>
-     *   <li>candidateMovieIds 크기가 roundSize와 일치하는지 검증한다.</li>
+     *   <li>candidateMovieIds가 null/empty이면 DB에서 장르 기반으로 랜덤 선택한다.</li>
+     *   <li>candidateMovieIds가 제공되면 크기가 roundSize와 일치하는지 검증한다.</li>
      *   <li>{@link WorldcupSession} 엔티티를 생성하고 저장한다.</li>
      *   <li>첫 라운드(roundSize강) 매치를 pairs로 생성한다:
      *       candidates[0] vs candidates[1], candidates[2] vs candidates[3], ...</li>
-     *   <li>생성된 매치 목록을 포함한 {@link WorldcupStartResponse}를 반환한다.</li>
+     *   <li>생성된 매치 목록을 포함한 {@link WorldcupStartResponse}를 반환한다.
+     *       {@code gameId}는 {@code sessionId}와 동일한 값 (Frontend 호환).</li>
      * </ol>
      *
      * @param userId            사용자 ID
-     * @param genreFilter       장르 필터 (nullable)
-     * @param roundSize         토너먼트 크기 (16/32/64)
-     * @param candidateMovieIds 후보 영화 ID 목록 (roundSize 크기여야 함)
-     * @return 세션 ID 및 첫 라운드 매치 목록
-     * @throws BusinessException {@link ErrorCode#INVALID_INPUT} candidateMovieIds 크기 불일치 시
+     * @param genreFilter       장르 필터 (nullable — null이면 전체 장르에서 랜덤 선택)
+     * @param roundSize         토너먼트 크기 (8/16/32)
+     * @param candidateMovieIds 후보 영화 ID 목록 (optional — null/empty이면 DB에서 랜덤 선택)
+     * @return 세션 ID(gameId 포함) 및 첫 라운드 매치 목록
+     * @throws BusinessException {@link ErrorCode#INVALID_INPUT} candidateMovieIds 크기 불일치 또는
+     *                           DB 조회 결과가 roundSize에 미치지 못할 때
      */
     @Transactional
     public WorldcupStartResponse startWorldcup(String userId, String genreFilter,
                                                int roundSize, List<String> candidateMovieIds) {
-        // 후보 영화 수가 라운드 크기와 일치하는지 검증
-        if (candidateMovieIds == null || candidateMovieIds.size() != roundSize) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "후보 영화 수(" + (candidateMovieIds == null ? 0 : candidateMovieIds.size())
-                            + ")가 라운드 크기(" + roundSize + ")와 일치하지 않습니다");
-        }
+        // ① 후보 영화 목록 결정 — null/empty이면 DB에서 랜덤 선택, 제공 시 크기 검증
+        List<String> candidates = resolveCandidates(genreFilter, roundSize, candidateMovieIds);
 
-        // 세션 생성
+        // ② 세션 생성
         WorldcupSession session = WorldcupSession.builder()
                 .userId(userId)
                 .genreFilter(genreFilter)
@@ -106,14 +117,16 @@ public class WorldcupService {
         log.info("월드컵 세션 생성: userId={}, sessionId={}, roundSize={}",
                 userId, session.getSessionId(), roundSize);
 
-        // 첫 라운드 매치 생성 (candidates 짝 지어 매치 구성)
-        List<WorldcupMatch> matches = createMatchPairs(session, roundSize, candidateMovieIds);
+        // ③ 첫 라운드 매치 생성 (candidates 짝 지어 매치 구성)
+        List<WorldcupMatch> matches = createMatchPairs(session, roundSize, candidates);
         List<WorldcupMatchDto> matchDtos = matches.stream()
                 .map(WorldcupMatchDto::from)
                 .collect(Collectors.toList());
 
+        /* gameId = sessionId 별칭 (Frontend data.gameId 호환) */
         return new WorldcupStartResponse(
                 session.getSessionId(),
+                session.getSessionId(),   // gameId alias
                 roundSize,
                 roundSize,
                 matchDtos
@@ -184,10 +197,8 @@ public class WorldcupService {
                 .allMatch(m -> m.getWinnerMovieId() != null);
 
         if (!roundCompleted) {
-            // 라운드 미완료 — 현재 상태만 반환
-            return new WorldcupPickResponse(
-                    sessionId, currentRound, false, false, null, Collections.emptyList()
-            );
+            // 라운드 미완료 — 현재 상태만 반환 (정적 팩토리 메서드 사용)
+            return WorldcupPickResponse.inProgress(sessionId, currentRound);
         }
 
         // ⑦ 라운드 완료 처리
@@ -201,7 +212,7 @@ public class WorldcupService {
     }
 
     /**
-     * 특정 사용자의 월드컵 세션 목록을 조회한다 (IN_PROGRESS 상태).
+     * 특정 사용자의 진행 중인 월드컵 세션 목록을 조회한다 (IN_PROGRESS 상태).
      *
      * @param userId 사용자 ID
      * @return 진행 중인 세션 목록
@@ -210,9 +221,154 @@ public class WorldcupService {
         return sessionRepo.findByUserIdAndStatus(userId, WorldcupStatus.IN_PROGRESS);
     }
 
+    /**
+     * 완료된 월드컵 세션의 결과를 조회한다.
+     *
+     * <p>Frontend의 {@code GET /api/v1/worldcup/result/{sessionId}} 요청에 응답한다.
+     * 세션이 COMPLETED 상태가 아니면 {@link ErrorCode#INVALID_INPUT} 예외를 발생시킨다.</p>
+     *
+     * <h4>응답 구성</h4>
+     * <ol>
+     *   <li>sessionId로 WorldcupSession을 조회한다.</li>
+     *   <li>세션의 winnerMovieId로 Movie 상세 정보를 조회한다 (조회 실패 시 winner=null).</li>
+     *   <li>{@link WorldcupResultResponse}를 구성하여 반환한다 (gameId=sessionId 별칭 포함).</li>
+     * </ol>
+     *
+     * @param sessionId 세션 ID (Frontend의 gameId와 동일한 값)
+     * @return 결과 응답 DTO (gameId, sessionId, winnerMovieId, winner 상세, completedAt)
+     * @throws BusinessException 세션 미발견 또는 COMPLETED 상태가 아닐 때
+     */
+    public WorldcupResultResponse getResult(Long sessionId) {
+        // 세션 조회
+        WorldcupSession session = sessionRepo.findById(sessionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
+                        "세션을 찾을 수 없습니다: sessionId=" + sessionId));
+
+        // COMPLETED 상태 확인
+        if (session.getStatus() != WorldcupStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "완료되지 않은 세션입니다: sessionId=" + sessionId
+                            + ", status=" + session.getStatus());
+        }
+
+        // 우승 영화 상세 조회 (posterPath, title, releaseYear 포함)
+        Movie winnerMovie = null;
+        if (session.getWinnerMovieId() != null) {
+            winnerMovie = movieRepo.findById(session.getWinnerMovieId()).orElse(null);
+            if (winnerMovie == null) {
+                log.warn("우승 영화를 찾을 수 없습니다: winnerMovieId={}", session.getWinnerMovieId());
+            }
+        }
+
+        return WorldcupResultResponse.from(session, winnerMovie);
+    }
+
     // ────────────────────────────────────────────────────────────────
     // private 헬퍼 메서드
     // ────────────────────────────────────────────────────────────────
+
+    /**
+     * 후보 영화 목록을 결정한다.
+     *
+     * <p>candidateMovieIds가 null 또는 빈 목록이면 DB에서 랜덤으로 roundSize개를 선택한다.
+     * candidateMovieIds가 제공되면 크기가 roundSize와 일치하는지 검증 후 반환한다.</p>
+     *
+     * <h4>DB 랜덤 선택 전략</h4>
+     * <ol>
+     *   <li>genre 필터로 1차 시도.</li>
+     *   <li>결과가 roundSize에 미치지 못하면 genre 제한 해제 후 2차 시도.</li>
+     *   <li>그래도 부족하면 {@link ErrorCode#INVALID_INPUT} 예외.</li>
+     * </ol>
+     *
+     * @param genreFilter       장르 필터 (nullable)
+     * @param roundSize         토너먼트 크기
+     * @param candidateMovieIds Frontend가 전달한 후보 목록 (optional)
+     * @return 최종 후보 영화 ID 목록 (roundSize 크기 보장)
+     * @throws BusinessException 크기 불일치 또는 DB 조회 결과 부족 시
+     */
+    private List<String> resolveCandidates(String genreFilter, int roundSize,
+                                            List<String> candidateMovieIds) {
+        if (candidateMovieIds == null || candidateMovieIds.isEmpty()) {
+            // Frontend가 candidateMovieIds를 전달하지 않은 경우 — DB에서 랜덤 선택
+            log.info("candidateMovieIds 미제공 — DB에서 랜덤 선택: genreFilter={}, roundSize={}",
+                    genreFilter, roundSize);
+
+            // 빈 문자열 genreFilter는 null로 변환 (네이티브 쿼리의 :genre IS NULL 조건 활용)
+            String genre = (genreFilter != null && !genreFilter.isBlank()) ? genreFilter : null;
+            List<String> randomIds = movieRepo.findRandomMovieIdsByGenre(genre, roundSize);
+
+            if (randomIds.size() < roundSize) {
+                // 장르 필터 결과 부족 시 전체 장르로 재시도
+                log.warn("장르 필터({})로 충분한 영화({}/{})를 찾지 못함 — 전체 장르로 재시도",
+                        genreFilter, randomIds.size(), roundSize);
+                randomIds = movieRepo.findRandomMovieIdsByGenre(null, roundSize);
+            }
+
+            if (randomIds.size() < roundSize) {
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "DB에서 후보 영화(" + roundSize + "개)를 충분히 찾을 수 없습니다. "
+                                + "poster_path와 rating이 있는 영화가 부족합니다.");
+            }
+
+            return randomIds;
+        }
+
+        // Frontend가 candidateMovieIds를 전달한 경우 — 크기 검증 후 사용
+        if (candidateMovieIds.size() != roundSize) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "후보 영화 수(" + candidateMovieIds.size()
+                            + ")가 라운드 크기(" + roundSize + ")와 일치하지 않습니다");
+        }
+
+        return candidateMovieIds;
+    }
+
+    /**
+     * 월드컵 결과를 WorldcupResult 테이블에 저장한다.
+     *
+     * <p>세션 완료 직후 호출되며, 실패해도 게임 완료 흐름에 영향을 주지 않도록
+     * 예외를 try/catch로 흡수한다.</p>
+     *
+     * @param session     완료된 세션
+     * @param winnerMovieId 최종 우승 영화 ID
+     */
+    private void saveWorldcupResult(WorldcupSession session, String winnerMovieId) {
+        try {
+            // userId는 String FK 직접 보관 (JPA/MyBatis 하이브리드 §15.4)
+            // 사용자 존재 검증은 세션 시작 시점에 이미 수행됨
+            String userId = session.getUserId();
+            if (userId == null) {
+                log.warn("WorldcupResult 저장 건너뜀 — 세션에 userId 없음: sessionId={}",
+                        session.getSessionId());
+                return;
+            }
+
+            // 우승 영화 엔티티 조회 (FK 용 — Movie는 backend가 DDL 마스터, @ManyToOne 유지)
+            Movie winnerMovie = movieRepo.findById(winnerMovieId).orElse(null);
+            if (winnerMovie == null) {
+                log.warn("WorldcupResult 저장 건너뜀 — 우승 영화 미발견: winnerMovieId={}", winnerMovieId);
+                return;
+            }
+
+            // 결과 저장 (sessionId, rewardGranted, totalMatches 포함)
+            int totalMatches = (session.getRoundSize() - 1); // 16강 = 15경기
+            WorldcupResult result = WorldcupResult.builder()
+                    .userId(userId)
+                    .roundSize(session.getRoundSize())
+                    .winnerMovie(winnerMovie)
+                    .sessionId(session.getSessionId())
+                    .rewardGranted(true)
+                    .totalMatches(totalMatches)
+                    .onboardingCompleted(false)
+                    .build();
+            resultRepo.save(result);
+            log.info("WorldcupResult 저장 완료: sessionId={}, winnerMovieId={}",
+                    session.getSessionId(), winnerMovieId);
+        } catch (Exception e) {
+            log.warn("WorldcupResult 저장 실패 (무시): sessionId={}, error={}",
+                    session.getSessionId(), e.getMessage());
+        }
+    }
 
     /**
      * 후보 영화 ID 목록으로 매치 페어를 생성하고 저장한다.
@@ -273,14 +429,8 @@ public class WorldcupService {
                 .map(WorldcupMatchDto::from)
                 .collect(Collectors.toList());
 
-        return new WorldcupPickResponse(
-                session.getSessionId(),
-                nextRound,
-                true,
-                false,
-                null,
-                nextMatchDtos
-        );
+        /* 라운드 완료 — 정적 팩토리 메서드 사용 (alias 필드 자동 설정) */
+        return WorldcupPickResponse.roundComplete(session.getSessionId(), nextRound, nextMatchDtos);
     }
 
     /**
@@ -314,6 +464,9 @@ public class WorldcupService {
         log.info("월드컵 게임 완료: sessionId={}, userId={}, winnerMovieId={}",
                 session.getSessionId(), session.getUserId(), finalWinner);
 
+        // WorldcupResult INSERT — 결과 이력 보존 (실패해도 게임 완료 응답은 정상 반환)
+        saveWorldcupResult(session, finalWinner);
+
         // 리워드 지급 — WORLDCUP_COMPLETE (일일 5회 한도)
         rewardService.grantReward(
                 session.getUserId(),
@@ -330,13 +483,7 @@ public class WorldcupService {
                 0
         );
 
-        return new WorldcupPickResponse(
-                session.getSessionId(),
-                1,
-                true,
-                true,
-                finalWinner,
-                Collections.emptyList()
-        );
+        // gameComplete 팩토리 메서드 사용 — isFinished/finalWinner/nextMatch alias 자동 세팅
+        return WorldcupPickResponse.gameComplete(session.getSessionId(), finalWinner);
     }
 }

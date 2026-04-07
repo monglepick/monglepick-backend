@@ -52,46 +52,56 @@ public class AchievementInitializer implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         log.info("[AchievementInitializer] 기본 업적 유형 초기화 시작");
 
-        /* 초기화할 기본 업적 유형 정의 목록 */
+        /* 초기화할 기본 업적 유형 정의 목록
+         * category 값: VIEWING(시청), SOCIAL(소셜/커뮤니티), COLLECTION(수집), CHALLENGE(도전과제)
+         * 프론트엔드가 이 값으로 탭 필터링을 수행한다. */
         List<AchievementType> defaults = List.of(
 
-                /* 도장깨기 코스 완주 — 코스 1개를 끝까지 완료했을 때 달성 */
+                /* 도장깨기 코스 완주 — 코스 1개를 끝까지 완료했을 때 달성
+                 * category=CHALLENGE: 코스 완주는 도전과제 성격의 업적 */
                 AchievementType.builder()
                         .achievementCode("course_complete")
                         .achievementName("코스 완주")
                         .description("도장깨기 코스를 완주하면 획득할 수 있습니다. 코스 내 모든 영화를 시청하세요.")
                         .requiredCount(1)
                         .rewardPoints(100)
+                        .category("CHALLENGE")
                         .isActive(true)
                         .build(),
 
-                /* 퀴즈 만점 — 코스 내 퀴즈를 오답 없이 완료했을 때 달성 */
+                /* 퀴즈 만점 — 코스 내 퀴즈를 오답 없이 완료했을 때 달성
+                 * category=CHALLENGE: 퀴즈 만점은 지식 도전과제 업적 */
                 AchievementType.builder()
                         .achievementCode("quiz_perfect")
                         .achievementName("퀴즈 만점")
                         .description("도장깨기 코스의 퀴즈에서 만점을 받으면 획득할 수 있습니다.")
                         .requiredCount(1)
                         .rewardPoints(50)
+                        .category("CHALLENGE")
                         .isActive(true)
                         .build(),
 
-                /* 리뷰 10개 달성 — 누적 리뷰 작성 수가 10개에 도달했을 때 달성 */
+                /* 리뷰 10개 달성 — 누적 리뷰 작성 수가 10개에 도달했을 때 달성
+                 * category=SOCIAL: 리뷰 작성은 커뮤니티/소셜 활동 업적 */
                 AchievementType.builder()
                         .achievementCode("review_count_10")
                         .achievementName("리뷰 10개 달성")
                         .description("영화 리뷰를 10개 이상 작성하면 획득할 수 있습니다.")
                         .requiredCount(10)
                         .rewardPoints(200)
+                        .category("SOCIAL")
                         .isActive(true)
                         .build(),
 
-                /* 5개 장르 탐험 — 서로 다른 장르 영화를 5개 이상 시청했을 때 달성 */
+                /* 5개 장르 탐험 — 서로 다른 장르 영화를 5개 이상 시청했을 때 달성
+                 * category=VIEWING: 다양한 장르 시청은 시청 활동 업적 */
                 AchievementType.builder()
                         .achievementCode("genre_explorer")
                         .achievementName("5개 장르 탐험")
                         .description("5가지 이상의 서로 다른 장르 영화를 시청하면 획득할 수 있습니다.")
                         .requiredCount(5)
                         .rewardPoints(150)
+                        .category("VIEWING")
                         .isActive(true)
                         .build()
         );

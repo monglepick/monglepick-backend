@@ -323,6 +323,40 @@ public class PaymentOrder extends BaseAuditEntity {
         this.failedReason = reason;
     }
 
+    /**
+     * COMPENSATION_FAILED 주문을 COMPLETED로 복구한다 (관리자 수동 조치용).
+     *
+     * <p>관리자가 Toss Payments 콘솔에서 결제 이력을 확인한 뒤,
+     * "포인트 수동 지급 후 완료 처리" 경로로 복구할 때 호출한다.</p>
+     *
+     * <h4>복구 절차</h4>
+     * <ol>
+     *   <li>관리자가 Toss 결제 이력에서 실제 청구 금액 확인</li>
+     *   <li>PointService로 포인트 수동 지급</li>
+     *   <li>이 메서드 호출로 주문 상태 COMPLETED 복구</li>
+     * </ol>
+     *
+     * <h4>상태 전이</h4>
+     * <pre>COMPENSATION_FAILED → COMPLETED</pre>
+     *
+     * @param adminNote 복구 메모 (관리자 조치 내용, failedReason 필드에 덮어쓴다)
+     * @throws IllegalStateException COMPENSATION_FAILED 상태가 아닐 때 호출한 경우
+     */
+    public void markRecovered(String adminNote) {
+        if (this.status != OrderStatus.COMPENSATION_FAILED) {
+            throw new IllegalStateException(
+                    "복구 처리할 수 없는 주문 상태: " + this.status
+                            + " (COMPENSATION_FAILED 상태에서만 복구 가능)"
+            );
+        }
+        // 상태를 COMPLETED로 복구하고, completedAt과 관리자 메모를 기록한다.
+        this.status = OrderStatus.COMPLETED;
+        this.completedAt = LocalDateTime.now();
+        // failedReason 필드에 관리자 복구 메모를 덮어쓴다.
+        // 기존 실패 사유는 PointsHistory 이력에 남아있으므로 감사 추적에 지장이 없다.
+        this.failedReason = adminNote;
+    }
+
     // ──────────────────────────────────────────────
     // 내부 enum
     // ──────────────────────────────────────────────

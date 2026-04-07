@@ -84,6 +84,27 @@ public class CourseReview extends BaseAuditEntity {
     @Column(name = "review_text", columnDefinition = "TEXT")
     private String reviewText;
 
+    // ========== Excel Table 19 기준 추가 컬럼 (2개) ==========
+
+    /**
+     * 인증 횟수 (기본값: 0).
+     * 해당 리뷰(시청 완료)가 다른 사용자로부터 인증(검증)받은 횟수를 기록한다.
+     * 커뮤니티 신뢰도 지표 및 ACHIEVEMENT 리워드 조건 판정에 활용된다.
+     */
+    @Column(name = "verified_count", nullable = false)
+    @Builder.Default
+    private Integer verifiedCount = 0;
+
+    /**
+     * 이 리뷰 작성으로 지급된 포인트 (기본값: 0).
+     * RoadmapService가 도장깨기 코스 영화 시청 완료 리뷰 작성 시
+     * 등급 배율을 적용하여 지급한 실제 포인트 금액을 기록한다.
+     * 지급 이력 조회 및 정산 근거로 활용된다.
+     */
+    @Column(name = "award_point", nullable = false)
+    @Builder.Default
+    private Integer awardPoint = 0;
+
     /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
 }

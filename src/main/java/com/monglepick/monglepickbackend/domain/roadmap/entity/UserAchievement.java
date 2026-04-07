@@ -1,6 +1,5 @@
 package com.monglepick.monglepickbackend.domain.roadmap.entity;
 
-import com.monglepick.monglepickbackend.domain.user.entity.User;
 /* BaseAuditEntity 상속으로 created_at, updated_at, created_by, updated_by 자동 관리 */
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
@@ -38,7 +37,7 @@ import java.time.LocalDateTime;
  *
  * <h3>주요 필드</h3>
  * <ul>
- *   <li>{@code user}            — 업적 달성 사용자 (FK → users.user_id)</li>
+ *   <li>{@code userId}          — 업적 달성 사용자 ID (String FK → users.user_id, JPA/MyBatis 하이브리드 §15.4)</li>
  *   <li>{@code achievementType} — 업적 유형 참조 (FK → achievement_types.achievement_type_id)</li>
  *   <li>{@code achievementKey}  — 업적 식별 키 (예: 코스 ID, 수치 등)</li>
  *   <li>{@code achievedAt}      — 업적 달성 시각 (도메인 고유 필드, 유지)</li>
@@ -79,12 +78,14 @@ public class UserAchievement extends BaseAuditEntity {
     private Long userAchievementId;
 
     /**
-     * 업적 달성 사용자 (LAZY).
-     * user_achievements.user_id → users.user_id FK.
+     * 업적 달성 사용자 ID — users.user_id를 String으로 직접 참조한다.
+     *
+     * <p>users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA @ManyToOne 매핑을 두지 않고
+     * String FK로만 보관한다 (설계서 §15.4). AchievementType은 같은 roadmap 도메인이므로
+     * @ManyToOne 유지한다.</p>
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false, length = 50)
+    private String userId;
 
     /**
      * 업적 유형 참조 (LAZY) — achievement_types 마스터 테이블 FK.

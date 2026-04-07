@@ -7,24 +7,26 @@ import com.monglepick.monglepickbackend.admin.dto.ContentDto.ReportResponse;
 import com.monglepick.monglepickbackend.admin.dto.ContentDto.ReviewResponse;
 import com.monglepick.monglepickbackend.admin.dto.ContentDto.ToxicityActionRequest;
 import com.monglepick.monglepickbackend.admin.dto.ContentDto.ToxicityResponse;
-import com.monglepick.monglepickbackend.admin.repository.AdminPostRepository;
 import com.monglepick.monglepickbackend.admin.repository.AdminReportRepository;
-import com.monglepick.monglepickbackend.admin.repository.AdminReviewRepository;
-import com.monglepick.monglepickbackend.admin.repository.AdminToxicityLogRepository;
+import com.monglepick.monglepickbackend.domain.content.mapper.ContentMapper;
 import com.monglepick.monglepickbackend.domain.community.entity.Post;
 import com.monglepick.monglepickbackend.domain.community.entity.PostDeclaration;
 import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
+import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
 import com.monglepick.monglepickbackend.domain.content.entity.ToxicityLog;
 import com.monglepick.monglepickbackend.domain.review.entity.Review;
-import com.monglepick.monglepickbackend.domain.review.repository.ReviewRepository;
+import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 /**
  * 관리자 콘텐츠 관리 서비스.
@@ -54,17 +56,14 @@ public class AdminContentService {
     /** 신고 내역 조회 리포지토리 (관리자 전용) */
     private final AdminReportRepository adminReportRepository;
 
-    /** 혐오표현 로그 조회 리포지토리 (관리자 전용) */
-    private final AdminToxicityLogRepository adminToxicityLogRepository;
+    /** 콘텐츠 통합 Mapper — AdminToxicityLogRepository 폐기, ContentMapper로 일원화 (§15) */
+    private final ContentMapper contentMapper;
 
-    /** 게시글 필터 조회 리포지토리 (관리자 전용) */
-    private final AdminPostRepository adminPostRepository;
+    /** 게시글 Mapper — AdminPostRepository 폐기, 모든 조회·수정은 PostMapper로 일원화 (설계서 §15) */
+    private final PostMapper postMapper;
 
-    /** 리뷰 필터 조회 리포지토리 (관리자 전용) */
-    private final AdminReviewRepository adminReviewRepository;
-
-    /** 리뷰 단건 조회용 리포지토리 (도메인 공용 — deleteReview에서 사용) */
-    private final ReviewRepository reviewRepository;
+    /** 리뷰 Mapper — AdminReviewRepository + ReviewRepository 폐기, 모든 리뷰 쿼리 일원화 (§15) */
+    private final ReviewMapper reviewMapper;
 
     // ─────────────────────────────────────────────
     // 신고(Report) 관리
@@ -90,10 +89,9 @@ public class AdminContentService {
                 : adminReportRepository.findByStatusOrderByCreatedAtDesc(status, pageable);
 
         return page.map(declaration -> {
-            // 신고 대상 게시글 제목을 미리보기로 조회 (없으면 대체 문구)
-            String targetPreview = adminPostRepository.findById(declaration.getPostId())
-                    .map(Post::getTitle)
-                    .orElse("(삭제된 게시글)");
+            // 신고 대상 게시글 제목을 미리보기로 조회 (없으면 대체 문구) — MyBatis, null fallback
+            Post target = postMapper.findById(declaration.getPostId());
+            String targetPreview = (target != null) ? target.getTitle() : "(삭제된 게시글)";
 
             return new ReportResponse(
                     declaration.getPostDeclarationId(),
@@ -148,26 +146,28 @@ public class AdminContentService {
 
         switch (action) {
             case "blind" -> {
-                // 대상 게시글 블라인드 처리 (없으면 경고 로그만 남기고 진행)
-                adminPostRepository.findById(declaration.getPostId()).ifPresentOrElse(
-                        post -> {
-                            post.blind();
-                            log.info("[관리자] 게시글 블라인드 처리 — postId={}", post.getPostId());
-                        },
-                        () -> log.warn("[관리자] 블라인드 대상 게시글 없음 — postId={}", declaration.getPostId())
-                );
+                // 대상 게시글 블라인드 처리 (MyBatis: 도메인 메서드 후 명시 UPDATE)
+                Post postToBlind = postMapper.findById(declaration.getPostId());
+                if (postToBlind != null) {
+                    postToBlind.blind();
+                    postMapper.updateAdminStatus(postToBlind);
+                    log.info("[관리자] 게시글 블라인드 처리 — postId={}", postToBlind.getPostId());
+                } else {
+                    log.warn("[관리자] 블라인드 대상 게시글 없음 — postId={}", declaration.getPostId());
+                }
                 // 신고 상태 갱신
                 saveDeclarationWithNewStatus(declaration, "reviewed");
             }
             case "delete" -> {
-                // 대상 게시글 소프트 삭제 (없으면 경고 로그만 남기고 진행)
-                adminPostRepository.findById(declaration.getPostId()).ifPresentOrElse(
-                        post -> {
-                            post.softDelete();
-                            log.info("[관리자] 게시글 소프트 삭제 — postId={}", post.getPostId());
-                        },
-                        () -> log.warn("[관리자] 삭제 대상 게시글 없음 — postId={}", declaration.getPostId())
-                );
+                // 대상 게시글 소프트 삭제 (MyBatis: 도메인 메서드 후 명시 UPDATE)
+                Post postToDelete = postMapper.findById(declaration.getPostId());
+                if (postToDelete != null) {
+                    postToDelete.softDelete();
+                    postMapper.updateAdminStatus(postToDelete);
+                    log.info("[관리자] 게시글 소프트 삭제 — postId={}", postToDelete.getPostId());
+                } else {
+                    log.warn("[관리자] 삭제 대상 게시글 없음 — postId={}", declaration.getPostId());
+                }
                 // 신고 상태 갱신
                 saveDeclarationWithNewStatus(declaration, "reviewed");
             }
@@ -222,25 +222,30 @@ public class AdminContentService {
      * @return 혐오표현 로그 목록 페이지
      */
     public Page<ToxicityResponse> getToxicityLogs(Double minScore, Pageable pageable) {
-        // minScore 필터 유무에 따라 분기 조회
-        Page<ToxicityLog> page = (minScore == null)
-                ? adminToxicityLogRepository.findAllByOrderByCreatedAtDesc(pageable)
-                : adminToxicityLogRepository
-                        .findByToxicityScoreGreaterThanEqualOrderByCreatedAtDesc(
-                                minScore.floatValue(), pageable);
+        // MyBatis: minScore는 Float으로 변환 후 전달 (null이면 필터 미적용)
+        Float minScoreFloat = (minScore != null) ? minScore.floatValue() : null;
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
 
-        return page.map(log -> new ToxicityResponse(
-                log.getToxicityLogId(),
-                log.getContentType(),
-                log.getContentId(),
-                log.getUserId(),
-                log.getDetectedWords(),
-                log.getToxicityScore(),
-                log.getSeverity(),
-                log.getActionTaken(),
-                log.getProcessedAt(),
-                log.getCreatedAt()
-        ));
+        List<ToxicityLog> logs = contentMapper.findAllToxicityLogs(minScoreFloat, offset, limit);
+        long total = contentMapper.countAllToxicityLogs(minScoreFloat);
+
+        List<ToxicityResponse> content = logs.stream()
+                .map(item -> new ToxicityResponse(
+                        item.getToxicityLogId(),
+                        item.getContentType(),
+                        item.getContentId(),
+                        item.getUserId(),
+                        item.getDetectedWords(),
+                        item.getToxicityScore(),
+                        item.getSeverity(),
+                        item.getActionTaken(),
+                        item.getProcessedAt(),
+                        item.getCreatedAt()
+                ))
+                .toList();
+
+        return new PageImpl<>(content, pageable, total);
     }
 
     /**
@@ -263,11 +268,12 @@ public class AdminContentService {
      */
     @Transactional
     public void processToxicity(Long toxicityLogId, ToxicityActionRequest request) {
-        // 혐오표현 로그 조회 — 없으면 404
-        ToxicityLog toxicityLog = adminToxicityLogRepository.findById(toxicityLogId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.INVALID_INPUT,
-                        "혐오표현 로그 ID " + toxicityLogId + "를 찾을 수 없습니다"));
+        // 혐오표현 로그 조회 — MyBatis, null → 404
+        ToxicityLog toxicityLog = contentMapper.findToxicityLogById(toxicityLogId);
+        if (toxicityLog == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "혐오표현 로그 ID " + toxicityLogId + "를 찾을 수 없습니다");
+        }
 
         String action = request.action();
         log.info("[관리자] 혐오표현 조치 요청 — toxicityLogId={}, action={}", toxicityLogId, action);
@@ -282,8 +288,8 @@ public class AdminContentService {
                     "유효하지 않은 action 값입니다: '" + action + "'. 허용 값: restore, delete, warn");
         };
 
-        // ToxicityLog 도메인 메서드로 조치 기록 (actionTaken + processedAt 동시 설정)
-        toxicityLog.processAction(actionTaken);
+        // ContentMapper.processAction — actionTaken + processedAt 동시 UPDATE (§15)
+        contentMapper.processAction(toxicityLogId, actionTaken);
         log.info("[관리자] 혐오표현 조치 완료 — toxicityLogId={}, actionTaken={}", toxicityLogId, actionTaken);
     }
 
@@ -304,34 +310,41 @@ public class AdminContentService {
      */
     public Page<PostResponse> getPosts(String keyword, String category, String status,
                                        Pageable pageable) {
-        // 빈 문자열은 null로 통일하여 JPQL 동적 필터 조건 적용
-        String keywordParam   = (keyword  != null && !keyword.isBlank())  ? keyword  : null;
-        String categoryParam  = (category != null && !category.isBlank()) ? category : null;
-        String statusParam    = (status   != null && !status.isBlank())   ? status   : null;
+        // 빈 문자열은 null로 통일하여 MyBatis <if> 동적 필터 조건 적용
+        String keywordParam  = (keyword  != null && !keyword.isBlank())  ? keyword  : null;
+        String categoryParam = (category != null && !category.isBlank()) ? category : null;
+        String statusParam   = (status   != null && !status.isBlank())   ? status   : null;
 
-        // 문자열 → 열거형 변환 (null이면 그대로 null 유지)
-        Post.Category categoryEnum = (categoryParam != null)
-                ? Post.Category.fromValue(categoryParam) : null;
-        PostStatus statusEnum = (statusParam != null)
-                ? PostStatus.valueOf(statusParam.toUpperCase()) : null;
+        // 문자열 → enum 정규화 (MyBatis에는 enum.name() 문자열 전달)
+        String categoryStr = (categoryParam != null)
+                ? Post.Category.fromValue(categoryParam).name() : null;
+        String statusStr = (statusParam != null)
+                ? PostStatus.valueOf(statusParam.toUpperCase()).name() : null;
 
-        Page<Post> page = adminPostRepository.findByFilters(
-                keywordParam, categoryEnum, statusEnum, pageable);
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
 
-        return page.map(post -> new PostResponse(
-                post.getPostId(),
-                post.getUser().getUserId(),   // JOIN FETCH로 N+1 방지됨
-                post.getTitle(),
-                post.getContent(),
-                post.getCategory().name(),
-                post.getViewCount(),
-                post.getLikeCount(),
-                post.getCommentCount(),
-                post.isDeleted(),
-                post.isBlinded(),
-                post.getStatus().name(),
-                post.getCreatedAt()
-        ));
+        List<Post> posts = postMapper.searchAdminPosts(keywordParam, categoryStr, statusStr, offset, limit);
+        long total = postMapper.countAdminPosts(keywordParam, categoryStr, statusStr);
+
+        List<PostResponse> content = posts.stream()
+                .map(post -> new PostResponse(
+                        post.getPostId(),
+                        post.getUserId(),   // String FK 직접 보관 (§15.4)
+                        post.getTitle(),
+                        post.getContent(),
+                        post.getCategory().name(),
+                        post.getViewCount(),
+                        post.getLikeCount(),
+                        post.getCommentCount(),
+                        post.isDeleted(),
+                        post.isBlinded(),
+                        post.getStatus().name(),
+                        post.getCreatedAt()
+                ))
+                .toList();
+
+        return new PageImpl<>(content, pageable, total);
     }
 
     /**
@@ -347,10 +360,11 @@ public class AdminContentService {
      */
     @Transactional
     public PostResponse updatePost(Long postId, PostUpdateRequest request) {
-        // 게시글 조회 — 없으면 404
-        Post post = adminPostRepository.findById(postId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.POST_NOT_FOUND, "게시글 ID " + postId + "를 찾을 수 없습니다"));
+        // 게시글 조회 — MyBatis, null → 404
+        Post post = postMapper.findById(postId);
+        if (post == null) {
+            throw new BusinessException(ErrorCode.POST_NOT_FOUND, "게시글 ID " + postId + "를 찾을 수 없습니다");
+        }
 
         // null 필드는 기존 값 유지 (부분 수정 지원)
         String newTitle    = (request.title()    != null) ? request.title()    : post.getTitle();
@@ -359,14 +373,15 @@ public class AdminContentService {
                 ? Post.Category.fromValue(request.category())
                 : post.getCategory();
 
-        // 도메인 메서드로 수정 (setter 금지 원칙 준수)
+        // 도메인 메서드로 변경 후 MyBatis UPDATE 명시 호출 (dirty checking 미지원)
         post.update(newTitle, newContent, newCategory);
+        postMapper.update(post);
 
         log.info("[관리자] 게시글 수정 — postId={}, editReason={}", postId, request.editReason());
 
         return new PostResponse(
                 post.getPostId(),
-                post.getUser().getUserId(),
+                post.getUserId(),   // String FK 직접 보관 (JPA/MyBatis 하이브리드 §15.4)
                 post.getTitle(),
                 post.getContent(),
                 post.getCategory().name(),
@@ -391,11 +406,15 @@ public class AdminContentService {
      */
     @Transactional
     public void deletePost(Long postId) {
-        Post post = adminPostRepository.findById(postId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.POST_NOT_FOUND, "게시글 ID " + postId + "를 찾을 수 없습니다"));
+        Post post = postMapper.findById(postId);
+        if (post == null) {
+            throw new BusinessException(ErrorCode.POST_NOT_FOUND, "게시글 ID " + postId + "를 찾을 수 없습니다");
+        }
 
+        // 도메인 메서드 + 명시 UPDATE (MyBatis §15)
         post.softDelete();
+        postMapper.updateAdminStatus(post);
+
         log.info("[관리자] 게시글 소프트 삭제 — postId={}", postId);
     }
 
@@ -424,24 +443,31 @@ public class AdminContentService {
      * @return 리뷰 목록 페이지
      */
     public Page<ReviewResponse> getReviews(String movieId, Double minRating, Pageable pageable) {
-        // 빈 문자열은 null로 통일하여 JPQL 동적 필터 조건 적용
+        // 빈 문자열은 null로 통일하여 MyBatis <if> 동적 필터 조건 적용
         String movieIdParam = (movieId != null && !movieId.isBlank()) ? movieId : null;
 
-        // AdminReviewRepository의 동적 필터 쿼리로 DB 레벨에서 필터링 (N+1 방지, JOIN FETCH 포함)
-        Page<Review> page = adminReviewRepository.findByFilters(movieIdParam, minRating, pageable);
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
 
-        return page.map(review -> new ReviewResponse(
-                review.getReviewId(),
-                review.getUser().getUserId(),   // JOIN FETCH로 N+1 방지됨
-                review.getMovieId(),
-                review.getRating(),
-                review.getContent(),
-                review.isDeleted(),
-                review.isBlinded(),
-                review.isSpoiler(),
-                review.getLikeCount(),
-                review.getCreatedAt()
-        ));
+        List<Review> reviews = reviewMapper.searchAdminReviews(movieIdParam, minRating, offset, limit);
+        long total = reviewMapper.countAdminReviews(movieIdParam, minRating);
+
+        List<ReviewResponse> content = reviews.stream()
+                .map(review -> new ReviewResponse(
+                        review.getReviewId(),
+                        review.getUserId(),   // String FK 직접 보관 (§15.4)
+                        review.getMovieId(),
+                        review.getRating(),
+                        review.getContent(),
+                        review.isDeleted(),
+                        review.isBlinded(),
+                        review.isSpoiler(),
+                        review.getLikeCount(),
+                        review.getCreatedAt()
+                ))
+                .toList();
+
+        return new PageImpl<>(content, pageable, total);
     }
 
     /**
@@ -454,12 +480,15 @@ public class AdminContentService {
      */
     @Transactional
     public void deleteReview(Long reviewId) {
-        Review review = reviewRepository.findById(reviewId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.INVALID_INPUT,
-                        "리뷰 ID " + reviewId + "를 찾을 수 없습니다"));
+        Review review = reviewMapper.findById(reviewId);
+        if (review == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "리뷰 ID " + reviewId + "를 찾을 수 없습니다");
+        }
 
-        review.softDelete();
+        // MyBatis softDelete 쿼리 직접 호출
+        reviewMapper.softDelete(reviewId);
+
         log.info("[관리자] 리뷰 소프트 삭제 — reviewId={}", reviewId);
     }
 }

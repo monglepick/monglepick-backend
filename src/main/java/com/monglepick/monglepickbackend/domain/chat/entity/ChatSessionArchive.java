@@ -1,17 +1,13 @@
 package com.monglepick.monglepickbackend.domain.chat.entity;
 
-import com.monglepick.monglepickbackend.domain.user.entity.User;
 /* BaseAuditEntity 상속으로 created_at, updated_at, created_by, updated_by 자동 관리 */
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -30,7 +26,8 @@ import java.time.LocalDateTime;
  *
  * <h3>주요 필드</h3>
  * <ul>
- *   <li>{@code user} — 대화 참여 사용자 (FK → users.user_id)</li>
+ *   <li>{@code userId} — 대화 참여 사용자 ID (FK → users.user_id, String 직접 참조,
+ *       JPA/MyBatis 하이브리드 경계 격리)</li>
  *   <li>{@code sessionId} — 세션 UUID (UNIQUE)</li>
  *   <li>{@code messages} — 전체 대화 내역 (JSON 배열, 필수)</li>
  *   <li>{@code sessionState} — Agent 세션 상태 (preferences, emotion 등 JSON)</li>
@@ -52,7 +49,7 @@ import java.time.LocalDateTime;
  *   "preferences": { ... ExtractedPreferences ... },
  *   "emotion": { ... EmotionResult ... },
  *   "user_profile": { ... },
- *   "watch_history": [ ... ]
+ *   "watch_history": [ ... ]   // Agent state 키 (legacy 명칭). 실제 데이터 출처는 reviews 테이블.
  * }
  * </pre>
  *
@@ -90,12 +87,13 @@ public class ChatSessionArchive extends BaseAuditEntity {
     private Long chatSessionArchiveId;
 
     /**
-     * 대화 참여 사용자.
-     * chat_session_archive.user_id → users.user_id FK.
+     * 대화 참여 사용자 ID — users.user_id를 String으로 직접 참조한다.
+     *
+     * <p>users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA @ManyToOne 매핑을 두지 않고
+     * String FK로만 보관한다 (JPA/MyBatis 하이브리드 경계 격리, 설계서 §15.4).</p>
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false, length = 50)
+    private String userId;
 
     /**
      * 세션 UUID (v4). UNIQUE 제약.
@@ -117,8 +115,9 @@ public class ChatSessionArchive extends BaseAuditEntity {
 
     /**
      * Agent 세션 상태 (JSON).
-     * preferences, emotion, user_profile, watch_history를 묶어 저장한다.
+     * preferences, emotion, user_profile, watch_history(=리뷰 기반 시청 이력)를 묶어 저장한다.
      * 이어하기 시 Agent가 이 상태를 복원하여 대화 맥락을 유지한다.
+     * watch_history 키는 Agent state의 legacy 명칭일 뿐, 실제 데이터는 reviews 테이블에서 로드된다.
      */
     @Column(name = "session_state", columnDefinition = "json")
     private String sessionState;
@@ -212,5 +211,24 @@ public class ChatSessionArchive extends BaseAuditEntity {
     public void restore() {
         this.isDeleted = false;
         this.deletedAt = null;
+    }
+
+    // ========== Excel Table 기준 추가 컬럼 (1개) ==========
+
+    /**
+     * 이 세션에서 추천된 영화 수 (기본값: 0).
+     * Agent가 추천 응답을 생성할 때마다 incrementRecommendedMovieCount()로 증가시킨다.
+     * 세션별 추천 활동량 분석 및 통계에 활용된다.
+     */
+    @Column(name = "recommended_movie_count")
+    @Builder.Default
+    private Integer recommendedMovieCount = 0;
+
+    /**
+     * 추천된 영화 수를 1 증가시킨다.
+     * Agent가 영화 추천 응답을 반환할 때마다 호출한다.
+     */
+    public void incrementRecommendedMovieCount() {
+        this.recommendedMovieCount = (this.recommendedMovieCount == null ? 0 : this.recommendedMovieCount) + 1;
     }
 }

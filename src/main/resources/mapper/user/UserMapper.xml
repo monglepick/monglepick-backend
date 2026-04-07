@@ -87,6 +87,78 @@
         WHERE nickname = #{nickname}
     </select>
 
+    <!-- PK 존재 여부 확인 (JpaRepository.existsById 대체) -->
+    <select id="existsById" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM users
+        WHERE user_id = #{userId}
+    </select>
+
+    <!-- ═══ 통계/집계 (관리자 통계·대시보드용) ═══ -->
+
+    <!-- 전체 사용자 수 (탈퇴 포함) -->
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM users
+    </select>
+
+    <!-- 전체 사용자 페이징 조회 (최신 가입 순, LIMIT) — AdminStatsService 행동 통계 집계용 -->
+    <select id="findAllLimited" resultMap="userResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM users
+        ORDER BY created_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 지정 시각 이후 최종 로그인한 사용자 수 — DAU/MAU 집계 -->
+    <select id="countByLastLoginAtAfter" resultType="long">
+        SELECT COUNT(*)
+        FROM users
+        WHERE last_login_at IS NOT NULL
+          AND last_login_at > #{after}
+    </select>
+
+    <!-- 지정 기간 내 최종 로그인한 사용자 수 — 일별 DAU, 코호트 재방문 집계 -->
+    <select id="countByLastLoginAtBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM users
+        WHERE last_login_at IS NOT NULL
+          AND last_login_at BETWEEN #{start} AND #{end}
+    </select>
+
+    <!-- 지정 시각 이후 신규 가입한 사용자 수 -->
+    <select id="countByCreatedAtAfter" resultType="long">
+        SELECT COUNT(*)
+        FROM users
+        WHERE created_at > #{after}
+    </select>
+
+    <!-- 지정 기간 내 신규 가입한 사용자 수 — 일별/주별 신규 유입 집계 -->
+    <select id="countByCreatedAtBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM users
+        WHERE created_at BETWEEN #{start} AND #{end}
+    </select>
+
+    <!-- 지정 기간 내 가입한 사용자 목록 — 코호트 리텐션 계산 (탈퇴 제외) -->
+    <select id="findByCreatedAtBetween" resultMap="userResultMap">
+        SELECT <include refid="allColumns"/>
+        FROM users
+        WHERE is_deleted = false
+          AND created_at BETWEEN #{start} AND #{end}
+    </select>
+
+    <!-- 특정 사용자 ID 목록 중 지정 기간 내 재방문한 사용자 수 — 코호트 리텐션 분자 -->
+    <select id="countCohortRetention" resultType="long">
+        SELECT COUNT(*)
+        FROM users
+        WHERE user_id IN
+            <foreach collection="userIds" item="id" open="(" separator="," close=")">
+                #{id}
+            </foreach>
+          AND last_login_at IS NOT NULL
+          AND last_login_at BETWEEN #{start} AND #{end}
+    </select>
+
     <!-- ═══ INSERT ═══ -->
 
     <!-- 사용자 신규 등록 -->

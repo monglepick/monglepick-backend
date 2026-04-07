@@ -18,7 +18,7 @@ import java.util.Optional;
  * <ul>
  *   <li>{@link #countByCreatedAtAfter(LocalDateTime)} — 기간 내 피드백 총 수</li>
  *   <li>{@link #countByFeedbackTypeAndCreatedAtAfter(String, LocalDateTime)} — 피드백 유형별 집계</li>
- *   <li>{@link #findByUser_UserIdAndRecommendationLog_RecommendationLogId(String, Long)} — UPSERT용 기존 피드백 조회</li>
+ *   <li>{@link #findByUserIdAndRecommendationLog_RecommendationLogId(String, Long)} — UPSERT용 기존 피드백 조회</li>
  * </ul>
  */
 public interface RecommendationFeedbackRepository extends JpaRepository<RecommendationFeedback, Long> {
@@ -37,7 +37,7 @@ public interface RecommendationFeedbackRepository extends JpaRepository<Recommen
      * @param recommendationLogId 피드백 대상 추천 로그 ID
      * @return 기존 피드백 (없으면 빈 Optional)
      */
-    Optional<RecommendationFeedback> findByUser_UserIdAndRecommendationLog_RecommendationLogId(
+    Optional<RecommendationFeedback> findByUserIdAndRecommendationLog_RecommendationLogId(
             String userId, Long recommendationLogId);
 
     /**

@@ -18,11 +18,11 @@ public interface ChatSessionArchiveRepository extends JpaRepository<ChatSessionA
     Optional<ChatSessionArchive> findBySessionId(String sessionId);
 
     /** 사용자별 세션 목록 조회 — 소프트 삭제 제외, 최신 메시지 순 (Client 이력 목록) */
-    Page<ChatSessionArchive> findByUser_UserIdAndIsDeletedFalseOrderByLastMessageAtDesc(
+    Page<ChatSessionArchive> findByUserIdAndIsDeletedFalseOrderByLastMessageAtDesc(
             String userId, Pageable pageable);
 
     /** 사용자 소유 + 미삭제 세션 조회 (Client 상세/삭제 시 권한 확인 겸용) */
-    Optional<ChatSessionArchive> findByUser_UserIdAndSessionIdAndIsDeletedFalse(
+    Optional<ChatSessionArchive> findByUserIdAndSessionIdAndIsDeletedFalse(
             String userId, String sessionId);
 
     /** 세션 존재 여부 확인 */

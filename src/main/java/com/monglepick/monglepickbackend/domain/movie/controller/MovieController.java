@@ -56,6 +56,29 @@ public class MovieController {
     }
 
     /**
+     * 최신 영화 목록 조회 API (개봉일순).
+     *
+     * <p>홈 페이지 "최신 영화" 섹션과 클라이언트
+     * {@code movieApi.getLatestMovies()}에서 호출됩니다.
+     * 비로그인 사용자도 접근 가능합니다.</p>
+     *
+     * <p>개봉일(release_date)이 없거나 포스터가 없는 영화는 결과에서 제외합니다.</p>
+     *
+     * @param pageable 페이징 (기본 page=0, size=8)
+     * @return 200 OK + 최신 영화 목록 (Page)
+     */
+    @Operation(summary = "최신 영화 목록", description = "개봉일 내림차순 최신 영화 목록 조회 (비로그인 가능)")
+    @ApiResponse(responseCode = "200", description = "조회 성공")
+    @SecurityRequirement(name = "")
+    @GetMapping("/latest")
+    public ResponseEntity<Page<MovieResponse>> getLatestMovies(
+            @PageableDefault(size = 8) Pageable pageable) {
+        log.debug("최신 영화 조회 - page: {}, size: {}", pageable.getPageNumber(), pageable.getPageSize());
+        Page<MovieResponse> movies = movieService.getLatestMovies(pageable);
+        return ResponseEntity.ok(movies);
+    }
+
+    /**
      * 영화 상세 조회 API
      *
      * @param movieId 영화 ID (내부 DB)

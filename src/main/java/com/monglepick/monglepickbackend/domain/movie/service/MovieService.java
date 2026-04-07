@@ -79,4 +79,22 @@ public class MovieService {
         return movieRepository.findByRatingIsNotNullOrderByRatingDesc(pageable)
                 .map(MovieResponse::from);
     }
+
+    /**
+     * 최신 영화 목록을 조회합니다 (개봉일 내림차순).
+     *
+     * <p>홈 페이지 "최신 영화" 섹션과 클라이언트 {@code getLatestMovies()}
+     * ({@code GET /api/v1/movies/latest})에서 호출됩니다.
+     * 개봉일이 NULL이거나 포스터 경로가 없는 영화는 결과에서 제외합니다
+     * (UI 카드 가독성 및 무결성 확보 목적).</p>
+     *
+     * @param pageable 페이징 정보 (기본 size=8)
+     * @return 최신 개봉 영화 페이지
+     */
+    public Page<MovieResponse> getLatestMovies(Pageable pageable) {
+        log.debug("최신 영화 조회 - page: {}, size: {}", pageable.getPageNumber(), pageable.getPageSize());
+        return movieRepository
+                .findByReleaseDateIsNotNullAndPosterPathIsNotNullOrderByReleaseDateDesc(pageable)
+                .map(MovieResponse::from);
+    }
 }

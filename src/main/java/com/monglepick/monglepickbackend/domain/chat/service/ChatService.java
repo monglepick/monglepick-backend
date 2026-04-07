@@ -6,14 +6,11 @@ import tools.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.domain.chat.dto.ChatDto;
 import com.monglepick.monglepickbackend.domain.chat.entity.ChatSessionArchive;
 import com.monglepick.monglepickbackend.domain.chat.repository.ChatSessionArchiveRepository;
-import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,7 +46,6 @@ import java.util.Map;
 public class ChatService {
 
     private final ChatSessionArchiveRepository sessionRepository;
-    private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
     /** 세션 제목 자동 생성 시 최대 길이 */
@@ -90,8 +86,9 @@ public class ChatService {
                 })
                 .orElseGet(() -> {
                     // 신규 세션 생성
-                    User user = userRepository.findById(request.userId())
-                            .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+                    // users 테이블 쓰기 소유는 김민규(MyBatis) — JPA에서 fetch 하지 않고
+                    // String userId만 보관한다 (설계서 §15.4).
+                    // 사용자 존재 검증은 ServiceKey 인증 단계에서 이미 수행됨.
 
                     // 제목 자동 생성: 요청에 title이 없으면 첫 user 메시지에서 추출
                     String title = request.title();
@@ -100,7 +97,7 @@ public class ChatService {
                     }
 
                     ChatSessionArchive newSession = ChatSessionArchive.builder()
-                            .user(user)
+                            .userId(request.userId())
                             .sessionId(request.sessionId())
                             .messages(request.messages())
                             .turnCount(request.turnCount())
@@ -128,7 +125,7 @@ public class ChatService {
      */
     public ChatDto.LoadSessionResponse loadSession(String userId, String sessionId) {
         return sessionRepository
-                .findByUser_UserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
+                .findByUserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
                 .map(ChatDto.LoadSessionResponse::from)
                 .orElse(null);
     }
@@ -143,7 +140,7 @@ public class ChatService {
      */
     public Page<ChatDto.SessionListItem> getSessionList(String userId, Pageable pageable) {
         return sessionRepository
-                .findByUser_UserIdAndIsDeletedFalseOrderByLastMessageAtDesc(userId, pageable)
+                .findByUserIdAndIsDeletedFalseOrderByLastMessageAtDesc(userId, pageable)
                 .map(ChatDto.SessionListItem::from);
     }
 
@@ -153,7 +150,7 @@ public class ChatService {
      */
     public ChatDto.SessionDetailResponse getSessionDetail(String userId, String sessionId) {
         ChatSessionArchive session = sessionRepository
-                .findByUser_UserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
+                .findByUserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHAT_SESSION_NOT_FOUND));
         return ChatDto.SessionDetailResponse.from(session);
     }
@@ -165,7 +162,7 @@ public class ChatService {
     @Transactional
     public void deleteSession(String userId, String sessionId) {
         ChatSessionArchive session = sessionRepository
-                .findByUser_UserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
+                .findByUserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHAT_SESSION_NOT_FOUND));
         session.softDelete();
         log.info("chat_session_deleted: sessionId={}, userId={}", sessionId, userId);
@@ -177,7 +174,7 @@ public class ChatService {
     @Transactional
     public void updateSessionTitle(String userId, String sessionId, String newTitle) {
         ChatSessionArchive session = sessionRepository
-                .findByUser_UserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
+                .findByUserIdAndSessionIdAndIsDeletedFalse(userId, sessionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CHAT_SESSION_NOT_FOUND));
         session.updateTitle(newTitle);
     }

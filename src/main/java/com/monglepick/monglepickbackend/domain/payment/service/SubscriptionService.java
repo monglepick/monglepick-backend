@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.payment.service;
 
+import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.ExtendSubscriptionResponse;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.SubscriptionPlanResponse;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.SubscriptionStatusResponse;
 import com.monglepick.monglepickbackend.domain.payment.entity.SubscriptionPlan;
@@ -292,6 +293,88 @@ public class SubscriptionService {
         } while (page.hasContent());
 
         log.info("만료 구독 처리 완료: 성공 {}건, 실패 {}건", totalProcessed, totalErrors);
+    }
+
+    // ──────────────────────────────────────────────
+    // 구독 연장 (관리자 전용)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 구독을 1주기 연장한다 (관리자 전용).
+     *
+     * <p>장애 보상, 프로모션, 수동 재활성화 등 관리자가 특정 구독을 연장할 때 호출한다.
+     * 연장 주기는 구독 상품의 {@code periodType}에 따라 자동 결정된다.</p>
+     *
+     * <h4>연장 주기 계산</h4>
+     * <ul>
+     *   <li>MONTHLY: expiresAt + 1개월</li>
+     *   <li>YEARLY: expiresAt + 1년</li>
+     * </ul>
+     *
+     * <h4>연장 가능 상태</h4>
+     * <ul>
+     *   <li>ACTIVE — 만료일 연장 후 ACTIVE 유지</li>
+     *   <li>CANCELLED — 만료일 연장 후 ACTIVE로 재활성화 (autoRenew는 false 유지)</li>
+     *   <li>EXPIRED — 신규 구독을 생성하는 것이 원칙이므로 이 메서드로 처리 불가</li>
+     * </ul>
+     *
+     * @param subscriptionId 연장할 구독 레코드 ID (user_subscriptions.user_subscription_id)
+     * @param adminNote      관리자 연장 사유 (감사 로그용, null이면 "관리자 연장"으로 기록)
+     * @return 연장 결과 (success, newExpiresAt, message)
+     * @throws BusinessException 구독 미발견(SUBSCRIPTION_NOT_FOUND) 또는
+     *                           EXPIRED 상태에서 호출(IllegalStateException으로 래핑)한 경우
+     */
+    @Transactional
+    public ExtendSubscriptionResponse extendSubscription(Long subscriptionId, String adminNote) {
+        log.info("구독 연장 시작: subscriptionId={}, adminNote={}", subscriptionId, adminNote);
+
+        // 1. 구독 조회 — plan JOIN FETCH로 N+1 방지
+        //    UserSubscriptionRepository의 findById()는 plan을 LAZY 로딩하므로,
+        //    plan.periodType 접근 전에 명시적으로 즉시 로딩 쿼리를 사용한다.
+        UserSubscription sub = subscriptionRepository.findByIdWithPlan(subscriptionId)
+                .orElseThrow(() -> {
+                    log.error("구독 연장 실패 — 구독 미발견: subscriptionId={}", subscriptionId);
+                    return new BusinessException(ErrorCode.SUBSCRIPTION_NOT_FOUND);
+                });
+
+        // 2. 연장 가능 상태 검증 (EXPIRED는 신규 구독 생성으로 처리해야 함)
+        if (sub.getStatus() == UserSubscription.Status.EXPIRED) {
+            log.error("구독 연장 실패 — EXPIRED 상태 연장 불가: subscriptionId={}, userId={}",
+                    subscriptionId, sub.getUserId());
+            throw new BusinessException(
+                    ErrorCode.SUBSCRIPTION_NOT_FOUND,
+                    "만료된 구독은 연장할 수 없습니다. 신규 구독을 생성하세요. subscriptionId=" + subscriptionId
+            );
+        }
+
+        // 3. 연장 주기 계산 — 구독 상품의 periodType 기준
+        //    현재 expiresAt에서 1주기를 더한다.
+        //    (현재 시각 기준이 아닌 expiresAt 기준으로 더해야 기존 남은 기간을 보존한다.)
+        SubscriptionPlan plan = sub.getPlan();
+        LocalDateTime currentExpiresAt = sub.getExpiresAt();
+        LocalDateTime newExpiresAt = plan.getPeriodType() == SubscriptionPlan.PeriodType.MONTHLY
+                ? currentExpiresAt.plusMonths(1)   // 월간 구독: 1개월 연장
+                : currentExpiresAt.plusYears(1);    // 연간 구독: 1년 연장
+
+        // 4. 도메인 메서드로 만료일 갱신 + ACTIVE 상태 복원
+        //    UserSubscription.renew()는 expiresAt 설정 + status=ACTIVE 처리를 수행한다.
+        //    CANCELLED 상태에서 호출하면 ACTIVE로 재활성화된다 (autoRenew는 false 유지).
+        sub.renew(newExpiresAt);
+
+        // 5. 관리자 메모 로그 기록
+        //    별도 감사 로그 테이블이 없으므로 INFO 레벨 로그로 기록한다.
+        //    향후 AdminAuditLog 엔티티 연동 시 이 위치에 INSERT 호출을 추가한다.
+        String note = (adminNote != null && !adminNote.isBlank()) ? adminNote : "관리자 연장";
+        log.info("구독 연장 완료: subscriptionId={}, userId={}, planCode={}, "
+                        + "이전만료={}, 새만료={}, 관리자메모={}",
+                subscriptionId, sub.getUserId(), plan.getPlanCode(),
+                currentExpiresAt, newExpiresAt, note);
+
+        // 6. 응답 반환
+        String message = String.format("구독이 %s 연장되었습니다. 새 만료일: %s",
+                plan.getPeriodType() == SubscriptionPlan.PeriodType.MONTHLY ? "1개월" : "1년",
+                newExpiresAt);
+        return new ExtendSubscriptionResponse(true, newExpiresAt, message);
     }
 
     // ──────────────────────────────────────────────

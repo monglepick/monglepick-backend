@@ -52,8 +52,18 @@
                sort_order, is_active, start_date, end_date,
                created_at, updated_at
         FROM banners
-        ORDER BY position ASC, sort_order ASC
-        LIMIT #{limit} OFFSET #{offset}
+        ORDER BY sort_order ASC, banner_id ASC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- 활성 배너 전체 목록 (메인 페이지 노출용, sort_order ASC) -->
+    <select id="findAllActiveBanners" resultMap="bannerResultMap">
+        SELECT banner_id, title, image_url, link_url, position,
+               sort_order, is_active, start_date, end_date,
+               created_at, updated_at
+        FROM banners
+        WHERE is_active = true
+        ORDER BY sort_order ASC, banner_id ASC
     </select>
 
     <select id="countAllBanners" resultType="long">
@@ -218,6 +228,31 @@
         <if test="severity != null and severity != ''">
             AND severity = #{severity}
         </if>
+    </select>
+
+    <!-- 관리자 혐오표현 탭: 전체 목록 (minScore 필터, 페이징, 최신순) -->
+    <select id="findAllToxicityLogs" resultMap="toxicityLogResultMap">
+        SELECT toxicity_log_id, content_type, content_id, user_id,
+               detected_words, toxicity_score, severity,
+               action_taken, processed_at, created_at, updated_at
+        FROM toxicity_logs
+        <where>
+            <if test="minScore != null">
+                toxicity_score IS NOT NULL AND toxicity_score &gt;= #{minScore}
+            </if>
+        </where>
+        ORDER BY created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countAllToxicityLogs" resultType="long">
+        SELECT COUNT(*)
+        FROM toxicity_logs
+        <where>
+            <if test="minScore != null">
+                toxicity_score IS NOT NULL AND toxicity_score &gt;= #{minScore}
+            </if>
+        </where>
     </select>
 
     <insert id="insertToxicityLog" useGeneratedKeys="true" keyProperty="toxicityLogId">

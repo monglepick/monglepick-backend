@@ -15,8 +15,6 @@ import com.monglepick.monglepickbackend.domain.support.repository.SupportFaqFeed
 import com.monglepick.monglepickbackend.domain.support.repository.SupportFaqRepository;
 import com.monglepick.monglepickbackend.domain.support.repository.SupportHelpArticleRepository;
 import com.monglepick.monglepickbackend.domain.support.repository.SupportTicketRepository;
-import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -51,7 +49,11 @@ public class SupportService {
     private final SupportHelpArticleRepository helpArticleRepository;
     private final SupportTicketRepository ticketRepository;
     private final SupportFaqFeedbackRepository faqFeedbackRepository;
-    private final UserRepository userRepository;
+
+    /*
+     * users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 UserRepository 의존성을 제거하고
+     * String userId만 보관한다 (설계서 §15.4). 사용자 존재 검증은 JWT 인증 단계에서 완료된다.
+     */
 
     /** 활동 리워드 서비스 — FAQ 피드백(FAQ_FEEDBACK), 티켓 생성(TICKET_CREATE) 리워드 지급 위임 */
     private final RewardService rewardService;
@@ -178,9 +180,7 @@ public class SupportService {
      */
     @Transactional
     public TicketResponse createTicket(String userId, TicketCreateRequest request) {
-        /* 사용자 조회 (User PK가 userId VARCHAR(50)이므로 findById 사용) */
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        /* 사용자 존재 검증은 JWT 인증 단계에서 이미 처리됨 — String userId만 보관 (설계서 §15.4) */
 
         /* 카테고리 변환 */
         SupportCategory category;
@@ -192,7 +192,7 @@ public class SupportService {
 
         /* 티켓 생성 */
         SupportTicket ticket = SupportTicket.builder()
-                .user(user)
+                .userId(userId)
                 .category(category)
                 .title(request.title())
                 .content(request.content())
@@ -226,7 +226,7 @@ public class SupportService {
         int safeSize = Math.min(size, 50);
         PageRequest pageable = PageRequest.of(page, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"));
 
-        return ticketRepository.findByUser_UserId(userId, pageable)
+        return ticketRepository.findByUserId(userId, pageable)
                 .map(TicketResponse::from);
     }
 }

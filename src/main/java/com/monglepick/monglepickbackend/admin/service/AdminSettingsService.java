@@ -11,21 +11,24 @@ import com.monglepick.monglepickbackend.admin.dto.SettingsDto.TermsResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.TermsUpdateRequest;
 import com.monglepick.monglepickbackend.admin.repository.AdminAccountRepository;
 import com.monglepick.monglepickbackend.admin.repository.AdminAuditLogRepository;
-import com.monglepick.monglepickbackend.admin.repository.AdminBannerRepository;
 import com.monglepick.monglepickbackend.admin.repository.AdminTermsRepository;
 import com.monglepick.monglepickbackend.domain.admin.entity.AdminAuditLog;
 import com.monglepick.monglepickbackend.domain.content.entity.Banner;
 import com.monglepick.monglepickbackend.domain.content.entity.Terms;
+import com.monglepick.monglepickbackend.domain.content.mapper.ContentMapper;
 import com.monglepick.monglepickbackend.domain.user.entity.Admin;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.util.List;
 
 /**
  * 관리자 설정 서비스.
@@ -54,8 +57,8 @@ public class AdminSettingsService {
     /** 약관/정책 Repository */
     private final AdminTermsRepository adminTermsRepository;
 
-    /** 배너 Repository */
-    private final AdminBannerRepository adminBannerRepository;
+    /** 콘텐츠 통합 Mapper — AdminBannerRepository 폐기, ContentMapper로 일원화 (§15) */
+    private final ContentMapper contentMapper;
 
     /** 관리자 감사 로그 Repository */
     private final AdminAuditLogRepository adminAuditLogRepository;
@@ -153,8 +156,18 @@ public class AdminSettingsService {
      */
     public Page<BannerResponse> getBanners(Pageable pageable) {
         log.debug("[settings] 배너 목록 조회 — page={}, size={}", pageable.getPageNumber(), pageable.getPageSize());
-        return adminBannerRepository.findAllByOrderBySortOrderAsc(pageable)
-                .map(this::toBannerResponse);
+
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
+
+        List<Banner> banners = contentMapper.findAllBanners(offset, limit);
+        long total = contentMapper.countAllBanners();
+
+        List<BannerResponse> content = banners.stream()
+                .map(this::toBannerResponse)
+                .toList();
+
+        return new PageImpl<>(content, pageable, total);
     }
 
     /**
@@ -179,9 +192,10 @@ public class AdminSettingsService {
                 .endDate(request.endDate())
                 .build();
 
-        Banner saved = adminBannerRepository.save(banner);
-        log.info("[settings] 배너 등록 완료 — bannerId={}", saved.getBannerId());
-        return toBannerResponse(saved);
+        // MyBatis insert — useGeneratedKeys로 bannerId 자동 세팅
+        contentMapper.insertBanner(banner);
+        log.info("[settings] 배너 등록 완료 — bannerId={}", banner.getBannerId());
+        return toBannerResponse(banner);
     }
 
     /**
@@ -198,9 +212,10 @@ public class AdminSettingsService {
     public BannerResponse updateBanner(Long id, BannerUpdateRequest request) {
         log.info("[settings] 배너 수정 — bannerId={}", id);
 
-        Banner banner = adminBannerRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
-                        "배너를 찾을 수 없습니다. id=" + id));
+        Banner banner = contentMapper.findBannerById(id);
+        if (banner == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "배너를 찾을 수 없습니다. id=" + id);
+        }
 
         /* 기본 정보 수정 */
         banner.update(request.title(), request.imageUrl(), request.linkUrl(),
@@ -211,6 +226,9 @@ public class AdminSettingsService {
 
         /* 게시 기간 수정 */
         banner.updateDateRange(request.startDate(), request.endDate());
+
+        // MyBatis는 dirty checking 미지원 — 명시적 UPDATE 호출
+        contentMapper.updateBanner(banner);
 
         log.info("[settings] 배너 수정 완료 — bannerId={}", id);
         return toBannerResponse(banner);
@@ -228,11 +246,12 @@ public class AdminSettingsService {
     public void deleteBanner(Long id) {
         log.info("[settings] 배너 삭제 — bannerId={}", id);
 
-        Banner banner = adminBannerRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
-                        "배너를 찾을 수 없습니다. id=" + id));
+        Banner banner = contentMapper.findBannerById(id);
+        if (banner == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "배너를 찾을 수 없습니다. id=" + id);
+        }
 
-        adminBannerRepository.delete(banner);
+        contentMapper.deleteBanner(id);
         log.info("[settings] 배너 삭제 완료 — bannerId={}", id);
     }
 

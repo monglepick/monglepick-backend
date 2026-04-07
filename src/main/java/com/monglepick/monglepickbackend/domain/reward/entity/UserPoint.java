@@ -26,21 +26,23 @@ import java.time.LocalDate;
  * <p>사용자의 포인트 잔액 및 등급 정보를 관리한다.
  * 각 사용자당 하나의 포인트 레코드만 존재한다 (user_id UNIQUE).</p>
  *
- * <h3>v3.1 AI 4-단계 모델 변경</h3>
+ * <h3>v3.3 AI 쿼터 분리</h3>
+ * <p>기존 이 엔티티에 있던 AI 쿼터 관련 4개 컬럼
+ * ({@code daily_ai_used}, {@code monthly_coupon_used}, {@code monthly_reset},
+ * {@code purchased_ai_tokens})을 {@link UserAiQuota} 엔티티로 분리하였다.
+ * 이 엔티티는 포인트 잔액·등급 관리에만 집중한다.</p>
+ *
+ * <h3>이 엔티티의 책임 (v3.3 기준)</h3>
  * <ul>
- *   <li>복원: {@code monthlyAiUsed} — 이번 달 AI 총 사용 횟수 (전 소스 합산). grade.monthly_ai_limit와 비교.</li>
- *   <li>복원: {@code monthlyReset} — 월간 lazy reset 기준일</li>
- *   <li>유지: {@code purchasedAiTokens} — 포인트 상점에서 구매한 AI 이용권 잔여 횟수</li>
+ *   <li>포인트 잔액 관리 ({@code balance}, {@code total_earned}, {@code total_spent})</li>
+ *   <li>활동 리워드 포인트 추적 ({@code earned_by_activity}, {@code daily_cap_used})</li>
+ *   <li>일일 포인트 획득 관리 ({@code daily_earned}, {@code daily_reset})</li>
+ *   <li>사용자 등급 FK 관리 ({@code grade_id} → {@link Grade})</li>
  * </ul>
  *
- * <h3>v3.1 AI 사용 처리 순서 (QuotaService.checkQuota)</h3>
- * <ol>
- *   <li>monthly_ai_used &gt;= grade.monthly_ai_limit → 월간 상한 초과, 즉시 차단 (PLATINUM은 -1 무제한)</li>
- *   <li>daily_ai_used &lt; grade.daily_ai_limit → 무료 허용 (daily_ai_used++, monthly_ai_used++)</li>
- *   <li>활성 구독의 remaining_ai_bonus &gt; 0 → 구독 풀 차감 (remaining_ai_bonus--, monthly_ai_used++)</li>
- *   <li>purchased_ai_tokens &gt; 0 → 구매 토큰 차감 (purchased_ai_tokens--, monthly_ai_used++). 일일 한도 우회.</li>
- *   <li>모두 소진 → 차단</li>
- * </ol>
+ * <h3>AI 쿼터 관련 로직</h3>
+ * <p>AI 사용량 카운터 및 이용권 관리는 {@link UserAiQuota} 및
+ * {@link com.monglepick.monglepickbackend.domain.reward.service.QuotaService}를 참조한다.</p>
  *
  * <h3>변경 이력</h3>
  * <ul>
@@ -48,9 +50,13 @@ import java.time.LocalDate;
  *   <li>2026-03-24: PK 필드명 pointId → userPointId 로 변경</li>
  *   <li>2026-03-31: userGrade 필드를 Grade 엔티티 FK로 전환</li>
  *   <li>2026-04-02: monthlyReset/earnedByActivity/dailyCapUsed 추가. addPoints() 파라미터 확장.</li>
- *   <li>2026-04-02 v3.0: purchasedAiTokens 추가. consumePurchasedToken()/addPurchasedTokens() 추가.</li>
- *   <li>2026-04-02 v3.1: monthlyAiUsed/monthlyReset 복원. incrementAiUsage() → monthly_ai_used도 함께 증가.
- *       resetMonthlyIfNeeded() 추가. 구매 이용권이 일일 한도를 우회하므로 월간 절대 상한 필요.</li>
+ *   <li>2026-04-02 v3.0: purchasedAiTokens 추가 (v3.3에서 UserAiQuota로 이동).</li>
+ *   <li>2026-04-02 v3.1: monthlyAiUsed/monthlyReset 복원 (v3.3에서 UserAiQuota로 이동).</li>
+ *   <li>2026-04-03 v3.2: monthlyAiUsed → monthlyCouponUsed 명칭 변경 (v3.3에서 UserAiQuota로 이동).</li>
+ *   <li>2026-04-07 v3.3: AI 쿼터 4컬럼(daily_ai_used/monthly_coupon_used/monthly_reset/purchased_ai_tokens)
+ *       을 UserAiQuota 엔티티로 분리. 관련 도메인 메서드(incrementAiUsage/incrementMonthlyAiUsage/
+ *       consumePurchasedToken/addPurchasedTokens/resetMonthlyIfNeeded/resetDailyAiUsed) 제거.
+ *       resetDailyIfNeeded()에서 daily_ai_used 리셋 코드 제거.</li>
  * </ul>
  *
  * <h3>주요 필드</h3>
@@ -63,10 +69,6 @@ import java.time.LocalDate;
  *   <li>{@code dailyEarned} — 오늘 획득 포인트 (일일 한도 관리용)</li>
  *   <li>{@code dailyCapUsed} — 오늘 활동 리워드 총 획득 (일일 상한 검사용)</li>
  *   <li>{@code dailyReset} — 일일 리셋 기준일 (DATE)</li>
- *   <li>{@code dailyAiUsed} — 오늘 AI 사용 횟수 (grade.daily_ai_limit와 비교)</li>
- *   <li>{@code monthlyAiUsed} — 이번 달 AI 총 사용 횟수 전 소스 합산 (grade.monthly_ai_limit와 비교)</li>
- *   <li>{@code monthlyReset} — 월간 lazy reset 기준일 (DATE)</li>
- *   <li>{@code purchasedAiTokens} — 포인트 상점 구매 AI 이용권 잔여 횟수</li>
  *   <li>{@code grade} — 사용자 등급 (FK → grades.grade_id, LAZY)</li>
  * </ul>
  */
@@ -132,8 +134,10 @@ public class UserPoint extends BaseAuditEntity {
 
     /**
      * 일일 리셋 기준일.
-     * dailyEarned/dailyAiUsed/dailyCapUsed가 마지막으로 0으로 초기화된 날짜.
-     * 날짜가 바뀌면 위 세 필드를 0으로 리셋한다.
+     * dailyEarned/dailyCapUsed가 마지막으로 0으로 초기화된 날짜.
+     * 날짜가 바뀌면 위 필드들을 0으로 리셋한다.
+     *
+     * <p>v3.3: dailyAiUsed는 UserAiQuota.daily_ai_reset으로 분리되었다.</p>
      */
     @Column(name = "daily_reset")
     private LocalDate dailyReset;
@@ -149,58 +153,6 @@ public class UserPoint extends BaseAuditEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "grade_id")
     private Grade grade;
-
-    /**
-     * 일일 AI 질문 사용 횟수.
-     * 기본값: 0.
-     *
-     * <p>v3.0: grade.daily_ai_limit와 비교하여 무료 AI 사용 가능 여부를 판단한다.
-     * 한도 내이면 포인트 차감 없이 무료 사용 (source="GRADE_FREE").
-     * 한도 초과 시 구독 보너스 풀 또는 구매 토큰으로 처리한다.</p>
-     *
-     * <p>dailyReset 기준일이 오늘이 아니면 resetDailyIfNeeded()에서 0으로 리셋된다.</p>
-     */
-    @Column(name = "daily_ai_used")
-    @Builder.Default
-    private Integer dailyAiUsed = 0;
-
-    /**
-     * 이번 달 AI 총 사용 횟수 (INT, NOT NULL, DEFAULT 0) — v3.1 복원.
-     *
-     * <p>GRADE_FREE·SUB_BONUS·PURCHASED 전 소스의 사용량을 합산한다.
-     * grade.monthly_ai_limit와 비교하여 월간 절대 상한을 초과하면 전 소스를 차단한다.
-     * 구매 이용권은 daily_ai_limit를 우회하지만, 이 monthly 카운터에는 반드시 포함된다.</p>
-     *
-     * <p>monthlyReset 기준일이 이번 달이 아니면 {@link #resetMonthlyIfNeeded(LocalDate)}에서 0으로 리셋된다.</p>
-     */
-    @Column(name = "monthly_ai_used", nullable = false)
-    @Builder.Default
-    private Integer monthlyAiUsed = 0;
-
-    /**
-     * 월간 카운터 lazy reset 기준일 (DATE) — v3.1 복원.
-     *
-     * <p>월이 바뀌었으면 monthlyAiUsed를 0으로 초기화하고 이 필드를 오늘로 갱신한다.
-     * {@code monthlyReset.getMonthValue() != LocalDate.now().getMonthValue()} 조건으로 판단.</p>
-     */
-    @Column(name = "monthly_reset")
-    private LocalDate monthlyReset;
-
-    /**
-     * 포인트 상점에서 구매한 AI 이용권 잔여 횟수 (INT, NOT NULL, DEFAULT 0).
-     *
-     * <p>v3.0 신규 필드. 사용자가 포인트 상점에서 "AI 이용권"을 구매하면 이 값이 증가한다.
-     * grade.daily_ai_limit와 구독 보너스 풀이 모두 소진된 경우에 사용된다 (source="PURCHASED").</p>
-     *
-     * <p>구매 시: {@link #addPurchasedTokens(int)} 호출.
-     * 사용 시: {@link #consumePurchasedToken()} 호출 (음수 방지 보장).</p>
-     *
-     * <p>유효 기간(30일/60일)은 별도 테이블(point_item_purchases) 또는 메타데이터로 관리할 예정.
-     * 현재는 횟수만 차감하는 방식으로 구현한다.</p>
-     */
-    @Column(name = "purchased_ai_tokens", nullable = false)
-    @Builder.Default
-    private Integer purchasedAiTokens = 0;
 
     /**
      * 순수 활동으로 획득한 누적 포인트 (등급 산정 기준).
@@ -310,99 +262,21 @@ public class UserPoint extends BaseAuditEntity {
     /**
      * 일일 카운터 리셋.
      *
-     * <p>dailyReset 날짜가 오늘이 아니면 dailyEarned, dailyAiUsed, dailyCapUsed를
+     * <p>dailyReset 날짜가 오늘이 아니면 dailyEarned, dailyCapUsed를
      * 0으로 초기화하고 dailyReset을 오늘로 갱신한다. 이미 오늘이면 아무 작업도 하지 않는다.</p>
+     *
+     * <p>v3.3: daily_ai_used 리셋은 {@link UserAiQuota#resetDailyIfNeeded(LocalDate)}에서 처리한다.
+     * 이 메서드는 포인트 일일 획득량({@code dailyEarned}, {@code dailyCapUsed})만 관리한다.</p>
      *
      * @param today 오늘 날짜
      */
     public void resetDailyIfNeeded(LocalDate today) {
         if (this.dailyReset == null || !this.dailyReset.equals(today)) {
+            // v3.3: dailyAiUsed는 UserAiQuota로 분리됨 — 여기서 리셋하지 않는다
             this.dailyEarned = 0;
-            this.dailyAiUsed = 0;
             this.dailyCapUsed = 0;
             this.dailyReset = today;
         }
-    }
-
-    /**
-     * AI 질문 일일 + 월간 사용 횟수 동시 증가.
-     *
-     * <p>v3.1: GRADE_FREE 소스 사용 시 daily_ai_used와 monthly_ai_used를 함께 증가시킨다.
-     * 호출 전에 반드시 {@link #resetDailyIfNeeded(LocalDate)}와
-     * {@link #resetMonthlyIfNeeded(LocalDate)}를 먼저 수행해야 한다.
-     * 쿼터 초과 여부 사전 검증은 서비스 레이어(QuotaService)에서 수행한다.</p>
-     */
-    public void incrementAiUsage() {
-        this.dailyAiUsed += 1;
-        this.monthlyAiUsed += 1;
-    }
-
-    /**
-     * 월간 AI 사용 횟수만 증가 (SUB_BONUS / PURCHASED 소스용).
-     *
-     * <p>v3.1: 구독 보너스 또는 구매 이용권 사용 시 daily_ai_used는 건드리지 않고
-     * monthly_ai_used만 증가시킨다. QuotaService에서 consumeAiBonus()/consumePurchasedToken()
-     * 호출 후 이 메서드를 호출한다.</p>
-     */
-    public void incrementMonthlyAiUsage() {
-        this.monthlyAiUsed += 1;
-    }
-
-    /**
-     * 월간 카운터 리셋.
-     *
-     * <p>monthlyReset 날짜의 월이 오늘과 다르면 monthlyAiUsed를 0으로 초기화하고
-     * monthlyReset을 오늘로 갱신한다. 이미 이번 달이면 아무 작업도 하지 않는다.</p>
-     *
-     * @param today 오늘 날짜
-     */
-    public void resetMonthlyIfNeeded(LocalDate today) {
-        if (this.monthlyReset == null || this.monthlyReset.getMonthValue() != today.getMonthValue()
-                || this.monthlyReset.getYear() != today.getYear()) {
-            this.monthlyAiUsed = 0;
-            this.monthlyReset = today;
-        }
-    }
-
-    /**
-     * 구매한 AI 이용권 토큰 1회 차감.
-     *
-     * <p>v3.0 신규 메서드. grade.daily_ai_limit와 구독 보너스 풀이 모두 소진된 경우
-     * QuotaService에서 호출한다. 음수 방지: 0 미만으로 내려가지 않는다.</p>
-     *
-     * @return 차감 성공 여부 (잔여 토큰이 0이면 false 반환)
-     */
-    public boolean consumePurchasedToken() {
-        if (this.purchasedAiTokens <= 0) {
-            return false; // 구매 토큰 없음 — 차단 필요
-        }
-        this.purchasedAiTokens -= 1;
-        return true;
-    }
-
-    /**
-     * 구매한 AI 이용권 토큰 추가.
-     *
-     * <p>v3.0 신규 메서드. 사용자가 포인트 상점에서 AI 이용권을 구매하면
-     * PointItemService에서 호출한다.</p>
-     *
-     * @param count 추가할 토큰 횟수 (양수여야 함)
-     * @throws IllegalArgumentException count가 0 이하인 경우
-     */
-    public void addPurchasedTokens(int count) {
-        if (count <= 0) {
-            throw new IllegalArgumentException("추가할 토큰 횟수는 1 이상이어야 합니다: count=" + count);
-        }
-        this.purchasedAiTokens += count;
-    }
-
-    /**
-     * 일일 AI 사용 횟수 리셋 (스케줄러 — 매일 자정 호출).
-     * @deprecated resetDailyIfNeeded()의 lazy reset으로 대체. 스케줄러 호환용으로 유지.
-     */
-    @Deprecated
-    public void resetDailyAiUsed() {
-        this.dailyAiUsed = 0;
     }
 
     /**

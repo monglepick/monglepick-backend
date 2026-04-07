@@ -3,25 +3,29 @@ package com.monglepick.monglepickbackend.domain.community.service;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCreateRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
 import com.monglepick.monglepickbackend.domain.community.entity.Post;
+import com.monglepick.monglepickbackend.domain.community.entity.PostLike;
 import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
-import com.monglepick.monglepickbackend.domain.user.entity.User;
+import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
+import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
-import com.monglepick.monglepickbackend.domain.community.repository.PostRepository;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
-import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 /**
  * 게시글 서비스
  *
- * <p>게시글의 CRUD + 임시저장(DRAFT) 비즈니스 로직을 처리합니다.
- * Downloads POST 파일의 임시저장/게시 기능을 통합하였습니다.</p>
+ * <p>게시글의 CRUD + 임시저장(DRAFT) + 좋아요 토글 비즈니스 로직을 처리한다.
+ * JPA/MyBatis 하이브리드 §15에 따라 모든 데이터 접근은 {@link PostMapper}를 통해 이루어진다.
+ * Post/PostLike {@code @Entity}는 DDL 정의 전용이며 dirty checking은 사용하지 않는다.</p>
  */
 @Slf4j
 @Service
@@ -29,157 +33,158 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class PostService {
 
-    private final PostRepository postRepository;
-    private final UserRepository userRepository;
+    /** 게시글/댓글/좋아요 통합 Mapper — posts/post_comment/post_likes/comment_likes 담당 */
+    private final PostMapper postMapper;
+    /** 리워드 서비스 — POST_REWARD 정책 지급/회수 */
     private final RewardService rewardService;
 
     // ──────────────────────────────────────────────
-    // 게시글 CRUD (기존 기능)
+    // 게시글 CRUD
     // ──────────────────────────────────────────────
 
     /**
      * 게시글을 작성합니다 (바로 게시).
-     *
-     * <p>PostCreateRequest.category()는 이미 Post.Category enum 타입이므로
-     * valueOf() 변환 및 toUpperCase() 호출이 불필요하다.
-     * Jackson의 @JsonCreator(fromValue)가 역직렬화 시 자동 변환한다.</p>
      */
     @Transactional
     public PostResponse createPost(PostCreateRequest request, String userId) {
-        User user = findUserById(userId);
-        // category 필드가 Post.Category enum 타입이므로 직접 사용
+        // 사용자 존재 검증은 JWT 인증 단계에서 이미 처리됨 (§15.4)
         Post.Category category = request.category();
 
         Post post = Post.builder()
-                .user(user)
+                .userId(userId)
                 .title(request.title())
                 .content(request.content())
                 .category(category)
                 .status(PostStatus.PUBLISHED)
                 .build();
 
-        Post savedPost = postRepository.save(post);
+        // MyBatis insert — useGeneratedKeys로 postId 자동 세팅
+        postMapper.insert(post);
         log.info("게시글 작성 완료 — postId: {}, userId: {}, category: {}",
-                savedPost.getPostId(), userId, category);
+                post.getPostId(), userId, category);
 
         // 리워드 지급 — 게시글 ID 기준 1회 (reference_id = "post_{postId}")
-        // RewardService 내부에서 중복 검사/정책 조회/포인트 지급을 모두 처리하므로 try-catch 불필요
-        rewardService.grantReward(userId, "POST_REWARD", "post_" + savedPost.getPostId(), request.content().length());
+        rewardService.grantReward(userId, "POST_REWARD", "post_" + post.getPostId(), request.content().length());
 
-        return PostResponse.from(savedPost);
-    }
-
-    /**
-     * 게시글 상세를 조회합니다. 조회 시 조회수가 1 증가합니다.
-     */
-    @Transactional
-    public PostResponse getPost(Long postId) {
-        postRepository.incrementViewCount(postId);
-        Post post = findPostById(postId);
         return PostResponse.from(post);
     }
 
     /**
-     * 카테고리별 게시글 목록을 조회합니다 (게시 완료된 글만).
+     * 게시글 상세를 조회합니다. 조회 시 조회수가 1 증가한다 (원자적 UPDATE).
      *
-     * <p>@RequestParam은 Jackson을 거치지 않으므로
-     * {@link Post.Category#fromValue(String)}을 직접 호출하여 대소문자 무관 변환한다.
-     * "general" → FREE 별칭 처리도 fromValue() 내부에서 수행된다.</p>
-     *
-     * @param category 카테고리 문자열 (null이면 전체 조회, 소문자 허용)
-     * @param pageable 페이징 정보
-     * @return 게시글 응답 페이지
+     * <p>닉네임 표시를 위해 JOIN users 쿼리({@code findByIdWithNickname})를 사용한다.</p>
      */
-    public Page<PostResponse> getPosts(String category, Pageable pageable) {
-        if (category != null && !category.isBlank()) {
-            // @RequestParam String은 Jackson을 거치지 않으므로 fromValue()로 직접 변환
-            Post.Category cat = Post.Category.fromValue(category);
-            return postRepository.findByCategoryAndStatusWithUser(cat, PostStatus.PUBLISHED, pageable)
-                    .map(PostResponse::from);
+    @Transactional
+    public PostResponse getPost(Long postId) {
+        // 조회수 원자적 증가 → 이후 상세 조회 (증가 결과 반영된 값으로 반환)
+        postMapper.incrementViewCount(postId);
+
+        Post post = postMapper.findByIdWithNickname(postId);
+        if (post == null) {
+            throw new BusinessException(ErrorCode.POST_NOT_FOUND);
         }
-        return postRepository.findByStatusWithUser(PostStatus.PUBLISHED, pageable)
-                .map(PostResponse::from);
+        return PostResponse.from(post);
     }
 
     /**
-     * 게시글을 수정합니다. 작성자 본인만 수정할 수 있습니다.
-     *
-     * <p>category 필드가 Post.Category enum 타입으로 변경되어
-     * valueOf()/toUpperCase() 호출 없이 직접 사용한다.</p>
+     * 카테고리별 게시글 목록을 조회합니다 (게시 완료된 글만, 닉네임 포함).
+     */
+    public Page<PostResponse> getPosts(String category, Pageable pageable) {
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
+        String statusStr = PostStatus.PUBLISHED.name();
+
+        List<Post> posts;
+        long total;
+
+        if (category != null && !category.isBlank()) {
+            // @RequestParam String을 enum으로 변환 후 SQL에는 enum.name() 문자열 전달
+            Post.Category cat = Post.Category.fromValue(category);
+            posts = postMapper.findByCategoryAndStatusWithNickname(cat.name(), statusStr, offset, limit);
+            total = postMapper.countByCategoryAndStatus(cat.name(), statusStr);
+        } else {
+            posts = postMapper.findByStatusWithNickname(statusStr, offset, limit);
+            total = postMapper.countByStatus(statusStr);
+        }
+
+        List<PostResponse> content = posts.stream().map(PostResponse::from).toList();
+        return new PageImpl<>(content, pageable, total);
+    }
+
+    /**
+     * 게시글을 수정합니다. 작성자 본인만 수정할 수 있다.
      */
     @Transactional
     public PostResponse updatePost(Long postId, PostCreateRequest request, String userId) {
         Post post = findPostById(postId);
         validatePostOwner(post, userId);
 
-        // category 필드가 Post.Category enum 타입이므로 직접 사용
         Post.Category category = request.category();
         post.update(request.title(), request.content(), category);
+
+        // MyBatis는 dirty checking 미지원 — 명시적 UPDATE 호출
+        postMapper.update(post);
 
         log.info("게시글 수정 완료 — postId: {}, userId: {}", postId, userId);
         return PostResponse.from(post);
     }
 
     /**
-     * 게시글을 삭제합니다. 작성자 본인만 삭제할 수 있습니다.
+     * 게시글을 삭제합니다. 작성자 본인만 삭제할 수 있다.
+     *
+     * <p>현재는 hard delete. 소프트 삭제 정책으로 전환 시 {@code softDelete} + 별도 UPDATE로 전환.</p>
      */
     @Transactional
     public void deletePost(Long postId, String userId) {
         Post post = findPostById(postId);
         validatePostOwner(post, userId);
 
-        postRepository.delete(post);
+        postMapper.deleteById(postId);
         log.info("게시글 삭제 완료 — postId: {}, userId: {}", postId, userId);
 
-        // 리워드 회수 — 게시글 삭제 시 지급했던 포인트를 회수 (reference_id = "post_{postId}")
-        // RewardService 내부에서 지급 이력 조회/회수 처리를 모두 수행하므로 try-catch 불필요
+        // 리워드 회수
         rewardService.revokeReward(userId, "POST_REWARD", "post_" + postId);
     }
 
     // ──────────────────────────────────────────────
-    // 임시저장 기능 (Downloads POST 파일 적용)
+    // 임시저장 기능
     // ──────────────────────────────────────────────
 
-    /**
-     * 게시글을 임시저장합니다.
-     *
-     * <p>category 필드가 Post.Category enum 타입으로 변경되어
-     * valueOf()/toUpperCase() 호출 없이 직접 사용한다.</p>
-     */
     @Transactional
     public PostResponse createDraft(PostCreateRequest request, String userId) {
-        User user = findUserById(userId);
-        // category 필드가 Post.Category enum 타입이므로 직접 사용
         Post.Category category = request.category();
 
         Post draft = Post.builder()
-                .user(user)
+                .userId(userId)
                 .title(request.title())
                 .content(request.content())
                 .category(category)
                 .status(PostStatus.DRAFT)
                 .build();
 
-        Post savedDraft = postRepository.save(draft);
-        log.info("임시저장 완료 — postId: {}, userId: {}", savedDraft.getPostId(), userId);
+        postMapper.insert(draft);
+        log.info("임시저장 완료 — postId: {}, userId: {}", draft.getPostId(), userId);
 
-        return PostResponse.from(savedDraft);
+        return PostResponse.from(draft);
     }
 
     /**
-     * 사용자의 임시저장 목록을 조회합니다.
+     * 사용자의 임시저장 목록을 조회한다.
      */
     public Page<PostResponse> getDrafts(String userId, Pageable pageable) {
-        User user = findUserById(userId);
-        return postRepository.findByUserAndStatus(user, PostStatus.DRAFT, pageable)
-                .map(PostResponse::from);
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
+        String statusStr = PostStatus.DRAFT.name();
+
+        List<Post> posts = postMapper.findByUserIdAndStatus(userId, statusStr, offset, limit);
+        long total = postMapper.countByUserIdAndStatus(userId, statusStr);
+
+        List<PostResponse> content = posts.stream().map(PostResponse::from).toList();
+        return new PageImpl<>(content, pageable, total);
     }
 
     /**
-     * 임시저장 게시글을 수정합니다.
-     *
-     * <p>category 필드가 Post.Category enum 타입으로 변경되어
-     * valueOf()/toUpperCase() 호출 없이 직접 사용한다.</p>
+     * 임시저장 게시글을 수정한다.
      */
     @Transactional
     public PostResponse updateDraft(Long postId, PostCreateRequest request, String userId) {
@@ -190,15 +195,15 @@ public class PostService {
             throw new BusinessException(ErrorCode.POST_ACCESS_DENIED);
         }
 
-        // category 필드가 Post.Category enum 타입이므로 직접 사용
         Post.Category category = request.category();
         post.update(request.title(), request.content(), category);
 
+        postMapper.update(post);
         return PostResponse.from(post);
     }
 
     /**
-     * 임시저장 게시글을 삭제합니다.
+     * 임시저장 게시글을 삭제한다.
      */
     @Transactional
     public void deleteDraft(Long postId, String userId) {
@@ -209,11 +214,11 @@ public class PostService {
             throw new BusinessException(ErrorCode.POST_ACCESS_DENIED);
         }
 
-        postRepository.delete(post);
+        postMapper.deleteById(postId);
     }
 
     /**
-     * 임시저장 게시글을 게시합니다 (DRAFT → PUBLISHED).
+     * 임시저장 게시글을 게시한다 (DRAFT → PUBLISHED).
      */
     @Transactional
     public PostResponse publishDraft(Long postId, String userId) {
@@ -225,31 +230,74 @@ public class PostService {
         }
 
         post.publish();
+        postMapper.update(post);
+
         log.info("임시저장 게시 완료 — postId: {}", postId);
 
-        // 리워드 지급 — 임시저장 후 정식 게시 시점에 1회 지급 (reference_id = "post_{postId}")
-        // createPost()와 동일한 액션 타입을 사용하며, RewardService 내부 중복 검사로 이중 지급 방지
+        // 리워드 지급 (createPost와 동일, RewardService 내부 중복 검사)
         rewardService.grantReward(userId, "POST_REWARD", "post_" + postId, post.getContent().length());
 
         return PostResponse.from(post);
     }
 
     // ──────────────────────────────────────────────
+    // 게시글 좋아요 토글
+    // ──────────────────────────────────────────────
+
+    /**
+     * 게시글 좋아요 토글 (인스타그램 스타일).
+     *
+     * <p>해당 사용자의 좋아요 레코드가 없으면 INSERT, 있으면 hard DELETE한다.
+     * 토글 완료 후 현재 좋아요 상태와 전체 좋아요 수를 반환한다.</p>
+     */
+    @Transactional
+    public LikeToggleResponse togglePostLike(String userId, Long postId) {
+        PostLike existing = postMapper.findPostLikeByPostIdAndUserId(postId, userId);
+        boolean liked;
+
+        if (existing != null) {
+            /* 좋아요 취소 — hard-delete */
+            postMapper.deletePostLikeByPostIdAndUserId(postId, userId);
+            liked = false;
+        } else {
+            /* 좋아요 등록 — INSERT.
+             * 동시 요청 race condition으로 UNIQUE 제약 위반 시 DataIntegrityViolationException. */
+            try {
+                postMapper.insertPostLike(
+                        PostLike.builder()
+                                .postId(postId)
+                                .userId(userId)
+                                .build()
+                );
+            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                log.warn("게시글 좋아요 중복 INSERT 감지 (race condition) — userId:{}, postId:{}", userId, postId);
+                postMapper.deletePostLikeByPostIdAndUserId(postId, userId);
+                long count = postMapper.countPostLikeByPostId(postId);
+                return LikeToggleResponse.of(false, count);
+            }
+            liked = true;
+        }
+
+        long count = postMapper.countPostLikeByPostId(postId);
+        log.debug("게시글 좋아요 토글 — userId:{}, postId:{}, liked:{}, count:{}", userId, postId, liked, count);
+
+        return LikeToggleResponse.of(liked, count);
+    }
+
+    // ──────────────────────────────────────────────
     // Private 헬퍼 메서드
     // ──────────────────────────────────────────────
 
-    private User findUserById(String userId) {
-        return userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-    }
-
     private Post findPostById(Long postId) {
-        return postRepository.findById(postId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.POST_NOT_FOUND));
+        Post post = postMapper.findById(postId);
+        if (post == null) {
+            throw new BusinessException(ErrorCode.POST_NOT_FOUND);
+        }
+        return post;
     }
 
     private void validatePostOwner(Post post, String userId) {
-        if (!post.getUser().getUserId().equals(userId)) {
+        if (!post.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.POST_ACCESS_DENIED);
         }
     }

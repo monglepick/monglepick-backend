@@ -90,4 +90,26 @@ public interface RecommendationImpactRepository extends JpaRepository<Recommenda
             )
             """)
     Double avgExplorationDepthByUserId(@Param("userId") String userId);
+
+    /**
+     * 클릭된 추천 임팩트 수를 반환한다 (전체 CTR 산출용).
+     *
+     * <p>전체 임팩트 수({@code count()}) 대비 이 값의 비율로
+     * 추천 카드 클릭률(CTR, Click-Through Rate)을 계산한다.
+     * AdminStatsService.getRecommendationPerformance()에서 사용된다.</p>
+     *
+     * @return clicked = true 인 레코드 수
+     */
+    long countByClickedTrue();
+
+    /**
+     * 위시리스트 추가된 추천 임팩트 수를 반환한다 (위시리스트 전환율 산출용).
+     *
+     * <p>전체 임팩트 수 대비 이 값의 비율로
+     * 위시리스트 저장률(Save Rate)을 계산한다.
+     * AdminStatsService.getRecommendationPerformance()에서 사용된다.</p>
+     *
+     * @return wishlisted = true 인 레코드 수
+     */
+    long countByWishlistedTrue();
 }

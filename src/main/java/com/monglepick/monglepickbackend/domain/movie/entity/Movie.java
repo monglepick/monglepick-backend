@@ -183,6 +183,23 @@ public class Movie extends BaseAuditEntity {
     @Column(name = "adult")
     private Boolean adult;
 
+    // ========== Excel Table 1 기준 추가 컬럼 (2개) ==========
+
+    /**
+     * 수상 이력 (KMDb 기준, JSON 배열).
+     * 예: [{"award": "청룡영화상", "year": 2020, "category": "최우수작품상"}]
+     */
+    @Column(name = "awards", columnDefinition = "TEXT")
+    private String awards;
+
+    /**
+     * 촬영 장소 정보 (filming_location).
+     * 실제 영화 촬영이 이루어진 주요 장소를 기록한다. (최대 500자)
+     * 예: "서울 종로구, 부산 해운대구"
+     */
+    @Column(name = "filming_location", length = 500)
+    private String filmingLocation;
+
     @Builder
     public Movie(String movieId, Long tmdbId, String title, String titleEn, String overview,
                  String genres, Integer releaseYear, Double rating, String posterPath,
@@ -193,7 +210,8 @@ public class Movie extends BaseAuditEntity {
                  String tagline, String imdbId, String originalLanguage,
                  String collectionName, String kobisMovieCd, Long salesAcc,
                  Long audienceCount, Integer screenCount, String kobisWatchGrade,
-                 LocalDate kobisOpenDt, String kmdbId, String backdropPath, Boolean adult) {
+                 LocalDate kobisOpenDt, String kmdbId, String backdropPath, Boolean adult,
+                 String awards, String filmingLocation) {
         this.movieId = movieId;
         this.tmdbId = tmdbId;
         this.title = title;
@@ -228,5 +246,7 @@ public class Movie extends BaseAuditEntity {
         this.kmdbId = kmdbId;
         this.backdropPath = backdropPath;
         this.adult = adult != null ? adult : false;
+        this.awards = awards;
+        this.filmingLocation = filmingLocation;
     }
 }

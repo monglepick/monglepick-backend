@@ -1,0 +1,603 @@
+package com.monglepick.monglepickbackend.admin.service;
+
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminCancelSubscriptionResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminCompensateRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminCompensateResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminExtendSubscriptionRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminExtendSubscriptionResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminManualPointRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminManualPointResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminRefundRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminRefundResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PaymentOrderDetail;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PaymentOrderSummary;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PointHistoryItem;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PointItemCreateRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PointItemResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PointItemUpdateRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.SubscriptionSummary;
+import com.monglepick.monglepickbackend.admin.repository.AdminPaymentOrderRepository;
+import com.monglepick.monglepickbackend.admin.repository.AdminPointsHistoryRepository;
+import com.monglepick.monglepickbackend.admin.repository.AdminSubscriptionRepository;
+import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.RefundResponse;
+import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
+import com.monglepick.monglepickbackend.domain.payment.entity.SubscriptionPlan;
+import com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription;
+import com.monglepick.monglepickbackend.domain.payment.service.PaymentService;
+import com.monglepick.monglepickbackend.domain.payment.service.SubscriptionService;
+import com.monglepick.monglepickbackend.domain.reward.entity.PointItem;
+import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
+import com.monglepick.monglepickbackend.domain.reward.repository.PointItemRepository;
+import com.monglepick.monglepickbackend.domain.reward.service.PointService;
+import com.monglepick.monglepickbackend.global.exception.BusinessException;
+import com.monglepick.monglepickbackend.global.exception.ErrorCode;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * 관리자 결제/포인트 서비스.
+ *
+ * <p>관리자 페이지 "결제/포인트" 탭의 12개 기능에 대한 비즈니스 로직을 담당한다.
+ * 도메인 레이어의 {@link PaymentService}, {@link SubscriptionService}, {@link PointService}를
+ * 최대한 재사용하되, 관리자 전용 특수 케이스(예: 사용자 ID 소유자 검증 우회, 수동 보상 복구)는
+ * 이 서비스에서 처리한다.</p>
+ *
+ * <h3>담당 기능 (설계서 §3.1)</h3>
+ * <ul>
+ *   <li>결제 주문: 목록 / 상세 / 환불 (3)</li>
+ *   <li>구독: 목록 / 보상 복구 / 취소 / 연장 (4)</li>
+ *   <li>포인트: 이력 조회 / 수동 지급·차감 (2)</li>
+ *   <li>포인트 아이템: 목록 / 생성 / 수정 (3)</li>
+ * </ul>
+ *
+ * <h3>트랜잭션 전략</h3>
+ * <p>클래스 레벨 {@code @Transactional(readOnly = true)}로 기본 설정하고,
+ * 쓰기 메서드에만 {@code @Transactional}을 오버라이드한다.
+ * 단, {@link PaymentService#refundOrder}, {@link SubscriptionService#cancelSubscription} 등
+ * 도메인 메서드는 각자 {@code @Transactional}을 갖고 있으므로 새 트랜잭션이 시작된다.</p>
+ *
+ * <h3>설계 결정 — 환불 시 소유자 검증 우회</h3>
+ * <p>도메인 {@link PaymentService#refundOrder}는 BOLA(Broken Object Level Authorization) 방지를 위해
+ * userId 파라미터를 받아 주문 소유자를 검증한다. 관리자 환불에서는 먼저 주문을 조회하여 실제 소유자 ID를
+ * 알아낸 후 그 값을 그대로 전달하여 검증 로직을 통과시킨다 (사실상 관리자 임파서네이션 패턴).
+ * 이 방식으로 환불 로직의 PG 취소·포인트 회수·멱등 처리 등 모든 방어 로직을 그대로 재사용한다.</p>
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class AdminPaymentService {
+
+    /** 관리자 전용 결제 주문 리포지토리 — 상태별·전체 페이징 조회 */
+    private final AdminPaymentOrderRepository adminPaymentOrderRepository;
+
+    /** 관리자 전용 구독 리포지토리 — plan JOIN FETCH 페이징 조회 */
+    private final AdminSubscriptionRepository adminSubscriptionRepository;
+
+    /** 관리자 전용 포인트 이력 리포지토리 — 전체/사용자별 페이징 조회 */
+    private final AdminPointsHistoryRepository adminPointsHistoryRepository;
+
+    /** 포인트 아이템 리포지토리 (도메인 재사용) */
+    private final PointItemRepository pointItemRepository;
+
+    /** 도메인 결제 서비스 — 환불 로직 재사용 */
+    private final PaymentService paymentService;
+
+    /** 도메인 구독 서비스 — 취소/연장 로직 재사용 */
+    private final SubscriptionService subscriptionService;
+
+    /** 도메인 포인트 서비스 — 수동 지급/차감 로직 재사용 */
+    private final PointService pointService;
+
+    // ======================== 결제 주문 ========================
+
+    /**
+     * 결제 주문 목록을 최신순으로 페이징 조회한다.
+     *
+     * <p>status 파라미터가 null/공백이면 전체 조회, 그 외에는 해당 상태만 필터링한다.
+     * 유효하지 않은 상태 문자열을 전달하면 {@link IllegalArgumentException}이 발생하므로
+     * 서비스 레이어에서 대문자 정규화 후 enum으로 변환한다.</p>
+     *
+     * @param status   주문 상태 문자열 (PENDING / COMPLETED / FAILED / REFUNDED / COMPENSATION_FAILED)
+     *                 null 또는 공백이면 전체 조회
+     * @param pageable 페이지 정보
+     * @return 결제 주문 요약 페이지
+     */
+    public Page<PaymentOrderSummary> getOrders(String status, Pageable pageable) {
+        log.debug("[AdminPayment] 결제 내역 조회 — status={}, page={}", status, pageable.getPageNumber());
+
+        // 상태 필터 분기 — 공백/null 이면 전체, 그 외에는 enum 변환
+        if (status != null && !status.isBlank()) {
+            PaymentOrder.OrderStatus statusEnum;
+            try {
+                statusEnum = PaymentOrder.OrderStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("[AdminPayment] 잘못된 주문 상태 필터: {}", status);
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "허용되지 않은 주문 상태: " + status);
+            }
+            return adminPaymentOrderRepository
+                    .findByStatusOrderByCreatedAtDesc(statusEnum, pageable)
+                    .map(this::toOrderSummary);
+        }
+
+        return adminPaymentOrderRepository.findAllByOrderByCreatedAtDesc(pageable)
+                .map(this::toOrderSummary);
+    }
+
+    /**
+     * 결제 주문 단건 상세를 조회한다.
+     *
+     * @param orderId 주문 UUID
+     * @return 결제 주문 상세 응답
+     * @throws BusinessException 주문 미발견 시 ORDER_NOT_FOUND
+     */
+    public PaymentOrderDetail getOrderDetail(String orderId) {
+        log.debug("[AdminPayment] 결제 상세 조회 — orderId={}", orderId);
+        PaymentOrder order = adminPaymentOrderRepository.findById(orderId)
+                .orElseThrow(() -> {
+                    log.warn("[AdminPayment] 결제 상세 실패 — 주문 미발견: orderId={}", orderId);
+                    return new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+                });
+        return toOrderDetail(order);
+    }
+
+    /**
+     * 결제 주문을 환불 처리한다 (관리자 요청).
+     *
+     * <p>실제 환불 로직은 {@link PaymentService#refundOrder(String, String, String)}를 그대로 호출한다.
+     * BOLA 방지를 위해 해당 메서드가 요구하는 userId는 주문의 실제 소유자 ID를 먼저 조회해 전달한다.</p>
+     *
+     * @param orderId 환불할 주문 UUID
+     * @param request 환불 요청 DTO (사유 포함, nullable)
+     * @return 환불 응답 DTO
+     * @throws BusinessException 주문 미발견 / 환불 불가 상태 / 포인트 잔액 부족 등
+     */
+    public AdminRefundResponse refundOrder(String orderId, AdminRefundRequest request) {
+        // 1. 주문을 먼저 조회하여 실제 소유자 ID 확보 (환불 API 소유자 검증 우회용)
+        PaymentOrder order = adminPaymentOrderRepository.findById(orderId)
+                .orElseThrow(() -> {
+                    log.warn("[AdminPayment] 환불 실패 — 주문 미발견: orderId={}", orderId);
+                    return new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+                });
+
+        // 2. 환불 사유 (nullable — null 이면 "관리자 환불 처리")
+        String reason = (request != null && request.reason() != null && !request.reason().isBlank())
+                ? request.reason()
+                : "관리자 환불 처리";
+
+        log.info("[AdminPayment] 환불 요청 — orderId={}, ownerUserId={}, reason={}",
+                orderId, order.getUserId(), reason);
+
+        // 3. 도메인 레이어 환불 로직 재사용 — 실제 소유자 ID를 전달해서 BOLA 검증 통과
+        RefundResponse response = paymentService.refundOrder(orderId, order.getUserId(), reason);
+
+        return new AdminRefundResponse(
+                response.success(),
+                response.orderId(),
+                response.refundAmount(),
+                response.message()
+        );
+    }
+
+    // ======================== 구독 ========================
+
+    /**
+     * 구독 목록을 페이징 조회한다.
+     *
+     * <p>status 파라미터가 null/공백이면 전체 조회, 그 외에는 해당 상태만 필터링한다.
+     * plan은 JOIN FETCH로 즉시 로딩된다.</p>
+     *
+     * @param status   구독 상태 문자열 (ACTIVE / CANCELLED / EXPIRED), 공백이면 전체
+     * @param pageable 페이지 정보
+     * @return 구독 요약 페이지
+     */
+    public Page<SubscriptionSummary> getSubscriptions(String status, Pageable pageable) {
+        log.debug("[AdminPayment] 구독 목록 조회 — status={}, page={}", status, pageable.getPageNumber());
+
+        if (status != null && !status.isBlank()) {
+            UserSubscription.Status statusEnum;
+            try {
+                statusEnum = UserSubscription.Status.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("[AdminPayment] 잘못된 구독 상태 필터: {}", status);
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "허용되지 않은 구독 상태: " + status);
+            }
+            return adminSubscriptionRepository.findByStatusWithPlan(statusEnum, pageable)
+                    .map(this::toSubscriptionSummary);
+        }
+
+        return adminSubscriptionRepository.findAllWithPlan(pageable)
+                .map(this::toSubscriptionSummary);
+    }
+
+    /**
+     * COMPENSATION_FAILED 상태 주문을 COMPLETED 로 수동 복구한다 (관리자 전용).
+     *
+     * <p>관리자가 Toss Payments 콘솔에서 결제 이력을 확인하고 포인트를 수동 지급한 뒤
+     * 이 API로 주문 상태를 최종 COMPLETED 로 복구한다. 이 경로는 사용자 화면에는 노출되지 않는다.</p>
+     *
+     * <p>도메인 메서드 {@link PaymentOrder#markRecovered(String)}가 상태 전이와 adminNote 기록을
+     * 담당한다.</p>
+     *
+     * @param orderId 복구할 주문 UUID
+     * @param request 복구 요청 DTO (adminNote 필수)
+     * @return 복구 응답 DTO
+     * @throws BusinessException 주문 미발견(ORDER_NOT_FOUND) 또는 상태가 COMPENSATION_FAILED 가 아닌 경우
+     */
+    @Transactional
+    public AdminCompensateResponse compensateOrder(String orderId, AdminCompensateRequest request) {
+        log.info("[AdminPayment] 보상 복구 요청 — orderId={}, adminNote={}", orderId, request.adminNote());
+
+        PaymentOrder order = adminPaymentOrderRepository.findById(orderId)
+                .orElseThrow(() -> {
+                    log.warn("[AdminPayment] 보상 복구 실패 — 주문 미발견: orderId={}", orderId);
+                    return new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+                });
+
+        // 도메인 메서드가 상태 검증 포함 — COMPENSATION_FAILED 가 아니면 IllegalStateException 발생
+        try {
+            order.markRecovered(request.adminNote());
+        } catch (IllegalStateException e) {
+            log.warn("[AdminPayment] 보상 복구 실패 — 상태 불일치: orderId={}, status={}",
+                    orderId, order.getStatus());
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "COMPENSATION_FAILED 상태에서만 복구할 수 있습니다. 현재 상태: " + order.getStatus());
+        }
+
+        log.info("[AdminPayment] 보상 복구 완료 — orderId={}, newStatus=COMPLETED", orderId);
+        return new AdminCompensateResponse(
+                true,
+                orderId,
+                order.getStatus().name(),
+                "주문 상태를 COMPLETED 로 복구하였습니다."
+        );
+    }
+
+    /**
+     * 구독을 관리자 권한으로 취소한다.
+     *
+     * <p>도메인 {@link SubscriptionService#cancelSubscription(String)}을 재사용한다.
+     * 해당 메서드는 userId 기준으로 활성 구독을 조회하므로, 먼저 subscriptionId로 구독을 조회한 뒤
+     * 그 userId를 넘겨 호출한다.</p>
+     *
+     * @param subscriptionId 취소할 구독 레코드 ID
+     * @return 취소 응답 DTO
+     * @throws BusinessException 구독 미발견 / ACTIVE 가 아닌 경우
+     */
+    @Transactional
+    public AdminCancelSubscriptionResponse cancelSubscription(Long subscriptionId) {
+        log.info("[AdminPayment] 구독 취소 요청 — subscriptionId={}", subscriptionId);
+
+        UserSubscription sub = adminSubscriptionRepository.findByIdWithPlan(subscriptionId)
+                .orElseThrow(() -> {
+                    log.warn("[AdminPayment] 구독 취소 실패 — 구독 미발견: subscriptionId={}", subscriptionId);
+                    return new BusinessException(ErrorCode.SUBSCRIPTION_NOT_FOUND);
+                });
+
+        if (sub.getStatus() != UserSubscription.Status.ACTIVE) {
+            log.warn("[AdminPayment] 구독 취소 실패 — ACTIVE 아님: subscriptionId={}, status={}",
+                    subscriptionId, sub.getStatus());
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "ACTIVE 상태에서만 취소할 수 있습니다. 현재 상태: " + sub.getStatus());
+        }
+
+        // 도메인 서비스 호출 — 내부적으로 @Transactional 이므로 REQUIRED 전파로 현재 트랜잭션 합류
+        subscriptionService.cancelSubscription(sub.getUserId());
+
+        // 취소 후 상태 확인을 위해 재조회 (영속성 컨텍스트 내 동일 객체이므로 상태 반영됨)
+        log.info("[AdminPayment] 구독 취소 완료 — subscriptionId={}, userId={}",
+                subscriptionId, sub.getUserId());
+
+        return new AdminCancelSubscriptionResponse(
+                true,
+                subscriptionId,
+                UserSubscription.Status.CANCELLED.name(),
+                sub.getExpiresAt(),
+                "구독이 취소되었습니다. 만료일까지 혜택이 유지됩니다."
+        );
+    }
+
+    /**
+     * 구독을 1주기 연장한다.
+     *
+     * <p>도메인 {@link SubscriptionService#extendSubscription(Long, String)}를 그대로 호출한다.</p>
+     *
+     * @param subscriptionId 연장할 구독 레코드 ID
+     * @param request        연장 요청 DTO (adminNote nullable)
+     * @return 연장 응답 DTO
+     */
+    public AdminExtendSubscriptionResponse extendSubscription(
+            Long subscriptionId, AdminExtendSubscriptionRequest request
+    ) {
+        String adminNote = (request != null) ? request.adminNote() : null;
+        log.info("[AdminPayment] 구독 연장 요청 — subscriptionId={}, adminNote={}",
+                subscriptionId, adminNote);
+
+        // 도메인 서비스 호출 — 반환 타입이 도메인 DTO 이므로 관리자 DTO 로 변환
+        var domainResponse = subscriptionService.extendSubscription(subscriptionId, adminNote);
+
+        return new AdminExtendSubscriptionResponse(
+                domainResponse.success(),
+                domainResponse.newExpiresAt(),
+                domainResponse.message()
+        );
+    }
+
+    // ======================== 포인트 이력 ========================
+
+    /**
+     * 포인트 변동 이력을 최신순으로 페이징 조회한다.
+     *
+     * <p>userId 파라미터가 null/공백이면 전체 사용자 이력, 그 외에는 해당 사용자 이력만 필터링한다.</p>
+     *
+     * @param userId   사용자 ID (생략 시 전체)
+     * @param pageable 페이지 정보
+     * @return 포인트 이력 페이지
+     */
+    public Page<PointHistoryItem> getPointHistories(String userId, Pageable pageable) {
+        log.debug("[AdminPayment] 포인트 이력 조회 — userId={}, page={}", userId, pageable.getPageNumber());
+
+        Page<PointsHistory> pageResult;
+        if (userId != null && !userId.isBlank()) {
+            pageResult = adminPointsHistoryRepository
+                    .findByUserIdOrderByCreatedAtDesc(userId, pageable);
+        } else {
+            pageResult = adminPointsHistoryRepository.findAllByOrderByCreatedAtDesc(pageable);
+        }
+
+        return pageResult.map(this::toPointHistoryItem);
+    }
+
+    /**
+     * 관리자 수동 포인트 지급/차감.
+     *
+     * <p>amount 양수 → 지급 (earnPoint), 음수 → 차감 (deductPoint), 0 불가.
+     * 이 경로는 활동 리워드가 아니므로 등급 계산에 반영되지 않는다 (isActivityReward=false).</p>
+     *
+     * @param request 수동 지급/차감 요청 DTO
+     * @return 처리 결과 응답 DTO
+     * @throws BusinessException 금액 0 / 포인트 레코드 없음 / 잔액 부족
+     */
+    @Transactional
+    public AdminManualPointResponse manualPoint(AdminManualPointRequest request) {
+        log.info("[AdminPayment] 수동 포인트 변동 — userId={}, amount={}, reason={}",
+                request.userId(), request.amount(), request.reason());
+
+        int amount = request.amount();
+        if (amount == 0) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "0P 변동은 허용되지 않습니다.");
+        }
+
+        Integer newBalance;
+        String gradeCode;
+
+        if (amount > 0) {
+            // 양수 → earnPoint (isActivityReward=false 로 등급 미반영)
+            var earnResponse = pointService.earnPoint(
+                    request.userId(),
+                    amount,
+                    "bonus",                     // point_type: bonus (관리자 지급은 등급 배율 미적용)
+                    request.reason(),
+                    "admin_manual_" + System.currentTimeMillis(),  // referenceId — 중복 지급 방지용 고유값
+                    null,                        // actionType: null (리워드 외 변동)
+                    false                        // isActivityReward: false
+            );
+            newBalance = earnResponse.balanceAfter();
+            gradeCode = earnResponse.grade();
+        } else {
+            // 음수 → deductPoint (절댓값 전달)
+            int absAmount = -amount;
+            var deductResponse = pointService.deductPoint(
+                    request.userId(),
+                    absAmount,
+                    "admin_manual_" + System.currentTimeMillis(),
+                    request.reason()
+            );
+            newBalance = deductResponse.balanceAfter();
+            // 차감 경로는 등급 조회가 없으므로 별도 조회
+            var balanceResponse = pointService.getBalance(request.userId());
+            gradeCode = balanceResponse.grade();
+        }
+
+        log.info("[AdminPayment] 수동 포인트 변동 완료 — userId={}, change={}, newBalance={}, grade={}",
+                request.userId(), amount, newBalance, gradeCode);
+
+        String message = amount > 0
+                ? String.format("%dP 지급 완료. 잔액: %dP", amount, newBalance)
+                : String.format("%dP 차감 완료. 잔액: %dP", -amount, newBalance);
+
+        return new AdminManualPointResponse(
+                true,
+                request.userId(),
+                amount,
+                newBalance,
+                gradeCode,
+                message
+        );
+    }
+
+    // ======================== 포인트 아이템 ========================
+
+    /**
+     * 포인트 아이템 전체 목록을 가격 오름차순으로 조회한다.
+     *
+     * <p>관리자 화면에서는 비활성 아이템도 함께 표시해야 하므로
+     * {@code PointItemRepository.findAll()} 기반으로 변환 후 정렬한다.</p>
+     *
+     * @return 포인트 아이템 응답 리스트
+     */
+    public java.util.List<PointItemResponse> getPointItems() {
+        log.debug("[AdminPayment] 포인트 아이템 목록 조회");
+        return pointItemRepository.findAll().stream()
+                // 활성 여부와 무관하게 전체 노출, 가격 오름차순 정렬
+                .sorted(java.util.Comparator.comparing(PointItem::getItemPrice))
+                .map(this::toPointItemResponse)
+                .toList();
+    }
+
+    /**
+     * 신규 포인트 아이템을 등록한다.
+     *
+     * @param request 등록 요청 DTO
+     * @return 등록된 아이템 응답 DTO
+     */
+    @Transactional
+    public PointItemResponse createPointItem(PointItemCreateRequest request) {
+        log.info("[AdminPayment] 포인트 아이템 등록 — name={}, price={}",
+                request.itemName(), request.itemPrice());
+
+        PointItem item = PointItem.builder()
+                .itemName(request.itemName())
+                .itemDescription(request.itemDescription())
+                .itemPrice(request.itemPrice())
+                .itemCategory(request.itemCategory() != null ? request.itemCategory() : "general")
+                .isActive(request.isActive() != null ? request.isActive() : true)
+                .build();
+
+        PointItem saved = pointItemRepository.save(item);
+        return toPointItemResponse(saved);
+    }
+
+    /**
+     * 기존 포인트 아이템을 수정한다.
+     *
+     * <p>{@link PointItem} 엔티티는 @Setter 가 없으므로 업데이트는 신규 엔티티를 빌드하여
+     * 기존 PK 를 유지한 채 저장하는 방식(merge)을 사용한다.</p>
+     *
+     * @param itemId  수정할 아이템 ID
+     * @param request 수정 요청 DTO
+     * @return 수정된 아이템 응답 DTO
+     * @throws BusinessException 아이템 미발견 시
+     */
+    @Transactional
+    public PointItemResponse updatePointItem(Long itemId, PointItemUpdateRequest request) {
+        log.info("[AdminPayment] 포인트 아이템 수정 — itemId={}", itemId);
+
+        // 존재 여부 확인 (상세 조회는 전체 목록 포함 — 비활성도 허용)
+        PointItem existing = pointItemRepository.findById(itemId)
+                .orElseThrow(() -> {
+                    log.warn("[AdminPayment] 포인트 아이템 수정 실패 — 미발견: itemId={}", itemId);
+                    return new BusinessException(ErrorCode.ITEM_NOT_FOUND,
+                            "포인트 아이템을 찾을 수 없습니다: id=" + itemId);
+                });
+
+        // @Getter 전용 엔티티는 setter 가 없으므로 Builder 로 병합 후 save (JPA merge 패턴)
+        PointItem merged = PointItem.builder()
+                .pointItemId(existing.getPointItemId())
+                .itemName(request.itemName())
+                .itemDescription(request.itemDescription())
+                .itemPrice(request.itemPrice())
+                .itemCategory(request.itemCategory() != null ? request.itemCategory() : "general")
+                .isActive(request.isActive())
+                .build();
+
+        PointItem saved = pointItemRepository.save(merged);
+        return toPointItemResponse(saved);
+    }
+
+    // ======================== DTO 변환 ========================
+
+    /**
+     * {@link PaymentOrder} 엔티티 → {@link PaymentOrderSummary} 응답 DTO.
+     */
+    private PaymentOrderSummary toOrderSummary(PaymentOrder order) {
+        return new PaymentOrderSummary(
+                order.getPaymentOrderId(),
+                order.getUserId(),
+                order.getOrderType().name(),
+                order.getAmount(),
+                order.getPointsAmount(),
+                order.getStatus().name(),
+                order.getPgProvider(),
+                order.getCreatedAt(),
+                order.getCompletedAt()
+        );
+    }
+
+    /**
+     * {@link PaymentOrder} 엔티티 → {@link PaymentOrderDetail} 응답 DTO (상세).
+     */
+    private PaymentOrderDetail toOrderDetail(PaymentOrder order) {
+        return new PaymentOrderDetail(
+                order.getPaymentOrderId(),
+                order.getUserId(),
+                order.getOrderType().name(),
+                order.getAmount(),
+                order.getPointsAmount(),
+                order.getStatus().name(),
+                order.getPgProvider(),
+                order.getPgTransactionId(),
+                order.getCardInfo(),
+                order.getReceiptUrl(),
+                order.getFailedReason(),
+                order.getRefundReason(),
+                order.getRefundAmount(),
+                order.getRefundedAt(),
+                order.getCreatedAt(),
+                order.getCompletedAt()
+        );
+    }
+
+    /**
+     * {@link UserSubscription} 엔티티 → {@link SubscriptionSummary} 응답 DTO.
+     *
+     * <p>plan 은 반드시 JOIN FETCH 로 로딩된 상태여야 한다 (LazyInitializationException 방지).</p>
+     */
+    private SubscriptionSummary toSubscriptionSummary(UserSubscription sub) {
+        SubscriptionPlan plan = sub.getPlan();
+        return new SubscriptionSummary(
+                sub.getUserSubscriptionId(),
+                sub.getUserId(),
+                plan.getPlanCode(),
+                plan.getName(),
+                plan.getPeriodType().name(),
+                plan.getPrice(),
+                sub.getStatus().name(),
+                sub.getAutoRenew(),
+                sub.getRemainingAiBonus(),
+                sub.getStartedAt(),
+                sub.getExpiresAt(),
+                sub.getCancelledAt()
+        );
+    }
+
+    /**
+     * {@link PointsHistory} 엔티티 → {@link PointHistoryItem} 응답 DTO.
+     */
+    private PointHistoryItem toPointHistoryItem(PointsHistory history) {
+        return new PointHistoryItem(
+                history.getPointsHistoryId(),
+                history.getUserId(),
+                history.getPointChange(),
+                history.getPointAfter(),
+                history.getPointType(),
+                history.getActionType(),
+                history.getDescription(),
+                history.getReferenceId(),
+                history.getCreatedAt()
+        );
+    }
+
+    /**
+     * {@link PointItem} 엔티티 → {@link PointItemResponse} 응답 DTO.
+     */
+    private PointItemResponse toPointItemResponse(PointItem item) {
+        return new PointItemResponse(
+                item.getPointItemId(),
+                item.getItemName(),
+                item.getItemDescription(),
+                item.getItemPrice(),
+                item.getItemCategory(),
+                item.getIsActive(),
+                item.getCreatedAt(),
+                item.getUpdatedAt()
+        );
+    }
+}

@@ -1,6 +1,5 @@
 package com.monglepick.monglepickbackend.domain.community.entity;
 
-import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -8,19 +7,18 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 /**
  * 커뮤니티 게시글 엔티티
@@ -59,10 +57,26 @@ public class Post extends BaseAuditEntity {
     @Column(name = "post_id")
     private Long postId;
 
-    /** 작성자 (지연 로딩) */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    /**
+     * 작성자 ID — users.user_id를 String으로 직접 참조한다 (JPA/MyBatis 하이브리드 §15.4).
+     *
+     * <p>users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 @ManyToOne 매핑 대신 String FK만 보관한다.
+     * Post 목록/상세 조회 시 작성자 닉네임은 {@link #nickname} 필드로 MyBatis JOIN 결과를 받는다.</p>
+     */
+    @Column(name = "user_id", nullable = false, length = 50)
+    private String userId;
+
+    /**
+     * 작성자 닉네임 (DB 비영속, JOIN 결과 캐리어).
+     *
+     * <p>MyBatis PostMapper의 JOIN 쿼리(users 테이블과 조인)로 채운다.
+     * DB 컬럼이 아니므로 {@code @Transient}로 JPA 영속성 제외한다.
+     * 기본 SELECT({@code findById} 등)는 이 값을 null로 남겨두며,
+     * 목록/상세 조회 시 JOIN 쿼리 결과에서만 세팅된다.</p>
+     */
+    @Transient
+    @Setter
+    private String nickname;
 
     /** 게시글 제목 (최대 200자) */
     @Column(nullable = false, length = 200)
@@ -172,8 +186,8 @@ public class Post extends BaseAuditEntity {
     }
 
     @Builder
-    public Post(User user, String title, String content, Category category, PostStatus status) {
-        this.user = user;
+    public Post(String userId, String title, String content, Category category, PostStatus status) {
+        this.userId = userId;
         this.title = title;
         this.content = content;
         this.category = category;

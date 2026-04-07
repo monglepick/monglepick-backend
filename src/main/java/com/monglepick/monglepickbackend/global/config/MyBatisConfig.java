@@ -54,7 +54,10 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
         // ── 이민수 도메인 ──
         "com.monglepick.monglepickbackend.domain.community.mapper",
         "com.monglepick.monglepickbackend.domain.review.mapper",
-        "com.monglepick.monglepickbackend.domain.content.mapper"
+        "com.monglepick.monglepickbackend.domain.content.mapper",
+        // ── 관리자 전용 (윤형주 유지보수) ──
+        //   AdminUserMapper 등 admin 전용 동적 검색 Mapper
+        "com.monglepick.monglepickbackend.admin.mapper"
     },
     sqlSessionFactoryRef = "sqlSessionFactory"
 )

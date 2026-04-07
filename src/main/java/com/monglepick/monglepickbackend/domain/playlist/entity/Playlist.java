@@ -72,4 +72,66 @@ public class Playlist extends BaseAuditEntity {
     @Column(name = "is_public")
     @Builder.Default
     private Boolean isPublic = false;
+
+    // ========== Excel Table 기준 추가 컬럼 (2개) ==========
+
+    /**
+     * 커버 이미지 URL (최대 500자, nullable).
+     * 플레이리스트 목록/상세 화면에서 대표 이미지로 표시된다.
+     * 미설정 시 첫 번째 영화 포스터로 대체한다.
+     */
+    @Column(name = "cover_image_url", length = 500)
+    private String coverImageUrl;
+
+    /**
+     * 좋아요(추천) 수.
+     * 기본값: 0.
+     * 다른 사용자가 공개 플레이리스트에 좋아요를 누를 때 증가한다.
+     */
+    @Column(name = "like_count")
+    @Builder.Default
+    private Integer likeCount = 0;
+
+    // ─────────────────────────────────────────────
+    // 도메인 메서드 (setter 대신 의미 있는 메서드명 사용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 좋아요 수를 1 증가시킨다.
+     * 다른 사용자가 이 플레이리스트에 좋아요를 누를 때 호출된다.
+     */
+    public void incrementLikeCount() {
+        this.likeCount = (this.likeCount == null ? 0 : this.likeCount) + 1;
+    }
+
+    /**
+     * 좋아요 수를 1 감소시킨다 (최소 0).
+     * 좋아요를 취소할 때 호출된다. 0 미만으로 내려가지 않도록 보호한다.
+     */
+    public void decrementLikeCount() {
+        this.likeCount = Math.max(0, (this.likeCount == null ? 0 : this.likeCount) - 1);
+    }
+
+    /**
+     * 플레이리스트 정보를 수정한다 (null-safe).
+     *
+     * <p>null로 전달된 필드는 기존 값을 유지한다.
+     * {@code PUT /api/v1/playlists/{playlistId}} 서비스 레이어에서 호출된다.</p>
+     *
+     * @param playlistName 변경할 이름 (null이면 기존 값 유지)
+     * @param description  변경할 설명 (null이면 기존 값 유지)
+     * @param isPublic     변경할 공개 여부 (null이면 기존 값 유지)
+     */
+    public void update(String playlistName, String description, Boolean isPublic) {
+        /* null 전달 시 기존 값을 유지하는 null-safe 패치 방식 */
+        if (playlistName != null) {
+            this.playlistName = playlistName;
+        }
+        if (description != null) {
+            this.description = description;
+        }
+        if (isPublic != null) {
+            this.isPublic = isPublic;
+        }
+    }
 }

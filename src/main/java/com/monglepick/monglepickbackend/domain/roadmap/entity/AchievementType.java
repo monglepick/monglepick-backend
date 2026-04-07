@@ -121,6 +121,26 @@ public class AchievementType extends BaseAuditEntity {
     private String iconUrl;
 
     /**
+     * 업적 카테고리 — 프론트엔드 필터링용 분류값 (최대 50자, nullable).
+     *
+     * <p>사용자 인터페이스에서 업적을 종류별로 분류할 때 사용한다.
+     * null이면 기타(미분류) 업적으로 취급한다.</p>
+     *
+     * <h4>정의된 카테고리 값</h4>
+     * <ul>
+     *   <li>{@code "VIEWING"}    — 시청 관련 업적 (예: genre_explorer)</li>
+     *   <li>{@code "SOCIAL"}     — 소셜/커뮤니티 활동 업적 (예: review_count_10)</li>
+     *   <li>{@code "COLLECTION"} — 수집/저장 관련 업적 (예: playlist 관련)</li>
+     *   <li>{@code "CHALLENGE"}  — 도전과제 업적 (예: course_complete, quiz_perfect)</li>
+     *   <li>{@code null}         — 기타/미분류 업적</li>
+     * </ul>
+     *
+     * <p>JPA ddl-auto=update에 의해 category VARCHAR(50) 컬럼이 자동으로 추가된다.</p>
+     */
+    @Column(name = "category", length = 50)
+    private String category; // VIEWING, SOCIAL, COLLECTION, CHALLENGE, null(기타)
+
+    /**
      * 업적 활성화 여부 (기본값 true).
      *
      * <p>false이면 해당 업적에 대한 새 달성 기록이 생성되지 않는다.
@@ -149,12 +169,14 @@ public class AchievementType extends BaseAuditEntity {
      * @param description     변경할 설명
      * @param rewardPoints    변경할 보상 포인트
      * @param iconUrl         변경할 아이콘 URL
+     * @param category        변경할 카테고리 (VIEWING/SOCIAL/COLLECTION/CHALLENGE/null)
      */
     public void updateInfo(String achievementName, String description,
-                           Integer rewardPoints, String iconUrl) {
+                           Integer rewardPoints, String iconUrl, String category) {
         this.achievementName = achievementName;
         this.description = description;
         this.rewardPoints = rewardPoints;
         this.iconUrl = iconUrl;
+        this.category = category;
     }
 }

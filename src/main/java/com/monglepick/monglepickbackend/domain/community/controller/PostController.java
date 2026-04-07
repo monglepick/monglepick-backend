@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.domain.community.dto.PostCreateRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
 import com.monglepick.monglepickbackend.domain.community.service.PostService;
 import com.monglepick.monglepickbackend.global.constants.AppConstants;
+import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -208,6 +209,38 @@ public class PostController {
 
         postService.deleteDraft(id, userId);
         return ResponseEntity.noContent().build();
+    }
+
+    // ──────────────────────────────────────────────
+    // 게시글 좋아요 토글
+    // ──────────────────────────────────────────────
+
+    /**
+     * 게시글 좋아요 토글 API (인스타그램 스타일, JWT 필수).
+     *
+     * <p>한 번 호출로 좋아요 등록/취소를 전환한다.
+     * 좋아요가 없으면 INSERT, 있으면 hard DELETE 처리된다.</p>
+     *
+     * @param id     게시글 ID
+     * @param userId JWT에서 추출한 사용자 ID
+     * @return 200 OK + { liked, likeCount }
+     */
+    @Operation(summary = "게시글 좋아요 토글",
+            description = "게시글 좋아요를 토글합니다 (인스타그램 스타일 — 한 번 클릭으로 등록/취소). JWT 필수.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "좋아요 토글 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요"),
+            @ApiResponse(responseCode = "404", description = "게시글 없음")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PostMapping("/{id}/like")
+    public ResponseEntity<LikeToggleResponse> togglePostLike(
+            @PathVariable Long id,
+            @AuthenticationPrincipal String userId) {
+
+        log.info("게시글 좋아요 토글 — userId:{}, postId:{}", userId, id);
+        LikeToggleResponse response = postService.togglePostLike(userId, id);
+        return ResponseEntity.ok(response);
     }
 
     /**

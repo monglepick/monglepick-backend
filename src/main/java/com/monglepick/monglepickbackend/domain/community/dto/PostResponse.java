@@ -27,15 +27,20 @@ public record PostResponse(
         LocalDateTime createdAt
 ) {
     /**
-     * Post 엔티티를 PostResponse로 변환하는 팩토리 메서드
+     * Post 엔티티를 PostResponse로 변환하는 팩토리 메서드.
+     *
+     * <p>{@link Post#getNickname()}은 MyBatis PostMapper의 JOIN users 쿼리 결과로 채워진다
+     * (JPA/MyBatis 하이브리드 §15). JOIN 없이 로드된 Post 객체에서는 null이 될 수 있으며,
+     * 이 경우 "알 수 없음"으로 표시한다 (소프트 폴백).</p>
      */
     public static PostResponse from(Post post) {
+        String nickname = post.getNickname() != null ? post.getNickname() : "알 수 없음";
         return new PostResponse(
                 post.getPostId(),
                 post.getTitle(),
                 post.getContent(),
                 post.getCategory().name(),
-                post.getUser().getNickname(),
+                nickname,
                 post.getViewCount(),
                 post.getStatus().name(),
                 post.getCreatedAt()

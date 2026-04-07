@@ -178,7 +178,8 @@ public class RecommendationImpact extends BaseAuditEntity {
      * 시청 완료 이벤트를 기록한다.
      *
      * <p>watched 플래그를 true로 설정한다.
-     * watch_history 도메인의 INSERT 이벤트와 연동하여 호출된다.</p>
+     * 추천 이력 화면의 "봤어요" 토글 또는 review 작성 시점에 호출된다 — "리뷰 작성 = 시청
+     * 완료 확인"이 단일 진실 원본이다 (watch_history 도메인 폐기, 2026-04-08).</p>
      */
     public void markWatched() {
         this.watched = true;
@@ -192,5 +193,30 @@ public class RecommendationImpact extends BaseAuditEntity {
      */
     public void markRated() {
         this.rated = true;
+    }
+
+    /**
+     * 위시리스트 추가를 취소한다 (찜 토글 취소용).
+     *
+     * <p>wishlisted 플래그를 false로 되돌린다.
+     * {@code POST /api/v1/recommendations/{id}/wishlist} 토글 API에서
+     * 현재 wishlisted=true 상태일 때 호출하여 찜을 취소한다.</p>
+     *
+     * <p>설계 주의: RecommendationImpact는 기본적으로 INSERT-ONLY 이벤트 로그이나,
+     * 클라이언트 UX 요구사항(찜 토글)을 위해 취소 메서드를 제한적으로 허용한다.</p>
+     */
+    public void cancelWishlisted() {
+        this.wishlisted = false;
+    }
+
+    /**
+     * 봤어요를 취소한다 (봤어요 토글 취소용).
+     *
+     * <p>watched 플래그를 false로 되돌린다.
+     * {@code POST /api/v1/recommendations/{id}/watched} 토글 API에서
+     * 현재 watched=true 상태일 때 호출하여 봤어요를 취소한다.</p>
+     */
+    public void cancelWatched() {
+        this.watched = false;
     }
 }

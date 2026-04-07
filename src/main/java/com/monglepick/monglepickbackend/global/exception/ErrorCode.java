@@ -231,7 +231,52 @@ public enum ErrorCode {
     CHAT_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT001", "채팅 세션을 찾을 수 없습니다"),
 
     /** 본인 세션이 아닌 경우 접근 거부. */
-    CHAT_SESSION_ACCESS_DENIED(HttpStatus.FORBIDDEN, "CHAT002", "채팅 세션 접근 권한이 없습니다");
+    CHAT_SESSION_ACCESS_DENIED(HttpStatus.FORBIDDEN, "CHAT002", "채팅 세션 접근 권한이 없습니다"),
+
+    // ─────────────────────────────────────────────
+    // 플레이리스트 (PL0xx)
+    // ─────────────────────────────────────────────
+
+    /** playlistId에 해당하는 플레이리스트를 찾을 수 없음. */
+    PLAYLIST_NOT_FOUND(HttpStatus.NOT_FOUND, "PL001", "플레이리스트를 찾을 수 없습니다"),
+
+    /** 플레이리스트 소유자가 아닌 사용자가 수정/삭제/상세 조회 시도. */
+    PLAYLIST_ACCESS_DENIED(HttpStatus.FORBIDDEN, "PL002", "플레이리스트에 접근할 권한이 없습니다"),
+
+    /** 동일 플레이리스트에 이미 추가된 영화를 중복 추가 시도. */
+    PLAYLIST_ITEM_DUPLICATE(HttpStatus.CONFLICT, "PL003", "이미 플레이리스트에 추가된 영화입니다"),
+
+    /** 플레이리스트에서 제거하려는 영화 항목이 존재하지 않음. */
+    PLAYLIST_ITEM_NOT_FOUND(HttpStatus.NOT_FOUND, "PL004", "플레이리스트에 해당 영화가 없습니다"),
+
+    /** 이미 좋아요를 누른 플레이리스트에 중복 좋아요 시도. */
+    PLAYLIST_LIKE_DUPLICATE(HttpStatus.CONFLICT, "PL005", "이미 좋아요를 누른 플레이리스트입니다"),
+
+    /** 좋아요를 누르지 않은 플레이리스트에 좋아요 취소 시도. */
+    PLAYLIST_LIKE_NOT_FOUND(HttpStatus.NOT_FOUND, "PL006", "좋아요 기록이 없습니다"),
+
+    /** 비공개 플레이리스트에 소유자가 아닌 사용자가 좋아요 시도. */
+    PLAYLIST_PRIVATE(HttpStatus.FORBIDDEN, "PL007", "비공개 플레이리스트입니다"),
+
+    // ─────────────────────────────────────────────
+    // 추천 이력 (REC0xx)
+    // ─────────────────────────────────────────────
+
+    /** recommendationLogId에 해당하는 추천 로그를 찾을 수 없음. */
+    RECOMMENDATION_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "REC001", "추천 이력을 찾을 수 없습니다"),
+
+    /** 본인 추천 이력이 아닌 경우 접근 거부. */
+    RECOMMENDATION_LOG_ACCESS_DENIED(HttpStatus.FORBIDDEN, "REC002", "추천 이력에 접근할 권한이 없습니다"),
+
+    // ─────────────────────────────────────────────
+    // 도장깨기 / 로드맵 (ROAD0xx)
+    // ─────────────────────────────────────────────
+
+    /** courseId(slug)에 해당하는 도장깨기 코스를 찾을 수 없음. */
+    ROADMAP_COURSE_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD001", "존재하지 않는 도장깨기 코스입니다"),
+
+    /** quizId에 해당하는 퀴즈가 존재하지 않거나 PUBLISHED 상태가 아님. */
+    QUIZ_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD002", "존재하지 않거나 출제 중이 아닌 퀴즈입니다");
 
     // ─────────────────────────────────────────────
     // 필드

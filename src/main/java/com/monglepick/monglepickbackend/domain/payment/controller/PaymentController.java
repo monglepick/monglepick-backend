@@ -5,6 +5,8 @@ import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.ConfirmRes
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.CreateOrderRequest;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderHistoryResponse;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderResponse;
+import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.RefundRequest;
+import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.RefundResponse;
 import com.monglepick.monglepickbackend.domain.payment.service.PaymentService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,6 +23,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -144,6 +147,59 @@ public class PaymentController extends BaseController {
         Page<OrderHistoryResponse> orders = paymentService.getOrderHistory(
                 userId, PageRequest.of(page, limitPageSize(size)));
         return ResponseEntity.ok(orders);
+    }
+
+    // ──────────────────────────────────────────────
+    // POST /api/v1/payment/orders/{orderId}/refund — 환불
+    // ──────────────────────────────────────────────
+
+    /**
+     * 완료된 결제 주문을 환불 처리한다.
+     *
+     * <p>COMPLETED 상태의 주문에 대해 환불을 요청한다.
+     * POINT_PACK 주문의 경우 지급된 포인트를 회수한 뒤 Toss Payments 취소 API를 호출하고,
+     * DB 상태를 REFUNDED로 변경한다.
+     * SUBSCRIPTION 주문의 경우 포인트 회수 없이 상태만 변경한다.</p>
+     *
+     * <h4>환불 가능 조건</h4>
+     * <ul>
+     *   <li>요청자가 주문 소유자여야 한다 (JWT에서 추출한 userId 기준 — BOLA 방지)</li>
+     *   <li>주문 상태가 COMPLETED이어야 한다</li>
+     *   <li>POINT_PACK인 경우 현재 포인트 잔액이 지급받은 포인트 이상이어야 한다</li>
+     * </ul>
+     *
+     * <h4>멱등성</h4>
+     * <p>이미 REFUNDED 상태인 주문은 200 OK와 함께 "이미 환불 처리된 주문입니다." 메시지를 반환한다.</p>
+     *
+     * @param orderId 환불할 주문 UUID (경로 변수)
+     * @param request 환불 사유 ({@code reason} 필드, nullable)
+     * @return 200 OK + RefundResponse (success, orderId, refundAmount, message)
+     */
+    @Operation(
+            summary = "결제 환불",
+            description = "COMPLETED 주문 환불. POINT_PACK은 포인트 회수 후 PG 취소. 멱등 처리 지원."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "환불 성공 (또는 이미 환불 완료된 멱등 응답)"),
+            @ApiResponse(responseCode = "402", description = "포인트 잔액 부족으로 환불 불가"),
+            @ApiResponse(responseCode = "404", description = "주문 미발견 또는 소유자 불일치"),
+            @ApiResponse(responseCode = "400", description = "환불 불가 상태 (PENDING/FAILED/COMPENSATION_FAILED)")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PostMapping("/orders/{orderId}/refund")
+    public ResponseEntity<RefundResponse> refundOrder(
+            Principal principal,
+            @PathVariable String orderId,
+            @RequestBody(required = false) RefundRequest request) {
+        // JWT에서 userId 추출 (소유자 검증용 — BOLA 방지)
+        String userId = resolveUserId(principal);
+        // request가 null이면 (body 없이 호출) reason을 null로 처리
+        String reason = (request != null) ? request.reason() : null;
+
+        log.info("환불 API 호출: userId={}, orderId={}, reason={}", userId, orderId, reason);
+
+        RefundResponse response = paymentService.refundOrder(orderId, userId, reason);
+        return ResponseEntity.ok(response);
     }
 
     // ──────────────────────────────────────────────

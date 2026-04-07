@@ -8,7 +8,7 @@ import com.monglepick.monglepickbackend.domain.reward.entity.PointItem;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointItemRepository;
 import com.monglepick.monglepickbackend.domain.user.entity.Admin;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.constants.UserRole;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,7 +42,8 @@ public class DataInitializer implements ApplicationRunner {
 
     private final PointItemRepository pointItemRepository;
     private final SubscriptionPlanRepository subscriptionPlanRepository;
-    private final UserRepository userRepository;
+    /** 사용자 CRUD — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
+    private final UserMapper userMapper;
     private final AdminAccountRepository adminAccountRepository;
     private final PasswordEncoder passwordEncoder;
 
@@ -76,7 +77,7 @@ public class DataInitializer implements ApplicationRunner {
      * <p>환경변수: ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NICKNAME</p>
      */
     private void initAdminAccount() {
-        if (userRepository.existsByEmail(adminEmail)) {
+        if (userMapper.existsByEmail(adminEmail)) {
             log.info("관리자 테스트 계정 이미 존재 — 스킵 (email: {})", adminEmail);
             return;
         }
@@ -93,18 +94,19 @@ public class DataInitializer implements ApplicationRunner {
                 .marketingAgreed(false)
                 .build();
 
-        User savedAdmin = userRepository.save(admin);
+        // MyBatis insert — PK는 수동 생성한 UUID(userId)로 세팅되어 그대로 저장됨
+        userMapper.insert(admin);
 
         /* admin 테이블에도 레코드 생성 (별도 admin 테이블이 존재하므로 필수) */
         Admin adminRecord = Admin.builder()
-                .userId(savedAdmin.getUserId())
+                .userId(admin.getUserId())
                 .adminRole("ADMIN")
                 .isActive(true)
                 .build();
         adminAccountRepository.save(adminRecord);
 
         log.info("관리자 테스트 계정 초기화 완료 — email: {}, role: ADMIN, userId: {}",
-                adminEmail, savedAdmin.getUserId());
+                adminEmail, admin.getUserId());
     }
 
     /**

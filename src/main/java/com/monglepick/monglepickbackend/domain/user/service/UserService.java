@@ -5,15 +5,13 @@ import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.entity.UserPreference;
-import com.monglepick.monglepickbackend.domain.watchhistory.dto.WatchHistoryResponse;
-import com.monglepick.monglepickbackend.domain.watchhistory.dto.WishlistResponse;
-import com.monglepick.monglepickbackend.domain.watchhistory.entity.UserWishlist;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserPreferenceMapper;
+import com.monglepick.monglepickbackend.domain.wishlist.dto.WishlistResponse;
+import com.monglepick.monglepickbackend.domain.wishlist.entity.UserWishlist;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
-import com.monglepick.monglepickbackend.domain.user.repository.UserPreferenceRepository;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
-import com.monglepick.monglepickbackend.domain.watchhistory.repository.UserWishlistRepository;
-import com.monglepick.monglepickbackend.domain.watchhistory.repository.WatchHistoryRepository;
+import com.monglepick.monglepickbackend.domain.wishlist.repository.UserWishlistRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -27,8 +25,8 @@ import java.util.Optional;
 /**
  * 마이페이지 서비스
  *
- * <p>사용자 프로필, 시청 이력, 위시리스트, 선호도 등
- * 마이페이지에 필요한 비즈니스 로직을 처리합니다.</p>
+ * <p>사용자 프로필, 위시리스트, 선호도 등 마이페이지에 필요한 비즈니스 로직을 처리합니다.
+ * 시청 이력 탭은 reviews 단일 진실 원본 원칙에 따라 폐기되었습니다 (2026-04-08).</p>
  */
 @Slf4j
 @Service
@@ -36,10 +34,12 @@ import java.util.Optional;
 @Transactional(readOnly = true)
 public class UserService {
 
-    private final UserRepository userRepository;
-    private final WatchHistoryRepository watchHistoryRepository;
+    /** 사용자 CRUD — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
+    private final UserMapper userMapper;
+    /** 사용자 선호도 — MyBatis Mapper */
+    private final UserPreferenceMapper userPreferenceMapper;
+    /** 위시리스트 — 윤형주 도메인 JpaRepository 유지 */
     private final UserWishlistRepository userWishlistRepository;
-    private final UserPreferenceRepository userPreferenceRepository;
     private final PasswordEncoder passwordEncoder;
 
     /** 활동 리워드 서비스 — 위시리스트 추가(WISHLIST_ADD) 리워드 지급 위임 */
@@ -53,8 +53,10 @@ public class UserService {
      * @throws BusinessException 사용자를 찾을 수 없는 경우
      */
     public UserResponse getProfile(String userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
         return UserResponse.from(user);
     }
 
@@ -71,11 +73,17 @@ public class UserService {
      */
     @Transactional
     public UserResponse updateProfile(String userId, UpdateProfileRequest request) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        /*
+         * JPA/MyBatis 하이브리드 (§15): MyBatis는 dirty checking을 지원하지 않으므로
+         * 도메인 메서드로 in-memory 변경한 뒤 반드시 userMapper.update(user)를 명시 호출해야 한다.
+         */
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
 
         if (request.nickname() != null && !request.nickname().equals(user.getNickname())) {
-            if (userRepository.existsByNickname(request.nickname())) {
+            if (userMapper.existsByNickname(request.nickname())) {
                 throw new BusinessException(ErrorCode.NICKNAME_ALREADY_EXISTS);
             }
             user.updateNickname(request.nickname());
@@ -96,23 +104,10 @@ public class UserService {
             log.info("비밀번호 변경 완료 - userId: {}", userId);
         }
 
-        return UserResponse.from(user);
-    }
+        // MyBatis는 dirty checking이 없으므로 변경사항을 명시적으로 UPDATE 호출
+        userMapper.update(user);
 
-    /**
-     * 사용자의 시청 이력을 페이징으로 조회합니다.
-     *
-     * <p>대용량 테이블(26M+ 행)이므로 반드시 페이징을 사용합니다.
-     * 최신순 정렬을 위해 Pageable에서 Sort를 지정해야 합니다.</p>
-     *
-     * @param userId 사용자 ID
-     * @param pageable 페이징 정보
-     * @return 페이지 단위의 시청 이력
-     */
-    public Page<WatchHistoryResponse> getWatchHistory(String userId, Pageable pageable) {
-        log.debug("시청 이력 조회 - userId: {}, page: {}", userId, pageable.getPageNumber());
-        return watchHistoryRepository.findByUser_UserId(userId, pageable)
-                .map(WatchHistoryResponse::from);
+        return UserResponse.from(user);
     }
 
     /**
@@ -124,7 +119,7 @@ public class UserService {
      */
     public Page<WishlistResponse> getWishlist(String userId, Pageable pageable) {
         log.debug("위시리스트 조회 - userId: {}", userId);
-        return userWishlistRepository.findByUser_UserId(userId, pageable)
+        return userWishlistRepository.findByUserId(userId, pageable)
                 .map(WishlistResponse::from);
     }
 
@@ -140,15 +135,15 @@ public class UserService {
     @Transactional
     public void addToWishlist(String userId, String movieId) {
         // 중복 확인
-        if (userWishlistRepository.existsByUser_UserIdAndMovieId(userId, movieId)) {
+        if (userWishlistRepository.existsByUserIdAndMovieId(userId, movieId)) {
             throw new BusinessException(ErrorCode.DUPLICATE_WISHLIST);
         }
 
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        // 사용자 존재 검증은 JWT 인증 단계에서 이미 처리됨 — String userId 그대로 사용
+        // (JPA/MyBatis 하이브리드 §15.4)
 
         UserWishlist wishlist = UserWishlist.builder()
-                .user(user)
+                .userId(userId)
                 .movieId(movieId)
                 .build();
 
@@ -174,7 +169,7 @@ public class UserService {
     @Transactional
     public void removeFromWishlist(String userId, String movieId) {
         UserWishlist wishlist = userWishlistRepository
-                .findByUser_UserIdAndMovieId(userId, movieId)
+                .findByUserIdAndMovieId(userId, movieId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.WISHLIST_NOT_FOUND));
 
         userWishlistRepository.delete(wishlist);
@@ -190,6 +185,6 @@ public class UserService {
      * @return 사용자 선호도 Optional
      */
     public Optional<UserPreference> getPreferences(String userId) {
-        return userPreferenceRepository.findByUser_UserId(userId);
+        return Optional.ofNullable(userPreferenceMapper.findByUserId(userId));
     }
 }

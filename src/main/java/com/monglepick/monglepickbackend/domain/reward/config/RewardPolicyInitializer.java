@@ -15,7 +15,7 @@ import java.util.List;
 /**
  * 리워드 정책 초기 데이터 적재기 — reward_policy 테이블 시드 데이터 삽입.
  *
- * <p>애플리케이션 시작 시 {@code reward_policy} 테이블에 37개 활동 정책이 없으면 INSERT한다.
+ * <p>애플리케이션 시작 시 {@code reward_policy} 테이블에 42개 활동 정책이 없으면 INSERT한다.
  * 이미 존재하는 정책(action_type 기준)은 건너뛰어 멱등(idempotent) 동작을 보장한다.</p>
  *
  * <h3>시드 데이터 5개 카테고리 (설계서 v2.4 §5.1 기준)</h3>
@@ -100,7 +100,7 @@ public class RewardPolicyInitializer implements ApplicationRunner {
      * <p>설계서 v2.4 §5.1 시드 데이터 기준. 카테고리별로 묶어 가독성을 높였으며,
      * 각 빌더 호출에 상세 주석을 달아 의도를 명확히 했다.</p>
      *
-     * @return 초기화할 RewardPolicy 엔티티 목록 (총 37개)
+     * @return 초기화할 RewardPolicy 엔티티 목록 (총 42개)
      */
     private List<RewardPolicy> buildAllPolicies() {
         return List.of(
@@ -888,14 +888,14 @@ public class RewardPolicyInitializer implements ApplicationRunner {
                         .description("SILVER → GOLD 등급 승급 달성 시 1회 지급. earned_by_activity 20,000P 달성 기준. (v3.0: 기준 20,000P)")
                         .build(),
 
-                // D-4. 플래티넘 승급 (earned_by_activity 50,000 달성)
-                // v3.0: PLATINUM 기준 15,000→50,000P 상향. 포인트 1,000P 유지.
-                //   최고 등급 달성 보상 — 이후 추가 등급 없으므로 연쇄 승급 없음 ✓
+                // D-4. 플래티넘 승급 (earned_by_activity 10,000 달성, v3.2 기준)
+                // v3.2: PLATINUM 기준 100,000→10,000P 하향. 포인트 500P.
+                //   연쇄 승급 검증: 10,000 + 500 = 10,500P < DIAMOND(20,000P) ✓
                 RewardPolicy.builder()
                         .actionType("GRADE_UP_PLATINUM")
                         .activityName("플래티넘 승급")
                         .actionCategory("MILESTONE")
-                        .pointsAmount(1_000)
+                        .pointsAmount(500)
                         .pointType("bonus")
                         .dailyLimit(0)
                         .maxCount(1)
@@ -906,20 +906,42 @@ public class RewardPolicyInitializer implements ApplicationRunner {
                         .thresholdTarget(null)
                         .parentActionType(null)
                         .isActive(true)
-                        .description("GOLD → PLATINUM 등급 승급 달성 시 1회 지급. earned_by_activity 50,000P 달성 기준. (v3.0: 기준 50,000P)")
+                        .description("GOLD → PLATINUM(몽글팝콘) 등급 승급 달성 시 1회 지급. earned_by_activity 10,000P 달성 기준. (v3.2: 기준 10,000P, 보상 500P)")
+                        .build(),
+
+                // D-5. 다이아몬드 승급 (earned_by_activity 20,000 달성, v3.2 신규 등급)
+                // v3.2: DIAMOND(몽아일체) 최고 등급 신규 추가. 최고 등급 달성 보상.
+                //   연쇄 승급 없음 (DIAMOND가 최고 등급) ✓
+                RewardPolicy.builder()
+                        .actionType("GRADE_UP_DIAMOND")
+                        .activityName("다이아몬드 승급")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(250)
+                        .pointType("bonus")
+                        .dailyLimit(0)
+                        .maxCount(1)            // 평생 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(0)
+                        .thresholdTarget(null)
+                        .parentActionType(null)
+                        .isActive(true)
+                        .description("PLATINUM → DIAMOND(몽아일체) 등급 승급 달성 시 1회 지급. earned_by_activity 20,000P 달성 기준. (v3.2 신규)")
                         .build(),
 
                 // ─────────────────────────────────────────────────────────────
                 // E. 월드컵/업적/퀴즈 (4개)
                 // ─────────────────────────────────────────────────────────────
 
-                // E-1. 월드컵 완주 — 하루 최대 5회 반복 지급 (earn)
+                // E-1. 월드컵 완주 — 하루 최대 5회 반복 지급 (bonus)
+                // v3.1: earn → bonus (PLATINUM ×2.0 인플레이션 방지. 고정 20P×5=100P/일)
                 RewardPolicy.builder()
                         .actionType("WORLDCUP_COMPLETE")
                         .activityName("월드컵 완주")
                         .actionCategory("ENGAGEMENT")
                         .pointsAmount(20)
-                        .pointType("earn")
+                        .pointType("bonus")       // v3.1: earn→bonus (PLATINUM ×2.0 인플레이션 방지. 고정 20P×5=100P/일)
                         .dailyLimit(5)          // 하루 최대 5회
                         .maxCount(0)
                         .cooldownSeconds(0)
@@ -929,7 +951,7 @@ public class RewardPolicyInitializer implements ApplicationRunner {
                         .thresholdTarget(null)
                         .parentActionType(null)
                         .isActive(true)
-                        .description("영화 월드컵 토너먼트 완주 시 지급. 일일 5회 한도.")
+                        .description("영화 월드컵 토너먼트 완주 시 지급. 일일 5회 한도. (v3.1: earn→bonus, 등급 배율 미적용)")
                         .build(),
 
                 // E-2. 첫 월드컵 완주 — 평생 1회 보너스 (bonus)
@@ -951,13 +973,14 @@ public class RewardPolicyInitializer implements ApplicationRunner {
                         .description("영화 월드컵 최초 완주 시 1회 지급.")
                         .build(),
 
-                // E-3. 퀴즈 정답 — 하루 최대 10회 반복 지급 (earn)
+                // E-3. 퀴즈 정답 — 하루 최대 10회 반복 지급 (bonus)
+                // v3.1: earn → bonus (퀴즈 반복 파밍 + 배율 인플레이션 방지. 고정 10P×10=100P/일)
                 RewardPolicy.builder()
                         .actionType("QUIZ_CORRECT")
                         .activityName("퀴즈 정답")
                         .actionCategory("CONTENT")
                         .pointsAmount(10)
-                        .pointType("earn")
+                        .pointType("bonus")       // v3.1: earn→bonus (퀴즈 반복 파밍 + 배율 인플레이션 방지. 고정 10P×10=100P/일)
                         .dailyLimit(10)         // 하루 최대 10회
                         .maxCount(0)
                         .cooldownSeconds(0)
@@ -967,7 +990,7 @@ public class RewardPolicyInitializer implements ApplicationRunner {
                         .thresholdTarget(null)
                         .parentActionType(null)
                         .isActive(true)
-                        .description("영화 관련 퀴즈 정답 시 지급. 일일 10회 한도.")
+                        .description("영화 관련 퀴즈 정답 시 지급. 일일 10회 한도. (v3.1: earn→bonus, 등급 배율 미적용)")
                         .build(),
 
                 // E-4. 업적 달성 — 가변 포인트 (pointsAmount=0), 업적별 동적 결정
@@ -1074,6 +1097,216 @@ public class RewardPolicyInitializer implements ApplicationRunner {
                         .parentActionType(null)
                         .isActive(true)
                         .description("서로 다른 5개 장르의 영화를 탐험(시청/평가) 시 1회 지급. AchievementType.achievementCode=genre_explorer 연동.")
+                        .build(),
+
+                // ─────────────────────────────────────────────────────────────
+                // C-1-g. 위시리스트 누적 달성 (3단계) — v3.1 신규 추가
+                //        WISHLIST_ADD total_count 기준 달성 시 보너스 1회 지급
+                // ─────────────────────────────────────────────────────────────
+
+                // C-1-g-1. 위시리스트 10건 달성
+                RewardPolicy.builder()
+                        .actionType("WISHLIST_MILESTONE_10")
+                        .activityName("찜 10회")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(20)
+                        .pointType("bonus")     // 등급 배율 미적용 (달성 보너스)
+                        .dailyLimit(0)
+                        .maxCount(1)            // 평생 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(10)     // WISHLIST_ADD total_count >= 10
+                        .thresholdTarget("TOTAL")
+                        .parentActionType("WISHLIST_ADD")
+                        .isActive(true)
+                        .description("위시리스트 누적 10건 달성 보너스.")
+                        .build(),
+
+                // C-1-g-2. 위시리스트 50건 달성
+                RewardPolicy.builder()
+                        .actionType("WISHLIST_MILESTONE_50")
+                        .activityName("찜 50회")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(50)
+                        .pointType("bonus")     // 등급 배율 미적용 (달성 보너스)
+                        .dailyLimit(0)
+                        .maxCount(1)            // 평생 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(50)     // WISHLIST_ADD total_count >= 50
+                        .thresholdTarget("TOTAL")
+                        .parentActionType("WISHLIST_ADD")
+                        .isActive(true)
+                        .description("위시리스트 누적 50건 달성 보너스.")
+                        .build(),
+
+                // C-1-g-3. 위시리스트 100건 달성
+                RewardPolicy.builder()
+                        .actionType("WISHLIST_MILESTONE_100")
+                        .activityName("찜 100회")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(100)
+                        .pointType("bonus")     // 등급 배율 미적용 (달성 보너스)
+                        .dailyLimit(0)
+                        .maxCount(1)            // 평생 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(100)    // WISHLIST_ADD total_count >= 100
+                        .thresholdTarget("TOTAL")
+                        .parentActionType("WISHLIST_ADD")
+                        .isActive(true)
+                        .description("위시리스트 누적 100건 달성 보너스.")
+                        .build(),
+
+                // ─────────────────────────────────────────────────────────────
+                // C-1-h. 게시글/댓글 대량 누적 달성 — v3.1 신규 추가
+                //        기존 POST_MILESTONE_5/30/50 시리즈의 고단계 연장
+                // ─────────────────────────────────────────────────────────────
+
+                // C-1-h-1. 게시글 100건 달성
+                RewardPolicy.builder()
+                        .actionType("POST_MILESTONE_100")
+                        .activityName("게시글 100회")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(300)
+                        .pointType("bonus")     // 등급 배율 미적용 (달성 보너스)
+                        .dailyLimit(0)
+                        .maxCount(1)            // 평생 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(100)    // POST_REWARD total_count >= 100
+                        .thresholdTarget("TOTAL")
+                        .parentActionType("POST_REWARD")
+                        .isActive(true)
+                        .description("게시글 누적 100건 달성 보너스.")
+                        .build(),
+
+                // C-1-h-2. 댓글 500건 달성
+                RewardPolicy.builder()
+                        .actionType("COMMENT_MILESTONE_500")
+                        .activityName("댓글 500회")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(300)
+                        .pointType("bonus")     // 등급 배율 미적용 (달성 보너스)
+                        .dailyLimit(0)
+                        .maxCount(1)            // 평생 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(500)    // COMMENT_CREATE total_count >= 500
+                        .thresholdTarget("TOTAL")
+                        .parentActionType("COMMENT_CREATE")
+                        .isActive(true)
+                        .description("댓글 누적 500건 달성 보너스.")
+                        .build(),
+
+                // ─────────────────────────────────────────────────────────────
+                // F. 온보딩 마일스톤 (4개) — point_type=bonus, ONCE
+                //    신규 가입 후 초기 설정 완료 시 지급 (각 항목 평생 1회)
+                //    엑셀 t2_09 시트 reward_policy 기준
+                // ─────────────────────────────────────────────────────────────
+
+                // F-1. 영화 월드컵 온보딩 완료 — 온보딩 중 월드컵 완주 시 1회
+                RewardPolicy.builder()
+                        .actionType("MOVIE_CUP_ONBOARD")
+                        .activityName("영화 월드컵 온보딩 완료")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(100)
+                        .pointType("bonus")
+                        .dailyLimit(0)
+                        .maxCount(1)            // 평생 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(0)
+                        .thresholdTarget(null)
+                        .parentActionType(null)
+                        .isActive(true)
+                        .description("온보딩 단계에서 영화 월드컵을 처음 완료 시 1회 지급. (엑셀 기준)")
+                        .build(),
+
+                // F-2. 인생영화 온보딩 설정 — 온보딩 중 인생영화 등록 시 1회
+                RewardPolicy.builder()
+                        .actionType("FAV_MOVIE_ONBOARD")
+                        .activityName("인생영화 온보딩 설정")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(100)
+                        .pointType("bonus")
+                        .dailyLimit(0)
+                        .maxCount(1)
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(0)
+                        .thresholdTarget(null)
+                        .parentActionType(null)
+                        .isActive(true)
+                        .description("온보딩 단계에서 인생영화를 처음 설정 시 1회 지급. (엑셀 기준)")
+                        .build(),
+
+                // F-3. 선호장르 온보딩 설정 — 온보딩 중 선호장르 등록 시 1회
+                RewardPolicy.builder()
+                        .actionType("FAV_GENRE_ONBOARD")
+                        .activityName("선호장르 온보딩 설정")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(100)
+                        .pointType("bonus")
+                        .dailyLimit(0)
+                        .maxCount(1)
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(0)
+                        .thresholdTarget(null)
+                        .parentActionType(null)
+                        .isActive(true)
+                        .description("온보딩 단계에서 선호장르를 처음 설정 시 1회 지급. (엑셀 기준)")
+                        .build(),
+
+                // F-4. 온보딩 3개 완료 보너스 — F-1~F-3 모두 완료 시 추가 보너스
+                RewardPolicy.builder()
+                        .actionType("ONBOARD_COMPLETE")
+                        .activityName("온보딩 3개 완료 보너스")
+                        .actionCategory("MILESTONE")
+                        .pointsAmount(100)
+                        .pointType("bonus")
+                        .dailyLimit(0)
+                        .maxCount(1)
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(0)
+                        .thresholdTarget(null)
+                        .parentActionType(null)
+                        .isActive(true)
+                        .description("영화 월드컵·인생영화·선호장르 온보딩 3개 항목 모두 완료 시 추가 보너스 1회 지급. (엑셀 기준)")
+                        .build(),
+
+                // ─────────────────────────────────────────────────────────────
+                // G. 플레이리스트 활동 (1개)
+                // ─────────────────────────────────────────────────────────────
+
+                // G-1. 플레이리스트 공유 — 평생 1회 보너스
+                RewardPolicy.builder()
+                        .actionType("PLAYLIST_SHARE")
+                        .activityName("플레이리스트 공유")
+                        .actionCategory("ENGAGEMENT")
+                        .pointsAmount(10)
+                        .pointType("bonus")
+                        .dailyLimit(0)
+                        .maxCount(1)            // 첫 공유 시 1회
+                        .cooldownSeconds(0)
+                        .minContentLength(0)
+                        .limitType("ONCE")
+                        .thresholdCount(1)
+                        .thresholdTarget(null)
+                        .parentActionType(null)
+                        .isActive(true)
+                        .description("플레이리스트를 처음 공유 시 1회 지급. (엑셀 기준)")
                         .build()
         );
     }

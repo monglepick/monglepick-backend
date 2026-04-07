@@ -7,7 +7,7 @@ import com.monglepick.monglepickbackend.domain.auth.dto.CustomOAuth2User;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
@@ -29,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -38,7 +37,7 @@ import java.util.UUID;
  * <p>KMG 프로젝트의 UserService 패턴을 적용하여
  * DefaultOAuth2UserService + UserDetailsService를 모두 구현한다.</p>
  *
- * <h3>C-2 수정: signup() 완료 후 Refresh Token을 RefreshRepository에 저장</h3>
+ * <h3>C-2 수정: signup() 완료 후 Refresh Token을 RefreshMapper에 저장 (2026-04-08 Repository → Mapper 전환)</h3>
  * <h3>C-3 수정: Kakao loadUser()에서 kakaoAccount/profile null 체크 추가</h3>
  * <h3>R-1 수정: signup() 가입 보너스를 RewardService.grantReward()로 위임</h3>
  * <p>기존 {@code pointService.initializePoint(userId, 500)} 방식에서
@@ -52,7 +51,8 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class AuthService extends DefaultOAuth2UserService implements UserDetailsService {
 
-    private final UserRepository userRepository;
+    /** 사용자 조회/등록/수정 — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
+    private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final PointService pointService;
@@ -91,10 +91,10 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     public AuthResponse signup(SignupRequest request) {
         log.info("로컬 회원가입 요청 — email: {}", request.email());
 
-        if (userRepository.existsByEmail(request.email())) {
+        if (userMapper.existsByEmail(request.email())) {
             throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
-        if (userRepository.existsByNickname(request.nickname())) {
+        if (userMapper.existsByNickname(request.nickname())) {
             throw new BusinessException(ErrorCode.NICKNAME_ALREADY_EXISTS);
         }
 
@@ -115,7 +115,7 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                 .marketingAgreed(request.marketingAgreed() != null ? request.marketingAgreed() : false)
                 .build();
 
-        userRepository.save(user);
+        userMapper.insert(user);
 
         // R-1: 포인트 레코드를 잔액 0으로 초기화 (보너스 지급은 rewardService가 담당)
         //      기존 initializePoint(userId, 500) 방식에서 변경 — 하드코딩 500P 제거
@@ -148,8 +148,10 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
      */
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다: " + email));
+        User user = userMapper.findByEmail(email);
+        if (user == null) {
+            throw new UsernameNotFoundException("사용자를 찾을 수 없습니다: " + email);
+        }
 
         /* 소셜 로그인 사용자는 로컬 로그인 불가 */
         if (user.getProvider() != User.Provider.LOCAL) {
@@ -254,20 +256,20 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
 
         User.Provider provider = User.Provider.valueOf(registrationId);
 
-        /* provider+providerId로 기존 사용자 조회 */
-        Optional<User> existingUser = userRepository.findByProviderAndProviderId(provider, providerId);
+        /* provider+providerId로 기존 사용자 조회 (MyBatis — Provider enum을 String으로 전달) */
+        User existingUser = userMapper.findByProviderAndProviderId(provider.name(), providerId);
 
         /* 이메일 중복 확인 (다른 제공자로 가입된 이메일인지) */
-        if (existingUser.isEmpty() && email != null && userRepository.existsByEmail(email)) {
+        if (existingUser == null && email != null && userMapper.existsByEmail(email)) {
             throw new OAuth2AuthenticationException("이미 해당 이메일로 가입된 계정이 있습니다.");
         }
 
         User user;
-        if (existingUser.isPresent()) {
-            /* 기존 사용자: 닉네임 업데이트 */
-            user = existingUser.get();
+        if (existingUser != null) {
+            /* 기존 사용자: 닉네임 업데이트 (도메인 메서드로 in-memory 변경 후 MyBatis update 명시 호출) */
+            user = existingUser;
             user.updateNickname(nickname);
-            userRepository.save(user);
+            userMapper.update(user);
             log.info("소셜 로그인 — 기존 사용자: userId={}, provider={}", user.getUserId(), provider);
         } else {
             /* 신규 사용자: 생성 + 포인트 레코드 초기화(잔액 0) + 가입 보너스 지급 */
@@ -280,7 +282,7 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                     .providerId(providerId)
                     .requiredTerm(true)
                     .build();
-            userRepository.save(user);
+            userMapper.insert(user);
 
             // R-1: 포인트 레코드를 잔액 0으로 초기화 (보너스 지급은 rewardService가 담당)
             pointService.initializePoint(userId, 0);

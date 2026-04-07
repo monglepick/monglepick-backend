@@ -3,13 +3,19 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <!--
-    플레이리스트(playlist, playlist_item) Mapper XML.
-    테이블: playlist, playlist_item
+    플레이리스트 통합 Mapper XML.
+    테이블: playlist, playlist_item, playlist_likes
     담당: 김민규 (playlist 도메인)
+
+    설계:
+      - @Entity는 DDL 정의 전용, 데이터 R/W는 100% 이 Mapper (설계서 §15)
+      - Playlist 엔티티의 cover_image_url, like_count 컬럼 포함
+      - sort_order hole 제거용 shiftSortOrderDown 포함
+      - 원자적 like_count 증감 (동시 요청 race condition 방지)
 -->
 <mapper namespace="com.monglepick.monglepickbackend.domain.playlist.mapper.PlaylistMapper">
 
-    <!-- ═══ ResultMap ═══ -->
+    <!-- ═══ ResultMaps ═══ -->
 
     <resultMap id="playlistResultMap" type="com.monglepick.monglepickbackend.domain.playlist.entity.Playlist">
         <id property="playlistId" column="playlist_id"/>
@@ -17,6 +23,8 @@
         <result property="playlistName" column="playlist_name"/>
         <result property="description" column="description"/>
         <result property="isPublic" column="is_public"/>
+        <result property="coverImageUrl" column="cover_image_url"/>
+        <result property="likeCount" column="like_count"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
         <result property="createdBy" column="created_by"/>
@@ -33,30 +41,52 @@
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
-    <!-- ═══ Playlist SELECT ═══ -->
+    <resultMap id="playlistLikeResultMap" type="com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistLike">
+        <id property="playlistLikeId" column="playlist_like_id"/>
+        <result property="playlistId" column="playlist_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="updatedBy" column="updated_by"/>
+    </resultMap>
+
+    <!-- ═══ 공통 SELECT 컬럼 ═══ -->
+
+    <sql id="playlistColumns">
+        playlist_id, user_id, playlist_name, description, is_public,
+        cover_image_url, like_count,
+        created_at, updated_at, created_by, updated_by
+    </sql>
+
+    <!-- ═══ Playlist 조회 ═══ -->
 
     <select id="findById" resultMap="playlistResultMap">
-        SELECT playlist_id, user_id, playlist_name, description, is_public,
-               created_at, updated_at, created_by, updated_by
+        SELECT <include refid="playlistColumns"/>
         FROM playlist
         WHERE playlist_id = #{playlistId}
     </select>
 
     <select id="findByUserId" resultMap="playlistResultMap">
-        SELECT playlist_id, user_id, playlist_name, description, is_public,
-               created_at, updated_at, created_by, updated_by
+        SELECT <include refid="playlistColumns"/>
         FROM playlist
         WHERE user_id = #{userId}
         ORDER BY created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countByUserId" resultType="long">
+        SELECT COUNT(*)
+        FROM playlist
+        WHERE user_id = #{userId}
     </select>
 
     <select id="findPublicPlaylists" resultMap="playlistResultMap">
-        SELECT playlist_id, user_id, playlist_name, description, is_public,
-               created_at, updated_at, created_by, updated_by
+        SELECT <include refid="playlistColumns"/>
         FROM playlist
         WHERE is_public = true
         ORDER BY created_at DESC
-        LIMIT #{limit} OFFSET #{offset}
+        LIMIT #{offset}, #{limit}
     </select>
 
     <select id="countPublicPlaylists" resultType="long">
@@ -65,22 +95,28 @@
         WHERE is_public = true
     </select>
 
-    <!-- ═══ Playlist INSERT / UPDATE / DELETE ═══ -->
+    <!-- ═══ Playlist 쓰기 ═══ -->
 
     <insert id="insertPlaylist" useGeneratedKeys="true" keyProperty="playlistId">
-        INSERT INTO playlist (user_id, playlist_name, description, is_public,
-                              created_at, updated_at, created_by, updated_by)
-        VALUES (#{userId}, #{playlistName}, #{description}, #{isPublic},
-                NOW(), NOW(), #{createdBy}, #{updatedBy})
+        INSERT INTO playlist (
+            user_id, playlist_name, description, is_public,
+            cover_image_url, like_count,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{userId}, #{playlistName}, #{description}, #{isPublic},
+            #{coverImageUrl}, #{likeCount},
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
     </insert>
 
     <update id="updatePlaylist">
         UPDATE playlist
-        SET playlist_name = #{playlistName},
-            description   = #{description},
-            is_public     = #{isPublic},
-            updated_at    = NOW(),
-            updated_by    = #{updatedBy}
+        SET playlist_name   = #{playlistName},
+            description     = #{description},
+            is_public       = #{isPublic},
+            cover_image_url = #{coverImageUrl},
+            updated_at      = NOW(),
+            updated_by      = #{updatedBy}
         WHERE playlist_id = #{playlistId}
     </update>
 
@@ -89,7 +125,23 @@
         WHERE playlist_id = #{playlistId}
     </delete>
 
-    <!-- ═══ PlaylistItem SELECT ═══ -->
+    <!-- 좋아요 수 원자적 증가 — race condition 방지를 위해 DB 레벨 UPDATE -->
+    <update id="incrementLikeCount">
+        UPDATE playlist
+        SET like_count = like_count + 1,
+            updated_at = NOW()
+        WHERE playlist_id = #{playlistId}
+    </update>
+
+    <!-- 좋아요 수 원자적 감소 — 0 미만 방지 CASE 구문 -->
+    <update id="decrementLikeCount">
+        UPDATE playlist
+        SET like_count = CASE WHEN like_count > 0 THEN like_count - 1 ELSE 0 END,
+            updated_at = NOW()
+        WHERE playlist_id = #{playlistId}
+    </update>
+
+    <!-- ═══ PlaylistItem ═══ -->
 
     <select id="findItemsByPlaylistId" resultMap="playlistItemResultMap">
         SELECT playlist_item_id, playlist_id, movie_id, sort_order, added_at,
@@ -106,7 +158,14 @@
           AND movie_id = #{movieId}
     </select>
 
-    <!-- ═══ PlaylistItem INSERT / DELETE ═══ -->
+    <select id="findItemByPlaylistIdAndMovieId" resultMap="playlistItemResultMap">
+        SELECT playlist_item_id, playlist_id, movie_id, sort_order, added_at,
+               created_at, updated_at
+        FROM playlist_item
+        WHERE playlist_id = #{playlistId}
+          AND movie_id = #{movieId}
+        LIMIT 1
+    </select>
 
     <insert id="insertItem" useGeneratedKeys="true" keyProperty="playlistItemId">
         INSERT INTO playlist_item (playlist_id, movie_id, sort_order, added_at,
@@ -118,6 +177,45 @@
     <delete id="deleteItem">
         DELETE FROM playlist_item
         WHERE playlist_item_id = #{playlistItemId}
+    </delete>
+
+    <!-- 삭제된 아이템보다 뒤에 있는 항목들의 sort_order를 1씩 당김 (hole 제거) -->
+    <update id="shiftSortOrderDown">
+        UPDATE playlist_item
+        SET sort_order = sort_order - 1,
+            updated_at = NOW()
+        WHERE playlist_id = #{playlistId}
+          AND sort_order > #{deletedSortOrder}
+    </update>
+
+    <!-- ═══ PlaylistLike ═══ -->
+
+    <select id="existsLikeByPlaylistIdAndUserId" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM playlist_likes
+        WHERE playlist_id = #{playlistId}
+          AND user_id = #{userId}
+    </select>
+
+    <select id="findLikeByPlaylistIdAndUserId" resultMap="playlistLikeResultMap">
+        SELECT playlist_like_id, playlist_id, user_id,
+               created_at, updated_at, created_by, updated_by
+        FROM playlist_likes
+        WHERE playlist_id = #{playlistId}
+          AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <insert id="insertLike" useGeneratedKeys="true" keyProperty="playlistLikeId">
+        INSERT INTO playlist_likes (playlist_id, user_id,
+                                     created_at, updated_at, created_by, updated_by)
+        VALUES (#{playlistId}, #{userId},
+                NOW(), NOW(), #{createdBy}, #{updatedBy})
+    </insert>
+
+    <delete id="deleteLike">
+        DELETE FROM playlist_likes
+        WHERE playlist_like_id = #{playlistLikeId}
     </delete>
 
 </mapper>

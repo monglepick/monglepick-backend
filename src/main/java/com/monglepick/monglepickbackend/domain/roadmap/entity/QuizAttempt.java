@@ -1,7 +1,6 @@
 package com.monglepick.monglepickbackend.domain.roadmap.entity;
 
 import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
-import com.monglepick.monglepickbackend.domain.user.entity.User;
 /* BaseAuditEntity: created_at, updated_at, created_by, updated_by 자동 관리 */
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
@@ -36,7 +35,7 @@ import java.time.LocalDateTime;
  *
  * <h3>주요 필드</h3>
  * <ul>
- *   <li>{@code user} — 퀴즈 도전자 (FK → users.user_id)</li>
+ *   <li>{@code userId} — 퀴즈 도전자 ID (String FK → users.user_id, JPA/MyBatis 하이브리드 §15.4)</li>
  *   <li>{@code courseId} — 코스 식별자 (roadmap_courses.course_id와 매핑)</li>
  *   <li>{@code movie} — 퀴즈 대상 영화 (FK → movies.movie_id)</li>
  *   <li>{@code question} — 퀴즈 문제 (TEXT)</li>
@@ -66,12 +65,14 @@ public class QuizAttempt extends BaseAuditEntity {
     private Long quizAttemptId;
 
     /**
-     * 퀴즈 도전 사용자.
-     * quiz_attempts.user_id → users.user_id FK.
+     * 퀴즈 도전 사용자 ID — users.user_id를 String으로 직접 참조한다.
+     *
+     * <p>users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA @ManyToOne 매핑을 두지 않고
+     * String FK로만 보관한다 (설계서 §15.4). Movie 참조는 backend가 movies 테이블의
+     * DDL 마스터이므로 그대로 @ManyToOne 유지한다.</p>
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false, length = 50)
+    private String userId;
 
     /**
      * 코스 식별자.

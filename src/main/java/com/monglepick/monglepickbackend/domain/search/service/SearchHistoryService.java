@@ -2,10 +2,6 @@ package com.monglepick.monglepickbackend.domain.search.service;
 
 import com.monglepick.monglepickbackend.domain.search.entity.SearchHistory;
 import com.monglepick.monglepickbackend.domain.search.repository.SearchHistoryRepository;
-import com.monglepick.monglepickbackend.domain.user.entity.User;
-import com.monglepick.monglepickbackend.domain.user.repository.UserRepository;
-import com.monglepick.monglepickbackend.global.exception.BusinessException;
-import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,10 +19,13 @@ import java.util.List;
  *
  * <h3>UPSERT 처리 흐름 (saveSearchKeyword)</h3>
  * <ol>
- *   <li>User 조회 — userId로 users 테이블 조회</li>
  *   <li>기존 이력 확인 — (userId, keyword) 조합으로 조회</li>
  *   <li>존재하면 updateSearchedAt(), 없으면 새 SearchHistory 생성 후 save()</li>
  * </ol>
+ *
+ * <p>users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA에서 fetch 하지 않고
+ * String userId만 보관한다 (설계서 §15.4). 사용자 존재 검증은 JWT 인증 단계에서
+ * 이미 수행되었으므로 saveSearchKeyword 내부 검증은 생략한다.</p>
  */
 @Service
 @Slf4j
@@ -36,9 +35,6 @@ public class SearchHistoryService {
 
     /** 검색 이력 JPA 리포지토리 */
     private final SearchHistoryRepository searchHistoryRepository;
-
-    /** 사용자 JPA 리포지토리 (사용자 존재 여부 확인 및 FK 연결용) */
-    private final UserRepository userRepository;
 
     /**
      * 검색 키워드를 저장한다 (UPSERT).
@@ -51,7 +47,6 @@ public class SearchHistoryService {
      *
      * @param userId  검색을 수행한 사용자 ID
      * @param keyword 검색 키워드
-     * @throws BusinessException USER_NOT_FOUND — userId에 해당하는 사용자가 없을 때
      */
     @Transactional
     public void saveSearchKeyword(String userId, String keyword) {
@@ -61,24 +56,20 @@ public class SearchHistoryService {
             return;
         }
 
-        // 1. 사용자 조회 — UserRepository PK가 String(userId)이므로 findById 사용
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-
-        // 2. 기존 이력 확인 후 UPSERT 분기
-        searchHistoryRepository.findByUser_UserIdAndKeyword(userId, keyword)
+        // 기존 이력 확인 후 UPSERT 분기 (사용자 존재 검증은 JWT 인증 단계에서 완료)
+        searchHistoryRepository.findByUserIdAndKeyword(userId, keyword)
                 .ifPresentOrElse(
                         existing -> {
-                            // 2-a. 이미 존재하는 키워드 — searchedAt만 갱신 (dirty checking으로 자동 UPDATE)
+                            // 이미 존재하는 키워드 — searchedAt만 갱신 (dirty checking으로 자동 UPDATE)
                             log.debug("기존 검색 이력 갱신: userId={}, keyword={}", userId, keyword);
                             existing.updateSearchedAt();
                         },
                         () -> {
-                            // 2-b. 처음 검색하는 키워드 — 새 이력 생성
+                            // 처음 검색하는 키워드 — 새 이력 생성
                             log.debug("신규 검색 이력 저장: userId={}, keyword={}", userId, keyword);
                             searchHistoryRepository.save(
                                     SearchHistory.builder()
-                                            .user(user)
+                                            .userId(userId)
                                             .keyword(keyword)
                                             .searchedAt(LocalDateTime.now())
                                             .build()
@@ -98,7 +89,7 @@ public class SearchHistoryService {
      */
     public List<String> getRecentSearches(String userId) {
         return searchHistoryRepository
-                .findTop20ByUser_UserIdOrderBySearchedAtDesc(userId)
+                .findTop20ByUserIdOrderBySearchedAtDesc(userId)
                 .stream()
                 .map(SearchHistory::getKeyword)
                 .toList();
@@ -118,7 +109,7 @@ public class SearchHistoryService {
     public void deleteSearchHistory(String userId, Long searchHistoryId) {
         // 본인 소유 여부 확인 후 삭제 (존재하지 않거나 타인 소유면 조용히 무시)
         searchHistoryRepository.findById(searchHistoryId)
-                .filter(history -> history.getUser().getUserId().equals(userId))
+                .filter(history -> history.getUserId().equals(userId))
                 .ifPresentOrElse(
                         history -> {
                             log.info("검색 이력 삭제: userId={}, searchHistoryId={}, keyword={}",

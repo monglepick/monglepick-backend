@@ -6,6 +6,7 @@ import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.ConfirmRes
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.CreateOrderRequest;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderHistoryResponse;
 import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.OrderResponse;
+import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.RefundResponse;
 import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
 import com.monglepick.monglepickbackend.domain.payment.entity.PointPackPrice;
 import com.monglepick.monglepickbackend.domain.payment.entity.SubscriptionPlan;
@@ -190,12 +191,13 @@ public class PaymentService {
                 .idempotencyKey(idempotencyKey != null && !idempotencyKey.isBlank() ? idempotencyKey : null)
                 .status(PaymentOrder.OrderStatus.PENDING);
 
-        // 3-1. ★ 포인트팩인 경우 가격 마스터 검증 (설계서 v2.3 §13.1 — 보안 필수)
-        //     클라이언트가 보낸 (amount, pointsAmount)가 서버 가격표와 정확히 일치하는지 검증.
-        //     미검증 시 {amount:1000, pointsAmount:999999} 공격으로 무제한 포인트 획득 가능.
+        // 3-1. ★ 포인트팩인 경우 가격 마스터 검증 (설계서 v3.2 §13.1 — 보안 필수)
+        //     클라이언트가 보낸 (amount=결제금액, pointsAmount)가 서버 가격표와 정확히 일치하는지 검증.
+        //     미검증 시 {price:1000, pointsAmount:999999} 공격으로 무제한 포인트 획득 가능.
+        //     v3.2: PointPackPrice 컬럼명 amount→price 변경에 따라 리포지토리 메서드명도 변경.
         if (orderType == PaymentOrder.OrderType.POINT_PACK) {
             PointPackPrice validPack = pointPackPriceRepository
-                    .findByAmountAndPointsAmountAndIsActiveTrue(request.amount(), request.pointsAmount())
+                    .findByPriceAndPointsAmountAndIsActiveTrue(request.amount(), request.pointsAmount())
                     .orElseThrow(() -> {
                         log.error("포인트팩 가격 검증 실패 (변조 의심): amount={}, pointsAmount={}",
                                 request.amount(), request.pointsAmount());
@@ -205,8 +207,9 @@ public class PaymentService {
                                         + "원, 포인트: " + request.pointsAmount() + "P"
                         );
                     });
-            log.debug("포인트팩 가격 검증 통과: packName={}, amount={}, points={}",
-                    validPack.getPackName(), validPack.getAmount(), validPack.getPointsAmount());
+            // v3.2: getAmount() → getPrice() (엔티티 필드명 변경 반영)
+            log.debug("포인트팩 가격 검증 통과: packName={}, price={}, points={}",
+                    validPack.getPackName(), validPack.getPrice(), validPack.getPointsAmount());
         }
 
         // 4. 구독인 경우 plan 조회 + 금액 검증 + 연결
@@ -714,6 +717,147 @@ public class PaymentService {
             }
         }
         return false; // 재시도 소진
+    }
+
+    // ──────────────────────────────────────────────
+    // 환불 처리 (사용자 요청 기반)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 결제 주문을 환불 처리한다.
+     *
+     * <p>사용자가 직접 환불을 요청하거나, 관리자가 수동으로 환불 처리할 때 호출한다.
+     * Toss Payments 취소 API 호출 → 포인트 회수 (POINT_PACK인 경우) → DB 상태 REFUNDED 변경 순으로 수행한다.</p>
+     *
+     * <h3>환불 정책</h3>
+     * <ul>
+     *   <li>COMPLETED 상태에서만 환불 가능하다. PENDING/FAILED/REFUNDED 상태는 처리 불가.</li>
+     *   <li>REFUNDED 상태이면 멱등 처리한다 (이미 완료된 환불 — 재요청 무시).</li>
+     *   <li>POINT_PACK: 구매 시 지급된 포인트를 전액 회수한다. 잔액 부족(이미 소진) 시 환불 불가.</li>
+     *   <li>SUBSCRIPTION: 서비스 이용 혜택 포인트이므로 회수하지 않는다.</li>
+     * </ul>
+     *
+     * <h3>Toss Payments 취소 API</h3>
+     * <p>TossPaymentsClient가 존재하면 실제 API를 호출한다.
+     * 호출 실패 시 예외를 전파하여 DB 상태 변경을 막는다 (PG 취소 없이 DB만 변경하면 불일치 발생).</p>
+     *
+     * <h3>포인트 회수 실패 처리</h3>
+     * <p>잔액 부족으로 포인트 회수가 실패하면 BusinessException을 던져 환불을 차단한다.
+     * 운영상 포인트를 이미 전부 소진한 경우 고객센터를 통한 수동 조치가 필요하다.</p>
+     *
+     * @param orderId 환불할 주문 UUID
+     * @param userId  요청자 사용자 ID (소유자 검증에 사용 — BOLA 방지)
+     * @param reason  환불 사유 (nullable — null이면 "사용자 환불 요청"으로 기록)
+     * @return 환불 결과 (success, orderId, refundAmount, message)
+     * @throws BusinessException 주문 미발견(ORDER_NOT_FOUND), 소유자 불일치(ORDER_NOT_FOUND),
+     *                           환불 불가 상태(PAYMENT_FAILED), 포인트 회수 실패(INSUFFICIENT_POINT)
+     */
+    @Transactional
+    public RefundResponse refundOrder(String orderId, String userId, String reason) {
+        log.info("환불 요청 시작: orderId={}, userId={}, reason={}", orderId, userId, reason);
+
+        // ── 1. 주문 조회 (FOR UPDATE — 동시 환불 요청 경쟁 조건 차단) ──
+        // 동일 주문에 대해 두 요청이 동시에 COMPLETED를 읽고 각각 환불을 시도하면
+        // 포인트가 이중 회수될 수 있다. SELECT FOR UPDATE로 첫 번째 트랜잭션이 완료될 때까지
+        // 두 번째 요청을 DB 레벨에서 대기시킨다.
+        PaymentOrder order = orderRepository.findByPaymentOrderIdForUpdate(orderId)
+                .orElseThrow(() -> {
+                    log.error("환불 실패 — 주문 미발견: orderId={}", orderId);
+                    return new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+                });
+
+        // ── 2. 소유자 검증 (BOLA 방지 — 타인의 주문을 환불할 수 없음) ──
+        if (!order.getUserId().equals(userId)) {
+            log.error("환불 실패 — 주문 소유자 불일치: orderId={}, 주문소유자={}, 요청자={}",
+                    orderId, order.getUserId(), userId);
+            // 존재 여부를 노출하지 않기 위해 ORDER_NOT_FOUND로 응답
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+        }
+
+        // ── 3. 멱등성 처리 — 이미 REFUNDED 상태이면 현재 정보를 그대로 반환 ──
+        // 네트워크 재시도나 중복 클릭으로 동일 요청이 2회 도달한 경우를 안전하게 처리한다.
+        if (order.getStatus() == PaymentOrder.OrderStatus.REFUNDED) {
+            log.info("환불 멱등 처리 — 이미 완료된 환불: orderId={}", orderId);
+            return new RefundResponse(
+                    true,
+                    orderId,
+                    order.getRefundAmount() != null ? order.getRefundAmount() : order.getAmount(),
+                    "이미 환불 처리된 주문입니다."
+            );
+        }
+
+        // ── 4. 환불 가능 상태 검증 (COMPLETED만 환불 가능) ──
+        if (order.getStatus() != PaymentOrder.OrderStatus.COMPLETED) {
+            log.warn("환불 실패 — 환불 불가 상태: orderId={}, status={}", orderId, order.getStatus());
+            throw new BusinessException(
+                    ErrorCode.PAYMENT_FAILED,
+                    "환불 불가 상태입니다. 현재 상태: " + order.getStatus().name()
+                            + " (COMPLETED 상태에서만 환불 가능)"
+            );
+        }
+
+        // ── 5. POINT_PACK인 경우 포인트 회수 먼저 수행 ──
+        // 포인트 회수 실패 시 예외를 전파하여 환불 전체를 중단한다.
+        // Toss 취소보다 포인트 회수를 먼저 시도하는 이유:
+        //   포인트 회수 실패 → Toss 취소 안 함 → PG 취소 없이 DB 변경 없음 → 일관성 유지
+        //   Toss 취소 후 포인트 회수 실패 → DB만 미변경 → PG는 취소됐는데 DB는 COMPLETED → 불일치 발생
+        if (order.getOrderType() == PaymentOrder.OrderType.POINT_PACK
+                && order.getPointsAmount() != null
+                && order.getPointsAmount() > 0) {
+
+            log.info("환불 포인트 회수 시작: orderId={}, userId={}, amount={}P",
+                    orderId, order.getUserId(), order.getPointsAmount());
+            try {
+                // deductPoint()는 @Transactional(REQUIRED)이므로 현재 트랜잭션에 합류한다.
+                // 잔액 부족 시 InsufficientPointException → 현재 트랜잭션 전체 롤백
+                pointService.deductPoint(
+                        order.getUserId(),
+                        order.getPointsAmount(),
+                        orderId + "_refund",         // sessionId: 이력 중복 방지용 고유 ID
+                        reason != null ? reason : "사용자 환불 요청"
+                );
+                log.info("환불 포인트 회수 완료: orderId={}, amount={}P", orderId, order.getPointsAmount());
+            } catch (Exception e) {
+                // InsufficientPointException(잔액 부족) 또는 기타 예외 모두 전파
+                // — 포인트 회수 없이 환불 진행하면 포인트를 공짜로 얻는 케이스가 발생한다.
+                log.error("환불 포인트 회수 실패 (환불 중단): orderId={}, userId={}, error={}",
+                        orderId, order.getUserId(), e.getMessage());
+                throw new BusinessException(
+                        ErrorCode.INSUFFICIENT_POINT,
+                        "포인트 잔액이 부족하여 환불을 처리할 수 없습니다. "
+                                + "잔액이 부족한 경우 고객센터로 문의해 주세요."
+                );
+            }
+        }
+
+        // ── 6. Toss Payments 취소 API 호출 (Phase 9 — 2026-04-08 SDK 실연동) ──
+        //
+        // TossPaymentsClient.cancelPayment() 는 실패 시 BusinessException(PAYMENT_FAILED)을
+        // 자연스럽게 throw 한다. 트랜잭션이 활성 상태에서 예외가 전파되면 Spring 이 자동으로
+        // 롤백하여 5단계의 포인트 회수도 함께 되돌려진다 (일관성 보장).
+        //
+        // 멱등키: cancelPayment 내부에서 paymentKey + "_cancel_all" 형식으로 자동 생성되므로
+        // 동일 환불 요청이 중복 도달해도 Toss 서버에서 1회만 처리된다.
+        tossClient.cancelPayment(
+                order.getPgTransactionId() != null ? order.getPgTransactionId() : orderId,
+                reason != null ? reason : "사용자 환불 요청"
+        );
+        log.info("Toss 결제 취소 API 호출 완료: orderId={}", orderId);
+
+        // ── 7. 주문 상태 REFUNDED로 변경 ──
+        // 전체 환불이므로 refundAmount = order.getAmount() (원래 결제 금액 전액)
+        String refundReason = reason != null ? reason : "사용자 환불 요청";
+        order.refund(refundReason, order.getAmount());
+
+        log.info("환불 처리 완료: orderId={}, userId={}, refundAmount={}원, orderType={}",
+                orderId, userId, order.getAmount(), order.getOrderType());
+
+        return new RefundResponse(
+                true,
+                orderId,
+                order.getAmount(),
+                "환불이 완료되었습니다. 카드사 정책에 따라 영업일 기준 3~5일 내 취소됩니다."
+        );
     }
 
     // ──────────────────────────────────────────────

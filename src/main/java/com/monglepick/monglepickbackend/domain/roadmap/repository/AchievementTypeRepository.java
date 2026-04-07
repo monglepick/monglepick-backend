@@ -35,4 +35,25 @@ public interface AchievementTypeRepository extends JpaRepository<AchievementType
      * @return 활성 업적 유형 리스트 (코드 오름차순)
      */
     List<AchievementType> findAllByIsActiveTrueOrderByAchievementCodeAsc();
+
+    /**
+     * 활성화된 업적 유형 전체 목록을 조회한다 (카테고리 필터 없음).
+     *
+     * <p>프론트엔드에서 카테고리 파라미터 없이 전체 업적 목록을 요청할 때 사용한다.
+     * is_active = true인 항목만 반환한다.</p>
+     *
+     * @return 활성 업적 유형 리스트
+     */
+    List<AchievementType> findByIsActiveTrue();
+
+    /**
+     * 특정 카테고리의 활성화된 업적 유형 목록을 조회한다.
+     *
+     * <p>프론트엔드에서 VIEWING/SOCIAL/COLLECTION/CHALLENGE 카테고리별 필터링 시 사용한다.
+     * is_active = true AND category = ? 조건으로 조회한다.</p>
+     *
+     * @param category 필터링할 카테고리 값 (VIEWING/SOCIAL/COLLECTION/CHALLENGE)
+     * @return 해당 카테고리의 활성 업적 유형 리스트
+     */
+    List<AchievementType> findByCategoryAndIsActiveTrue(String category);
 }

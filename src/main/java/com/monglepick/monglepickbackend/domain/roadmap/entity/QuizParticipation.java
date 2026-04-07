@@ -1,6 +1,5 @@
 package com.monglepick.monglepickbackend.domain.roadmap.entity;
 
-import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -37,7 +36,7 @@ import java.time.LocalDateTime;
  * <h3>주요 필드</h3>
  * <ul>
  *   <li>{@code quiz} — 참여한 퀴즈 (FK → quizzes.quiz_id, LAZY)</li>
- *   <li>{@code user} — 참여 사용자 (FK → users.user_id, LAZY)</li>
+ *   <li>{@code userId} — 참여 사용자 ID (String FK → users.user_id, JPA/MyBatis 하이브리드 §15.4)</li>
  *   <li>{@code selectedOption} — 사용자가 선택한 답 (VARCHAR(500), nullable)</li>
  *   <li>{@code isCorrect} — 정답 여부 (채점 결과, nullable)</li>
  *   <li>{@code submittedAt} — 답변 제출 시각 (DATETIME)</li>
@@ -83,12 +82,15 @@ public class QuizParticipation extends BaseAuditEntity {
     private Quiz quiz;
 
     /**
-     * 참여 사용자 (FK → users.user_id, LAZY, 필수).
-     * quiz_id와 함께 UNIQUE 제약을 구성하여 중복 참여를 방지한다.
+     * 참여 사용자 ID — users.user_id를 String으로 직접 참조한다.
+     *
+     * <p>quiz_id와 함께 UNIQUE 제약을 구성하여 중복 참여를 방지한다.
+     * users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA @ManyToOne 매핑을 두지 않고
+     * String FK로만 보관한다 (설계서 §15.4). Quiz 참조는 같은 roadmap 도메인이므로
+     * @ManyToOne 유지한다.</p>
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false, length = 50)
+    private String userId;
 
     /**
      * 사용자가 선택한 답 (VARCHAR(500), nullable).

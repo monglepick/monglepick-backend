@@ -1,18 +1,14 @@
 package com.monglepick.monglepickbackend.domain.support.entity;
 
-import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -36,7 +32,8 @@ import java.time.LocalDateTime;
  *
  * <h3>연관 관계</h3>
  * <ul>
- *   <li>user: ManyToOne LAZY — 티켓 목록/상세 조회 시 필요할 때만 JOIN</li>
+ *   <li>userId: String FK — users 테이블 쓰기 소유는 김민규(MyBatis)이므로 JPA @ManyToOne 매핑
+ *       대신 String 직접 보관 (설계서 §15.4)</li>
  * </ul>
  */
 @Entity
@@ -62,13 +59,14 @@ public class SupportTicket extends BaseAuditEntity {
     private Long ticketId;
 
     /**
-     * 티켓 작성자.
-     * LAZY 로딩 — 티켓 목록 조회 시 불필요한 User JOIN을 방지한다.
-     * nullable = false: 반드시 로그인한 사용자만 티켓을 생성할 수 있다.
+     * 티켓 작성자 ID — users.user_id를 String으로 직접 참조한다.
+     *
+     * <p>users 테이블의 쓰기 소유는 김민규(MyBatis)이므로 JPA @ManyToOne 매핑을 두지 않고
+     * String FK로만 보관한다 (설계서 §15.4). nullable=false: 반드시 로그인한 사용자만
+     * 티켓을 생성할 수 있다.</p>
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false, length = 50)
+    private String userId;
 
     /**
      * 문의 카테고리.
@@ -125,14 +123,14 @@ public class SupportTicket extends BaseAuditEntity {
      * <p>status는 항상 {@link TicketStatus#OPEN}으로 초기화된다.
      * 상태 변경은 비즈니스 메서드를 통해서만 수행한다.</p>
      *
-     * @param user     티켓 작성자
+     * @param userId   티켓 작성자 ID (String FK)
      * @param category 문의 카테고리
      * @param title    문의 제목
      * @param content  문의 내용
      */
     @Builder
-    public SupportTicket(User user, SupportCategory category, String title, String content) {
-        this.user = user;
+    public SupportTicket(String userId, SupportCategory category, String title, String content) {
+        this.userId = userId;
         this.category = category;
         this.title = title;
         this.content = content;
