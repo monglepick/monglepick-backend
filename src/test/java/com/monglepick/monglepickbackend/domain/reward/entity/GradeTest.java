@@ -71,7 +71,8 @@ class GradeTest {
                 .build();
 
         // 배율과 상한만 변경, 나머지 null → 기존 값 유지
-        grade.updateQuota(null, null, null,
+        // updateQuota 시그니처: (dailyAiLimit, monthlyAiLimit, freeDailyCount, maxInputLength, rewardMultiplier, dailyEarnCap)
+        grade.updateQuota(null, null, null, null,
                 new BigDecimal("1.50"), 1500);
 
         assertEquals(10, grade.getDailyAiLimit(), "null이므로 기존 값 유지");
@@ -94,11 +95,13 @@ class GradeTest {
                 .dailyEarnCap(500)
                 .build();
 
-        grade.updateQuota(5, 80, 300,
+        // updateQuota 시그니처: (dailyAiLimit, monthlyAiLimit, freeDailyCount, maxInputLength, rewardMultiplier, dailyEarnCap)
+        grade.updateQuota(5, 80, 1, 300,
                 new BigDecimal("1.10"), 800);
 
         assertEquals(5, grade.getDailyAiLimit());
         assertEquals(80, grade.getMonthlyAiLimit());
+        assertEquals(1, grade.getFreeDailyCount());
         assertEquals(300, grade.getMaxInputLength());
         assertEquals(new BigDecimal("1.10"), grade.getRewardMultiplier());
         assertEquals(800, grade.getDailyEarnCap());
