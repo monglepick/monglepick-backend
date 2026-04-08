@@ -8,7 +8,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -23,7 +22,7 @@ import java.time.LocalDateTime;
  * <p>사용자의 검색 키워드 이력을 저장한다.
  * 최근 검색어 표시 및 개인화 검색 추천에 활용된다.
  * 한 사용자가 같은 키워드를 다시 검색하면 기존 레코드가 업데이트된다
- * (user_id, keyword UNIQUE 제약).</p>
+ * (현재 서비스 정책상 UPSERT 방식).</p>
  *
  * <h3>변경 이력</h3>
  * <ul>
@@ -40,9 +39,7 @@ import java.time.LocalDateTime;
  * </ul>
  */
 @Entity
-@Table(name = "search_history", uniqueConstraints = {
-        @UniqueConstraint(name = "uk_search_history_user_keyword", columnNames = {"user_id", "keyword"})
-})
+@Table(name = "search_history")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
@@ -120,7 +117,7 @@ public class SearchHistory extends BaseAuditEntity {
      *
      * <p>동일 사용자가 같은 키워드를 다시 검색하면 새 레코드를 생성하는 대신
      * 이 메서드로 searchedAt을 현재 시각으로 업데이트한다.
-     * (user_id, keyword) UNIQUE 제약을 애플리케이션 레벨에서 처리한다.</p>
+     * 중복 검색 처리 방식은 서비스 레이어 정책에 따른다.</p>
      */
     public void updateSearchedAt() {
         this.searchedAt = LocalDateTime.now();
