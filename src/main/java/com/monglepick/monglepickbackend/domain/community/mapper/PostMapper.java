@@ -139,8 +139,17 @@ public interface PostMapper {
 
     // ═══ PostComment ═══
 
-    /** PK로 댓글 조회 (없으면 null) */
+    /** PK로 댓글 조회 (없으면 null, 닉네임 미포함 — 권한 체크 등 내부 용도) */
     PostComment findCommentById(@Param("postCommentId") Long postCommentId);
+
+    /**
+     * PK로 댓글 + 작성자 닉네임 조회 (JOIN users) — 작성 직후 응답용.
+     *
+     * <p>2026-04-08 추가. {@code createComment} 직후 응답에 nickname 과 createdAt 을
+     * 채우기 위해 사용한다. {@link #findCommentById} 와 달리 LEFT JOIN users 로
+     * {@code u.nickname} 컬럼을 함께 가져와 {@link PostComment#getNickname()} 에 주입한다.</p>
+     */
+    PostComment findCommentByIdWithNickname(@Param("postCommentId") Long postCommentId);
 
     /**
      * 게시글의 유효 댓글 목록 조회 (소프트 삭제 제외, 페이징).
@@ -148,6 +157,19 @@ public interface PostMapper {
     List<PostComment> findCommentsByPostIdAndIsDeletedFalse(@Param("postId") Long postId,
                                                              @Param("offset") int offset,
                                                              @Param("limit") int limit);
+
+    /**
+     * 게시글의 유효 댓글 목록 조회 (닉네임 포함, 소프트 삭제 제외, 페이징).
+     *
+     * <p>2026-04-08 추가. 댓글 목록 응답에 작성자 닉네임을 포함하기 위한 JOIN 쿼리.
+     * Post 도메인의 {@code findByStatusWithNickname} 과 같은 패턴으로,
+     * MyBatis {@code commentWithNicknameResultMap} 이 nickname 컬럼을 PostComment.nickname
+     * 트랜션트 필드에 매핑한다.</p>
+     */
+    List<PostComment> findCommentsByPostIdAndIsDeletedFalseWithNickname(
+            @Param("postId") Long postId,
+            @Param("offset") int offset,
+            @Param("limit") int limit);
 
     /** 게시글의 유효 댓글 총 건수 */
     long countCommentsByPostIdAndIsDeletedFalse(@Param("postId") Long postId);

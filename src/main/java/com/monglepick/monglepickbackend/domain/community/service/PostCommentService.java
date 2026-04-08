@@ -53,6 +53,20 @@ public class PostCommentService {
      * 게시글에 댓글을 작성한다.
      *
      * <p>저장 완료 후 {@code COMMENT_CREATE} 리워드를 지급한다.</p>
+     *
+     * <h3>2026-04-08 변경 — 응답 데이터 정합성 보강</h3>
+     * <p>기존엔 {@code insertComment} 직후 build 시점의 {@link PostComment} 객체를 그대로
+     * 응답으로 변환했으나, 두 가지 문제가 있었다:</p>
+     * <ol>
+     *   <li>{@code createdAt} 이 null — INSERT SQL 이 {@code NOW()} 로 컬럼만 채울 뿐
+     *       엔티티 객체에는 set 되지 않아 응답의 createdAt 이 null 로 직렬화됨
+     *       → 프론트에서 시간이 표시되지 않는 이슈.</li>
+     *   <li>{@code nickname} 이 null — 빌더 단계에서 채울 수 없음 → 프론트가 userId(예: "user_001") 를
+     *       그대로 표시하는 이슈.</li>
+     * </ol>
+     * <p>해결: INSERT 직후 {@link com.monglepick.monglepickbackend.domain.community.mapper.PostMapper#findCommentByIdWithNickname}
+     * 로 fully-loaded 댓글(JOIN users 포함)을 재조회하여 응답을 만든다. DB 라운드트립 1회 추가
+     * 비용을 들이는 대신 응답 데이터의 완전성을 보장한다.</p>
      */
     @Transactional
     public PostCommentResponse createComment(String userId, Long postId,
@@ -79,7 +93,12 @@ public class PostCommentService {
                 request.content().length()
         );
 
-        return PostCommentResponse.from(comment);
+        /*
+         * 응답 정합성 보강 — INSERT 후 nickname JOIN 으로 재조회.
+         * 재조회 실패(이론상 발생 어려움) 시에도 build 객체로 폴백하여 리워드 지급은 유지.
+         */
+        PostComment fullyLoaded = postMapper.findCommentByIdWithNickname(comment.getPostCommentId());
+        return PostCommentResponse.from(fullyLoaded != null ? fullyLoaded : comment);
     }
 
     // ─────────────────────────────────────────────
@@ -157,6 +176,10 @@ public class PostCommentService {
 
     /**
      * 게시글의 유효 댓글 목록을 페이징으로 조회한다.
+     *
+     * <p>2026-04-08 변경 — 닉네임 JOIN 쿼리({@code findCommentsByPostIdAndIsDeletedFalseWithNickname})
+     * 를 사용하여 응답에 작성자 닉네임을 포함하도록 변경했다. 기존 nickname 미포함 메서드는
+     * 권한 체크 등 내부 용도로만 남는다.</p>
      */
     public Page<PostCommentResponse> getComments(Long postId, Pageable pageable) {
         log.debug("[Comment] 댓글 목록 조회: postId={}, page={}", postId, pageable.getPageNumber());
@@ -164,7 +187,9 @@ public class PostCommentService {
         int offset = (int) pageable.getOffset();
         int limit  = pageable.getPageSize();
 
-        List<PostComment> comments = postMapper.findCommentsByPostIdAndIsDeletedFalse(postId, offset, limit);
+        /* nickname JOIN 포함 SQL 사용 — 응답에 작성자 닉네임을 채우기 위함 */
+        List<PostComment> comments = postMapper.findCommentsByPostIdAndIsDeletedFalseWithNickname(
+                postId, offset, limit);
         long total = postMapper.countCommentsByPostIdAndIsDeletedFalse(postId);
 
         List<PostCommentResponse> content = comments.stream()

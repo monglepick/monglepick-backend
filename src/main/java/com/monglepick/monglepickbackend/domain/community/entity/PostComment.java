@@ -8,11 +8,13 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 /**
  * 게시글 댓글 엔티티 — post_comment 테이블 매핑.
@@ -107,6 +109,22 @@ public class PostComment extends BaseAuditEntity {
 
     /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
+
+    /**
+     * 작성자 닉네임 (DB 컬럼 아님, MyBatis JOIN 결과 보관용 transient 필드).
+     *
+     * <p>Post 도메인의 nickname 패턴(JPA/MyBatis 하이브리드 §15)과 동일하게 설계되었다.
+     * MyBatis {@code findCommentsByPostIdAndIsDeletedFalseWithNickname} SQL 이
+     * {@code LEFT JOIN users u ON pc.user_id = u.user_id} 로 닉네임을 가져와 이 필드에 채운다.
+     * JPA 엔티티 자체에는 컬럼이 없으므로 {@link Transient} 로 표시한다.</p>
+     *
+     * <p>2026-04-08 추가 — 댓글 응답에 작성자 닉네임을 포함하기 위한 필드.
+     * 기존엔 PostCommentResponse 가 userId(예: "user_001") 를 그대로 노출하여
+     * 사용자에게 식별자가 어색하게 보이는 문제(이슈 1)를 해결.</p>
+     */
+    @Transient
+    @Setter
+    private String nickname;
 
     // ─────────────────────────────────────────────
     // 도메인 메서드

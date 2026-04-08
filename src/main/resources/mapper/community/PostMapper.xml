@@ -45,7 +45,7 @@
         <result property="nickname" column="nickname"/>
     </resultMap>
 
-    <!-- 댓글 매핑 -->
+    <!-- 댓글 매핑 (기본, 닉네임 없음 — 권한 체크 등 내부 용도) -->
     <resultMap id="commentResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.PostComment">
         <id property="postCommentId" column="post_comment_id"/>
         <result property="postId" column="post_id"/>
@@ -57,6 +57,16 @@
         <result property="likeCount" column="like_count"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <!--
+        댓글 + JOIN users.nickname 매핑 (목록/상세 응답용).
+        2026-04-08 추가 — Post 의 postWithNicknameResultMap 과 동일 패턴.
+        nickname 컬럼은 LEFT JOIN users 의 결과로 들어오며, JOIN 미스 시 null.
+    -->
+    <resultMap id="commentWithNicknameResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.PostComment"
+               extends="commentResultMap">
+        <result property="nickname" column="nickname"/>
     </resultMap>
 
     <!-- 게시글 좋아요 매핑 -->
@@ -297,12 +307,47 @@
         WHERE post_comment_id = #{postCommentId}
     </select>
 
+    <!--
+        댓글 단건 + JOIN users.nickname (작성 직후 응답용).
+        2026-04-08 추가 — createComment 후 nickname 과 createdAt 을 한 번에 채우기 위함.
+        post_comment 테이블에는 alias 'pc' 를 부여해 created_at/updated_at 컬럼이
+        users 테이블과 충돌하지 않도록 한다.
+    -->
+    <select id="findCommentByIdWithNickname" resultMap="commentWithNicknameResultMap">
+        SELECT pc.post_comment_id, pc.post_id, pc.category_id, pc.user_id,
+               pc.parent_comment_id, pc.content, pc.is_deleted, pc.like_count,
+               pc.created_at, pc.updated_at,
+               u.nickname AS nickname
+        FROM post_comment pc
+        LEFT JOIN users u ON pc.user_id = u.user_id
+        WHERE pc.post_comment_id = #{postCommentId}
+    </select>
+
     <select id="findCommentsByPostIdAndIsDeletedFalse" resultMap="commentResultMap">
         SELECT <include refid="commentColumns"/>
         FROM post_comment
         WHERE post_id = #{postId}
           AND is_deleted = false
         ORDER BY created_at ASC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!--
+        댓글 목록 + JOIN users.nickname (응답용 메인 쿼리).
+        2026-04-08 추가 — 사용자에게 노출되는 모든 댓글 조회 흐름은 이 쿼리를 사용한다.
+        createdAt/updatedAt 컬럼이 users 와 충돌하지 않도록 alias 'pc' 명시.
+    -->
+    <select id="findCommentsByPostIdAndIsDeletedFalseWithNickname"
+            resultMap="commentWithNicknameResultMap">
+        SELECT pc.post_comment_id, pc.post_id, pc.category_id, pc.user_id,
+               pc.parent_comment_id, pc.content, pc.is_deleted, pc.like_count,
+               pc.created_at, pc.updated_at,
+               u.nickname AS nickname
+        FROM post_comment pc
+        LEFT JOIN users u ON pc.user_id = u.user_id
+        WHERE pc.post_id = #{postId}
+          AND pc.is_deleted = false
+        ORDER BY pc.created_at ASC
         LIMIT #{offset}, #{limit}
     </select>
 
