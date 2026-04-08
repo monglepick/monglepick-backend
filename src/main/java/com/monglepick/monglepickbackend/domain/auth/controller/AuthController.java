@@ -2,6 +2,8 @@ package com.monglepick.monglepickbackend.domain.auth.controller;
 
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.AuthResponse;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.AuthResponseBody;
+import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.PasswordCheckRequest;
+import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.PasswordResetRequest;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.SignupRequest;
 import com.monglepick.monglepickbackend.domain.auth.service.AuthService;
 import com.monglepick.monglepickbackend.global.security.CookieUtil;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 /**
  * 인증 컨트롤러 — 회원가입 REST API 엔드포인트.
@@ -104,5 +107,47 @@ public class AuthController {
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).body(responseBody);
+    }
+
+    /**
+     * 비밀번호 찾기 — 이메일 존재 여부 확인.
+     *
+     * <p>LOCAL 계정으로 가입된 이메일인지 확인한다.
+     * 존재하면 200 OK, 없으면 404 반환.</p>
+     *
+     * @param request 이메일 주소
+     */
+    @Operation(summary = "비밀번호 찾기 이메일 확인", description = "LOCAL 계정으로 가입된 이메일인지 확인한다")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "이메일 존재 확인"),
+            @ApiResponse(responseCode = "404", description = "해당 이메일로 가입된 계정 없음")
+    })
+    @SecurityRequirement(name = "")
+    @ResponseStatus(HttpStatus.OK)
+    @PostMapping("/password/check")
+    public ResponseEntity<Void> checkEmail(@Valid @RequestBody PasswordCheckRequest request) {
+        log.info("POST /api/v1/auth/password/check — email: {}", request.email());
+        authService.checkEmailExists(request);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * 비밀번호 재설정.
+     *
+     * <p>LOCAL 계정의 비밀번호를 새 비밀번호로 변경한다.</p>
+     *
+     * @param request 이메일 + 새 비밀번호
+     */
+    @Operation(summary = "비밀번호 재설정", description = "LOCAL 계정의 비밀번호를 새 비밀번호로 변경한다")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "비밀번호 변경 완료"),
+            @ApiResponse(responseCode = "404", description = "해당 이메일로 가입된 계정 없음")
+    })
+    @SecurityRequirement(name = "")
+    @PostMapping("/password/reset")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody PasswordResetRequest request) {
+        log.info("POST /api/v1/auth/password/reset — email: {}", request.email());
+        authService.resetPassword(request);
+        return ResponseEntity.ok().build();
     }
 }

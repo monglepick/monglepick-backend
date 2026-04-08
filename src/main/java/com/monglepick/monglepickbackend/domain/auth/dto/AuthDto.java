@@ -147,6 +147,35 @@ public final class AuthDto {
      * @param provider     로그인 제공자 (LOCAL, GOOGLE, KAKAO, NAVER)
      * @param role         사용자 역할 (USER, ADMIN)
      */
+    /** 비밀번호 찾기 - 이메일 존재 여부 확인 요청 */
+    @Schema(description = "비밀번호 찾기 이메일 확인 요청")
+    public record PasswordCheckRequest(
+            @Schema(description = "이메일 주소", example = "user@example.com")
+            @NotBlank(message = "이메일은 필수입니다")
+            @Email(message = "올바른 이메일 형식이 아닙니다")
+            String email
+    ) {
+    }
+
+    /** 비밀번호 재설정 요청 */
+    @Schema(description = "비밀번호 재설정 요청")
+    public record PasswordResetRequest(
+            @Schema(description = "이메일 주소", example = "user@example.com")
+            @NotBlank(message = "이메일은 필수입니다")
+            @Email(message = "올바른 이메일 형식이 아닙니다")
+            String email,
+
+            @Schema(description = "새 비밀번호 (8~128자, 영문+숫자 필수)", example = "newpassword123")
+            @NotBlank(message = "비밀번호는 필수입니다")
+            @Size(min = 8, max = 128, message = "비밀번호는 8자 이상이어야 합니다")
+            @Pattern(
+                    regexp = "^(?=.*[A-Za-z])(?=.*\\d).+$",
+                    message = "비밀번호는 영문자와 숫자를 모두 포함해야 합니다"
+            )
+            String newPassword
+    ) {
+    }
+
     @Schema(description = "사용자 요약 정보")
     public record UserInfo(
             @Schema(description = "사용자 ID", example = "550e8400-e29b-41d4-a716-446655440000")

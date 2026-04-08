@@ -198,6 +198,15 @@
         WHERE user_id = #{userId}
     </update>
 
+    <!-- 이메일 기준 비밀번호 변경 (LOCAL 계정 전용) -->
+    <update id="updatePasswordByEmail">
+        UPDATE users
+        SET password_hash = #{passwordHash},
+            updated_at    = NOW()
+        WHERE email    = #{email}
+          AND provider = 'LOCAL'
+    </update>
+
     <!-- 최종 로그인 시각만 갱신 -->
     <update id="updateLastLoginAt">
         UPDATE users
