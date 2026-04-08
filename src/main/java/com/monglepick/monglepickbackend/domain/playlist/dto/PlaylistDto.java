@@ -39,23 +39,39 @@ public class PlaylistDto {
      * 플레이리스트 생성 요청 DTO.
      *
      * <p>{@code POST /api/v1/playlists} 요청 바디에 사용된다.
-     * playlistName은 필수이며 최대 200자까지 입력 가능하다.</p>
+     * playlistName은 필수이며, description/isPublic/coverImageUrl은 선택적으로 입력 가능하다.</p>
      *
      * <h3>예시 (JSON)</h3>
      * <pre>{@code
      * {
-     *   "playlistName": "크리스마스 영화 모음"
+     *   "playlistName": "크리스마스 영화 모음",
+     *   "description": "겨울밤에 보기 좋은 영화들",
+     *   "isPublic": true,
+     *   "coverImageUrl": "https://example.com/cover.jpg"
      * }
      * }</pre>
      *
-     * @param playlistName 플레이리스트 이름 (필수, 1~200자)
+     * @param playlistName  플레이리스트 이름 (필수, 1~200자)
+     * @param description   플레이리스트 설명 (선택)
+     * @param isPublic      공개 여부 (선택, 기본값: false)
+     * @param coverImageUrl 커버 이미지 URL (선택, 최대 500자)
      */
     public record CreateRequest(
 
             /** 플레이리스트 이름 (공백 불가, 최대 200자) */
             @NotBlank(message = "플레이리스트 이름은 필수입니다")
             @Size(max = 200, message = "플레이리스트 이름은 최대 200자입니다")
-            String playlistName
+            String playlistName,
+
+            /** 플레이리스트 설명 (null 허용) */
+            String description,
+
+            /** 공개 여부 (null이면 false로 처리) */
+            Boolean isPublic,
+
+            /** 커버 이미지 URL (null 허용, 최대 500자) */
+            @Size(max = 500, message = "커버 이미지 URL은 최대 500자입니다")
+            String coverImageUrl
 
     ) {}
 
