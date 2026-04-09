@@ -266,6 +266,33 @@ public class PostController {
     // 게시글 신고 (사용자 → 관리자)
     // ──────────────────────────────────────────────
 
+    // ──────────────────────────────────────────────
+    // 플레이리스트 공유 피드
+    // ──────────────────────────────────────────────
+
+    /**
+     * 플레이리스트 공유 피드 조회 API (비로그인 허용).
+     *
+     * <p>PLAYLIST_SHARE 카테고리 게시글만 반환하며, 각 게시글에는
+     * 연결된 플레이리스트의 이름·설명·커버 이미지·좋아요 수·영화 수가 포함된다.</p>
+     */
+    @Operation(summary = "플레이리스트 공유 피드 조회",
+            description = "커뮤니티에 공유된 플레이리스트 목록을 최신 순으로 페이징 조회합니다 (비로그인 허용).")
+    @ApiResponse(responseCode = "200", description = "플레이리스트 공유 피드 조회 성공")
+    @SecurityRequirement(name = "")
+    @GetMapping("/shared-playlists")
+    public ResponseEntity<Page<PostResponse>> getSharedPlaylistPosts(
+            @PageableDefault(size = 15, sort = "createdAt", direction = Sort.Direction.DESC)
+            Pageable pageable) {
+
+        int safeSize = Math.min(pageable.getPageSize(), AppConstants.MAX_PAGE_SIZE);
+        Pageable safePage = org.springframework.data.domain.PageRequest.of(
+                pageable.getPageNumber(), safeSize, pageable.getSort());
+
+        Page<PostResponse> posts = postService.getSharedPlaylistPosts(safePage);
+        return ResponseEntity.ok(posts);
+    }
+
     /**
      * 게시글 신고 API (인증 필요).
      *

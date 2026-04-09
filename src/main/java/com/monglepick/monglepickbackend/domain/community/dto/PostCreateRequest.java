@@ -12,10 +12,11 @@ import jakarta.validation.constraints.Size;
  * Jackson이 역직렬화 시 {@link Post.Category#fromValue(String)}를 호출한다.
  * 따라서 "general", "FREE", "discussion" 등 대소문자를 가리지 않고 모두 수용한다.</p>
  *
- * @param title    게시글 제목 (최대 200자, 필수)
- * @param content  게시글 본문 (필수)
- * @param category 카테고리 — FREE / DISCUSSION / RECOMMENDATION / NEWS
- *                 (소문자·혼합 대소문자 허용, "general" → FREE 자동 변환)
+ * @param title      게시글 제목 (최대 200자, 필수)
+ * @param content    게시글 본문 (필수)
+ * @param category   카테고리 — FREE / DISCUSSION / RECOMMENDATION / NEWS / PLAYLIST_SHARE
+ *                   (소문자·혼합 대소문자 허용, "general" → FREE 자동 변환)
+ * @param playlistId 공유할 플레이리스트 ID (PLAYLIST_SHARE 카테고리 전용, 나머지는 null)
  */
 public record PostCreateRequest(
         @NotBlank(message = "제목은 필수입니다.")
@@ -29,5 +30,8 @@ public record PostCreateRequest(
          * Jackson이 @JsonCreator(fromValue)를 통해 대소문자 무관하게 변환하므로
          * 서비스 계층에서 별도 valueOf() 호출이 불필요하다. */
         @NotNull(message = "카테고리는 필수입니다.")
-        Post.Category category
+        Post.Category category,
+
+        /** 공유할 플레이리스트 ID (PLAYLIST_SHARE 전용, 다른 카테고리에서는 null) */
+        Long playlistId
 ) {}

@@ -326,6 +326,15 @@ public enum ErrorCode {
     /** 비공개 플레이리스트에 소유자가 아닌 사용자가 좋아요 시도. */
     PLAYLIST_PRIVATE(HttpStatus.FORBIDDEN, "PL007", "비공개 플레이리스트입니다"),
 
+    /** 이미 가져온 플레이리스트를 중복으로 가져오기 시도. */
+    PLAYLIST_SCRAP_DUPLICATE(HttpStatus.CONFLICT, "PL008", "이미 가져온 플레이리스트입니다"),
+
+    /** PLAYLIST_SHARE 게시글 작성 시 자신의 공개 플레이리스트가 아닌 경우. */
+    PLAYLIST_SHARE_INVALID(HttpStatus.BAD_REQUEST, "PL009", "공개 상태인 본인 플레이리스트만 공유할 수 있습니다"),
+
+    /** 본인의 플레이리스트를 스스로 가져오기 시도. */
+    PLAYLIST_SELF_IMPORT(HttpStatus.BAD_REQUEST, "PL010", "본인의 플레이리스트는 가져올 수 없습니다"),
+
     // ─────────────────────────────────────────────
     // 추천 이력 (REC0xx)
     // ─────────────────────────────────────────────

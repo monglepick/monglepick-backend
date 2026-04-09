@@ -15,9 +15,9 @@ spring:
   ## 환경변수로 오버라이드 가능:
   ##   SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://100.73.239.117:3306/monglepick?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8}
-    username: ${SPRING_DATASOURCE_USERNAME:monglepick}
-    password: ${SPRING_DATASOURCE_PASSWORD:monglepick_dev}
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
     ## HikariCP 커넥션 풀 설정

@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.domain.playlist.dto.PlaylistDto;
 import com.monglepick.monglepickbackend.domain.playlist.entity.Playlist;
 import com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistItem;
 import com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistLike;
+import com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistScrap;
 import com.monglepick.monglepickbackend.domain.playlist.mapper.PlaylistMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
@@ -370,6 +371,87 @@ public class PlaylistService {
         // likeCount 원자적 감소 — DB 레벨 UPDATE로 동시 요청 race condition 방지
         playlistMapper.decrementLikeCount(playlistId);
         log.info("플레이리스트 좋아요 취소 완료: playlistId={}", playlistId);
+    }
+
+    // ─────────────────────────────────────────────
+    // 플레이리스트 가져오기 (복사)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 커뮤니티에 공유된 플레이리스트를 내 플레이리스트로 복사한다.
+     *
+     * <h3>비즈니스 규칙</h3>
+     * <ul>
+     *   <li>대상 플레이리스트가 없으면 PL001(404)</li>
+     *   <li>비공개 플레이리스트는 가져올 수 없음 — PL007(403)</li>
+     *   <li>본인 플레이리스트는 가져올 수 없음 — PL010(400)</li>
+     *   <li>이미 가져온 플레이리스트를 중복 요청 시 PL008(409)</li>
+     * </ul>
+     *
+     * <h3>처리 흐름</h3>
+     * <ol>
+     *   <li>원본 플레이리스트 조회 및 검증</li>
+     *   <li>새 플레이리스트 생성 (이름 + " (가져옴)", 비공개)</li>
+     *   <li>아이템 일괄 복사 (INSERT SELECT)</li>
+     *   <li>playlist_scrap 레코드 기록 (중복 방지용)</li>
+     * </ol>
+     *
+     * @param playlistId 가져올 원본 플레이리스트 ID
+     * @param userId     요청자 사용자 ID (JWT)
+     * @return 새로 생성된 내 플레이리스트 ID
+     */
+    @Transactional
+    public PlaylistDto.ImportResponse importPlaylist(Long playlistId, String userId) {
+        log.info("플레이리스트 가져오기: playlistId={}, userId={}", playlistId, userId);
+
+        // 1) 원본 플레이리스트 존재 확인
+        Playlist source = playlistMapper.findById(playlistId);
+        if (source == null) {
+            throw new BusinessException(ErrorCode.PLAYLIST_NOT_FOUND,
+                    "플레이리스트를 찾을 수 없습니다: playlistId=" + playlistId);
+        }
+
+        // 2) 비공개 플레이리스트 차단
+        if (!Boolean.TRUE.equals(source.getIsPublic())) {
+            throw new BusinessException(ErrorCode.PLAYLIST_PRIVATE,
+                    "비공개 플레이리스트는 가져올 수 없습니다");
+        }
+
+        // 3) 본인 플레이리스트 차단
+        if (source.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.PLAYLIST_SELF_IMPORT,
+                    "본인의 플레이리스트는 가져올 수 없습니다");
+        }
+
+        // 4) 중복 가져오기 차단
+        if (playlistMapper.existsScrap(userId, playlistId)) {
+            throw new BusinessException(ErrorCode.PLAYLIST_SCRAP_DUPLICATE,
+                    "이미 가져온 플레이리스트입니다");
+        }
+
+        // 5) 새 플레이리스트 생성 (비공개, 이름에 "(가져옴)" 접미사)
+        Playlist newPlaylist = Playlist.builder()
+                .userId(userId)
+                .playlistName(source.getPlaylistName() + " (가져옴)")
+                .description(source.getDescription())
+                .isPublic(false)
+                .coverImageUrl(source.getCoverImageUrl())
+                .likeCount(0)
+                .build();
+        playlistMapper.insertPlaylist(newPlaylist);
+
+        // 6) 아이템 일괄 복사 (INSERT SELECT)
+        playlistMapper.copyItems(playlistId, newPlaylist.getPlaylistId());
+
+        // 7) 스크랩 기록 (중복 방지 UNIQUE 제약)
+        PlaylistScrap scrap = PlaylistScrap.builder()
+                .userId(userId)
+                .playlistId(playlistId)
+                .build();
+        playlistMapper.insertScrap(scrap);
+
+        log.info("플레이리스트 가져오기 완료: newPlaylistId={}", newPlaylist.getPlaylistId());
+        return new PlaylistDto.ImportResponse(newPlaylist.getPlaylistId());
     }
 
     // ─────────────────────────────────────────────

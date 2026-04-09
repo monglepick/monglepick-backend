@@ -41,6 +41,15 @@
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
+    <!-- 플레이리스트 아이템 + JOIN movies (영화 제목/포스터 포함) -->
+    <resultMap id="playlistItemWithMovieResultMap"
+               type="com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistItem"
+               extends="playlistItemResultMap">
+        <result property="title"      column="movie_title"/>
+        <result property="posterPath" column="poster_path"/>
+        <result property="rating"     column="rating"/>
+    </resultMap>
+
     <resultMap id="playlistLikeResultMap" type="com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistLike">
         <id property="playlistLikeId" column="playlist_like_id"/>
         <result property="playlistId" column="playlist_id"/>
@@ -143,12 +152,14 @@
 
     <!-- ═══ PlaylistItem ═══ -->
 
-    <select id="findItemsByPlaylistId" resultMap="playlistItemResultMap">
-        SELECT playlist_item_id, playlist_id, movie_id, sort_order, added_at,
-               created_at, updated_at
-        FROM playlist_item
-        WHERE playlist_id = #{playlistId}
-        ORDER BY sort_order ASC, added_at ASC
+    <select id="findItemsByPlaylistId" resultMap="playlistItemWithMovieResultMap">
+        SELECT pi.playlist_item_id, pi.playlist_id, pi.movie_id, pi.sort_order, pi.added_at,
+               pi.created_at, pi.updated_at,
+               m.title AS movie_title, m.poster_path, m.rating
+        FROM playlist_item pi
+        LEFT JOIN movies m ON pi.movie_id = m.movie_id
+        WHERE pi.playlist_id = #{playlistId}
+        ORDER BY pi.sort_order ASC, pi.added_at ASC
     </select>
 
     <select id="existsItem" resultType="boolean">
@@ -217,5 +228,39 @@
         DELETE FROM playlist_likes
         WHERE playlist_like_id = #{playlistLikeId}
     </delete>
+
+    <!-- ═══ PlaylistScrap (플레이리스트 가져오기) ═══ -->
+
+    <select id="existsScrap" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM playlist_scrap
+        WHERE user_id    = #{userId}
+          AND playlist_id = #{playlistId}
+    </select>
+
+    <insert id="insertScrap" useGeneratedKeys="true" keyProperty="scrapId">
+        INSERT INTO playlist_scrap (
+            user_id, playlist_id,
+            created_at, updated_at, created_by, updated_by
+        ) VALUES (
+            #{userId}, #{playlistId},
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
+    </insert>
+
+    <!--
+        원본 플레이리스트 아이템을 대상 플레이리스트로 일괄 복사.
+        sort_order/movie_id는 그대로 복사, added_at은 현재 시각으로 재설정.
+    -->
+    <insert id="copyItems">
+        INSERT INTO playlist_item (
+            playlist_id, movie_id, sort_order, added_at,
+            created_at, updated_at
+        )
+        SELECT #{destPlaylistId}, movie_id, sort_order, NOW(),
+               NOW(), NOW()
+        FROM playlist_item
+        WHERE playlist_id = #{srcPlaylistId}
+    </insert>
 
 </mapper>

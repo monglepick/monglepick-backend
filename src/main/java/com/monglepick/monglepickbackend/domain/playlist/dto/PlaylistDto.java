@@ -272,6 +272,15 @@ public class PlaylistDto {
             /** 영화 ID */
             String movieId,
 
+            /** 영화 제목 */
+            String title,
+
+            /** 포스터 이미지 경로 */
+            String posterPath,
+
+            /** 평균 평점 */
+            Double rating,
+
             /** 정렬 순서 (낮을수록 앞쪽에 표시) */
             Integer sortOrder,
 
@@ -289,6 +298,9 @@ public class PlaylistDto {
             return new PlaylistItemResponse(
                     entity.getPlaylistItemId(),
                     entity.getMovieId(),
+                    entity.getTitle(),
+                    entity.getPosterPath(),
+                    entity.getRating(),
                     entity.getSortOrder(),
                     entity.getAddedAt()
             );
@@ -307,5 +319,39 @@ public class PlaylistDto {
             /** 생성된 플레이리스트 고유 ID */
             Long playlistId
 
+    ) {}
+
+    /**
+     * 커뮤니티에 공유된 플레이리스트 요약 정보 DTO.
+     *
+     * <p>PLAYLIST_SHARE 카테고리 게시글 응답({@code PostResponse})에 인라인으로 포함된다.
+     * PostMapper의 findPlaylistSharePostsWithDetail 쿼리에서 JOIN playlist로 채워진다.</p>
+     *
+     * @param playlistId    플레이리스트 고유 ID
+     * @param playlistName  플레이리스트 이름
+     * @param description   플레이리스트 설명 (null 가능)
+     * @param coverImageUrl 커버 이미지 URL (null 가능)
+     * @param likeCount     플레이리스트 좋아요 수
+     * @param movieCount    포함된 영화 수
+     */
+    public record SharedPlaylistInfo(
+            Long playlistId,
+            String playlistName,
+            String description,
+            String coverImageUrl,
+            Integer likeCount,
+            Integer movieCount
+    ) {}
+
+    /**
+     * 플레이리스트 가져오기(복사) 응답 DTO.
+     *
+     * <p>{@code POST /api/v1/playlists/{playlistId}/import} 성공 시
+     * 새로 생성된 내 플레이리스트 ID를 반환한다.</p>
+     *
+     * @param newPlaylistId 복사 생성된 내 플레이리스트 고유 ID
+     */
+    public record ImportResponse(
+            Long newPlaylistId
     ) {}
 }

@@ -8,6 +8,8 @@ import com.monglepick.monglepickbackend.domain.community.entity.PostDeclaration;
 import com.monglepick.monglepickbackend.domain.community.entity.PostLike;
 import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
+import com.monglepick.monglepickbackend.domain.playlist.entity.Playlist;
+import com.monglepick.monglepickbackend.domain.playlist.mapper.PlaylistMapper;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -37,6 +39,8 @@ public class PostService {
 
     /** 게시글/댓글/좋아요 통합 Mapper — posts/post_comment/post_likes/comment_likes 담당 */
     private final PostMapper postMapper;
+    /** 플레이리스트 Mapper — PLAYLIST_SHARE 카테고리 게시글 작성 시 플레이리스트 검증에 사용 */
+    private final PlaylistMapper playlistMapper;
     /** 리워드 서비스 — POST_REWARD 정책 지급/회수 */
     private final RewardService rewardService;
 
@@ -46,11 +50,25 @@ public class PostService {
 
     /**
      * 게시글을 작성합니다 (바로 게시).
+     *
+     * <p>PLAYLIST_SHARE 카테고리의 경우 추가 검증:</p>
+     * <ul>
+     *   <li>playlistId 필수</li>
+     *   <li>해당 플레이리스트가 존재해야 함</li>
+     *   <li>작성자 본인 소유의 플레이리스트여야 함</li>
+     *   <li>공개(isPublic=true) 플레이리스트여야 함</li>
+     * </ul>
      */
     @Transactional
     public PostResponse createPost(PostCreateRequest request, String userId) {
         // 사용자 존재 검증은 JWT 인증 단계에서 이미 처리됨 (§15.4)
         Post.Category category = request.category();
+
+        // PLAYLIST_SHARE 전용 검증
+        Long playlistId = null;
+        if (category == Post.Category.PLAYLIST_SHARE) {
+            playlistId = validateAndGetPlaylistId(request.playlistId(), userId);
+        }
 
         Post post = Post.builder()
                 .userId(userId)
@@ -58,6 +76,7 @@ public class PostService {
                 .content(request.content())
                 .category(category)
                 .status(PostStatus.PUBLISHED)
+                .playlistId(playlistId)
                 .build();
 
         // MyBatis insert — useGeneratedKeys로 postId 자동 세팅
@@ -90,6 +109,9 @@ public class PostService {
 
     /**
      * 카테고리별 게시글 목록을 조회합니다 (게시 완료된 글만, 닉네임 포함).
+     *
+     * <p>PLAYLIST_SHARE 카테고리는 playlist JOIN 전용 쿼리를 사용하여
+     * 플레이리스트 상세 정보(이름/설명/커버/좋아요/영화수)를 함께 반환한다.</p>
      */
     public Page<PostResponse> getPosts(String category, Pageable pageable) {
         int offset = (int) pageable.getOffset();
@@ -100,14 +122,37 @@ public class PostService {
         long total;
 
         if (category != null && !category.isBlank()) {
-            // @RequestParam String을 enum으로 변환 후 SQL에는 enum.name() 문자열 전달
             Post.Category cat = Post.Category.fromValue(category);
-            posts = postMapper.findByCategoryAndStatusWithNickname(cat.name(), statusStr, offset, limit);
-            total = postMapper.countByCategoryAndStatus(cat.name(), statusStr);
+
+            if (cat == Post.Category.PLAYLIST_SHARE) {
+                // PLAYLIST_SHARE: playlist JOIN 전용 쿼리 (플레이리스트 상세 포함)
+                posts = postMapper.findPlaylistSharePostsWithDetail(offset, limit);
+                total = postMapper.countPlaylistSharePosts();
+            } else {
+                posts = postMapper.findByCategoryAndStatusWithNickname(cat.name(), statusStr, offset, limit);
+                total = postMapper.countByCategoryAndStatus(cat.name(), statusStr);
+            }
         } else {
             posts = postMapper.findByStatusWithNickname(statusStr, offset, limit);
             total = postMapper.countByStatus(statusStr);
         }
+
+        List<PostResponse> content = posts.stream().map(PostResponse::from).toList();
+        return new PageImpl<>(content, pageable, total);
+    }
+
+    /**
+     * 플레이리스트 공유 피드를 조회합니다 (PLAYLIST_SHARE 전용 페이지).
+     *
+     * <p>커뮤니티 상단 "플레이리스트 공유" 탭에서 사용한다.
+     * playlist JOIN 쿼리로 플레이리스트 상세 정보를 포함하여 반환한다.</p>
+     */
+    public Page<PostResponse> getSharedPlaylistPosts(Pageable pageable) {
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
+
+        List<Post> posts = postMapper.findPlaylistSharePostsWithDetail(offset, limit);
+        long total = postMapper.countPlaylistSharePosts();
 
         List<PostResponse> content = posts.stream().map(PostResponse::from).toList();
         return new PageImpl<>(content, pageable, total);
@@ -373,5 +418,30 @@ public class PostService {
         if (!post.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.POST_ACCESS_DENIED);
         }
+    }
+
+    /**
+     * PLAYLIST_SHARE 게시글 작성 시 플레이리스트 유효성을 검증하고 playlistId를 반환한다.
+     *
+     * <ul>
+     *   <li>playlistId 누락 → INVALID_INPUT (400)</li>
+     *   <li>플레이리스트 없음 → PLAYLIST_NOT_FOUND (404)</li>
+     *   <li>본인 소유 아님 → PLAYLIST_SHARE_INVALID (400)</li>
+     *   <li>비공개 → PLAYLIST_SHARE_INVALID (400)</li>
+     * </ul>
+     */
+    private Long validateAndGetPlaylistId(Long playlistId, String userId) {
+        if (playlistId == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "PLAYLIST_SHARE 카테고리는 playlistId가 필수입니다");
+        }
+        Playlist playlist = playlistMapper.findById(playlistId);
+        if (playlist == null) {
+            throw new BusinessException(ErrorCode.PLAYLIST_NOT_FOUND);
+        }
+        if (!playlist.getUserId().equals(userId) || !Boolean.TRUE.equals(playlist.getIsPublic())) {
+            throw new BusinessException(ErrorCode.PLAYLIST_SHARE_INVALID);
+        }
+        return playlistId;
     }
 }

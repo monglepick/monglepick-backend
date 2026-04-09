@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.playlist.mapper;
 import com.monglepick.monglepickbackend.domain.playlist.entity.Playlist;
 import com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistItem;
 import com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistLike;
+import com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistScrap;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -108,4 +109,21 @@ public interface PlaylistMapper {
 
     /** 좋아요 레코드 삭제 */
     void deleteLike(@Param("playlistLikeId") Long playlistLikeId);
+
+    // ═══ PlaylistScrap (플레이리스트 가져오기) ═══
+
+    /** 사용자가 특정 플레이리스트를 이미 가져왔는지 확인 */
+    boolean existsScrap(@Param("userId") String userId,
+                        @Param("playlistId") Long playlistId);
+
+    /** 스크랩 레코드 생성 (INSERT) */
+    void insertScrap(PlaylistScrap scrap);
+
+    /**
+     * 원본 플레이리스트 아이템을 대상 플레이리스트로 일괄 복사 (INSERT SELECT).
+     *
+     * <p>sort_order 및 movie_id를 그대로 복사하며 added_at은 NOW()로 재설정한다.</p>
+     */
+    void copyItems(@Param("srcPlaylistId") Long srcPlaylistId,
+                   @Param("destPlaylistId") Long destPlaylistId);
 }

@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -94,4 +95,16 @@ public class PlaylistItem extends BaseAuditEntity {
      */
     @Column(name = "added_at", updatable = false)
     private LocalDateTime addedAt;
+
+    /** 영화 제목 — DB 컬럼 아님, JOIN movies 조회 시 MyBatis가 주입 */
+    @Transient
+    private String title;
+
+    /** 포스터 이미지 경로 — DB 컬럼 아님, JOIN movies 조회 시 MyBatis가 주입 */
+    @Transient
+    private String posterPath;
+
+    /** 평균 평점 — DB 컬럼 아님, JOIN movies 조회 시 MyBatis가 주입 */
+    @Transient
+    private Double rating;
 }

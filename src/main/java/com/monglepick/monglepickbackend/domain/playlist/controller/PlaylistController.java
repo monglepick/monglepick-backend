@@ -401,4 +401,47 @@ public class PlaylistController extends BaseController {
         playlistService.unlikePlaylist(playlistId, userId);
         return ResponseEntity.noContent().build();
     }
+
+    // ─────────────────────────────────────────────
+    // 플레이리스트 가져오기 (복사)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 커뮤니티에 공유된 플레이리스트를 내 플레이리스트로 가져온다 (복사).
+     *
+     * <p>원본 플레이리스트의 이름·설명·커버 이미지·영화 목록을 복사하여
+     * 새 플레이리스트를 생성한다. 새로 생성된 플레이리스트는 비공개(isPublic=false)로 시작한다.</p>
+     *
+     * <p>같은 플레이리스트를 두 번 이상 가져오면 409 Conflict를 반환한다.</p>
+     *
+     * @param playlistId 가져올 원본 플레이리스트 ID
+     * @param principal  JWT 인증 정보
+     * @return 201 Created + 새로 생성된 내 플레이리스트 ID
+     */
+    @Operation(
+            summary = "플레이리스트 가져오기",
+            description = "커뮤니티에 공유된 플레이리스트를 내 플레이리스트로 복사합니다. " +
+                    "비공개 플레이리스트는 가져올 수 없으며, 중복 가져오기는 409를 반환합니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "가져오기 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "본인 플레이리스트 가져오기 불가"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "비공개 플레이리스트"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "플레이리스트 없음"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 가져온 플레이리스트")
+    })
+    @PostMapping("/{playlistId}/import")
+    public ResponseEntity<ApiResponse<PlaylistDto.ImportResponse>> importPlaylist(
+            @Parameter(description = "가져올 플레이리스트 ID", required = true, example = "1")
+            @PathVariable Long playlistId,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        log.info("플레이리스트 가져오기 요청: playlistId={}, userId={}", playlistId, userId);
+
+        PlaylistDto.ImportResponse result = playlistService.importPlaylist(playlistId, userId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(result));
+    }
 }

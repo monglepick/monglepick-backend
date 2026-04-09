@@ -235,6 +235,20 @@ public interface PostMapper {
     void deleteCommentLikeByCommentIdAndUserId(@Param("commentId") Long commentId,
                                                  @Param("userId") String userId);
 
+    // ═══ PLAYLIST_SHARE 전용 조회 ═══
+
+    /**
+     * 플레이리스트 공유 게시글 목록 조회 (JOIN playlist + users, 페이징).
+     *
+     * <p>PLAYLIST_SHARE 카테고리 + PUBLISHED 상태 게시글을 조회하며
+     * playlist 테이블과 JOIN하여 플레이리스트 상세 정보(@Transient 필드)를 함께 로드한다.</p>
+     */
+    List<Post> findPlaylistSharePostsWithDetail(@Param("offset") int offset,
+                                                 @Param("limit") int limit);
+
+    /** 플레이리스트 공유 게시글 총 건수 */
+    long countPlaylistSharePosts();
+
     // ═══ PostDeclaration (게시글 신고) ═══
 
     /**

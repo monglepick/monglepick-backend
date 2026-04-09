@@ -33,6 +33,7 @@
         <result property="isDeleted" column="is_deleted"/>
         <result property="deletedAt" column="deleted_at"/>
         <result property="isBlinded" column="is_blinded"/>
+        <result property="playlistId" column="playlist_id"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
         <result property="createdBy" column="created_by"/>
@@ -43,6 +44,16 @@
     <resultMap id="postWithNicknameResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post"
                extends="postResultMap">
         <result property="nickname" column="nickname"/>
+    </resultMap>
+
+    <!-- 게시글 + nickname + playlist JOIN 매핑 (PLAYLIST_SHARE 피드 전용) -->
+    <resultMap id="postWithPlaylistResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post"
+               extends="postWithNicknameResultMap">
+        <result property="playlistName"         column="pl_playlist_name"/>
+        <result property="playlistDescription"  column="pl_description"/>
+        <result property="playlistCoverImageUrl" column="pl_cover_image_url"/>
+        <result property="playlistLikeCount"    column="pl_like_count"/>
+        <result property="playlistMovieCount"   column="pl_movie_count"/>
     </resultMap>
 
     <!-- 댓글 매핑 (기본, 닉네임 없음 — 권한 체크 등 내부 용도) -->
@@ -92,7 +103,7 @@
     <sql id="postColumns">
         p.post_id, p.user_id, p.title, p.content, p.category,
         p.view_count, p.status, p.like_count, p.comment_count,
-        p.is_deleted, p.deleted_at, p.is_blinded,
+        p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
         p.created_at, p.updated_at, p.created_by, p.updated_by
     </sql>
 
@@ -190,24 +201,25 @@
         INSERT INTO posts (
             user_id, title, content, category, status,
             view_count, like_count, comment_count,
-            is_deleted, is_blinded,
+            is_deleted, is_blinded, playlist_id,
             created_at, updated_at, created_by, updated_by
         ) VALUES (
             #{userId}, #{title}, #{content}, #{category}, #{status},
             0, 0, 0,
-            false, false,
+            false, false, #{playlistId},
             NOW(), NOW(), #{createdBy}, #{updatedBy}
         )
     </insert>
 
     <update id="update">
         UPDATE posts
-        SET title      = #{title},
-            content    = #{content},
-            category   = #{category},
-            status     = #{status},
-            updated_at = NOW(),
-            updated_by = #{updatedBy}
+        SET title       = #{title},
+            content     = #{content},
+            category    = #{category},
+            status      = #{status},
+            playlist_id = #{playlistId},
+            updated_at  = NOW(),
+            updated_by  = #{updatedBy}
         WHERE post_id = #{postId}
     </update>
 
@@ -291,6 +303,44 @@
         SELECT COUNT(*)
         FROM posts p
         <include refid="adminPostWhere"/>
+    </select>
+
+    <!-- ═══ PLAYLIST_SHARE 전용 조회 ═══ -->
+
+    <!--
+        플레이리스트 공유 게시글 목록 + playlist 상세 JOIN.
+        PLAYLIST_SHARE 카테고리, PUBLISHED 상태, 소프트 삭제 제외.
+        alias 접두사 pl_ 로 playlist 컬럼과 posts 컬럼 충돌을 방지한다.
+    -->
+    <select id="findPlaylistSharePostsWithDetail" resultMap="postWithPlaylistResultMap">
+        SELECT p.post_id, p.user_id, p.title, p.content, p.category,
+               p.view_count, p.status, p.like_count, p.comment_count,
+               p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
+               p.created_at, p.updated_at, p.created_by, p.updated_by,
+               u.nickname AS nickname,
+               pl.playlist_name     AS pl_playlist_name,
+               pl.description       AS pl_description,
+               pl.cover_image_url   AS pl_cover_image_url,
+               pl.like_count        AS pl_like_count,
+               (SELECT COUNT(*)
+                FROM playlist_item pi2
+                WHERE pi2.playlist_id = p.playlist_id) AS pl_movie_count
+        FROM posts p
+        LEFT JOIN users u    ON p.user_id     = u.user_id
+        LEFT JOIN playlist pl ON p.playlist_id = pl.playlist_id
+        WHERE p.category   = 'PLAYLIST_SHARE'
+          AND p.status     = 'PUBLISHED'
+          AND p.is_deleted = false
+        ORDER BY p.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countPlaylistSharePosts" resultType="long">
+        SELECT COUNT(*)
+        FROM posts
+        WHERE category   = 'PLAYLIST_SHARE'
+          AND status     = 'PUBLISHED'
+          AND is_deleted = false
     </select>
 
     <!-- ═══ PostComment ═══ -->

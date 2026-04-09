@@ -121,6 +121,26 @@ public class Post extends BaseAuditEntity {
     private boolean isBlinded = false;
 
     /**
+     * 연결된 플레이리스트 ID (PLAYLIST_SHARE 카테고리 전용, 나머지는 null).
+     * playlist.playlist_id를 FK로 참조한다.
+     */
+    @Column(name = "playlist_id")
+    private Long playlistId;
+
+    // ─── PLAYLIST_SHARE 전용 @Transient JOIN 캐리어 ───
+
+    /** 플레이리스트 이름 (JOIN playlist, PLAYLIST_SHARE 조회 시 세팅) */
+    @Transient @Setter private String playlistName;
+    /** 플레이리스트 설명 (JOIN playlist) */
+    @Transient @Setter private String playlistDescription;
+    /** 플레이리스트 커버 이미지 URL (JOIN playlist) */
+    @Transient @Setter private String playlistCoverImageUrl;
+    /** 플레이리스트 좋아요 수 (JOIN playlist) */
+    @Transient @Setter private Integer playlistLikeCount;
+    /** 플레이리스트 영화 수 (서브쿼리 COUNT) */
+    @Transient @Setter private Integer playlistMovieCount;
+
+    /**
      * 게시글 카테고리 열거형.
      *
      * <p>Jackson 역직렬화 시 대소문자를 무관하게 처리한다.
@@ -137,7 +157,9 @@ public class Post extends BaseAuditEntity {
         /** 추천 요청/공유 */
         RECOMMENDATION,
         /** 영화 뉴스/소식 */
-        NEWS;
+        NEWS,
+        /** 플레이리스트 공유 — 공개 플레이리스트를 커뮤니티에 공유 */
+        PLAYLIST_SHARE;
 
         /**
          * JSON 문자열 → Category 변환 팩토리 메서드 (대소문자 무관).
@@ -166,7 +188,7 @@ public class Post extends BaseAuditEntity {
                 return Category.valueOf(normalized);
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException(
-                        "유효하지 않은 카테고리입니다: '" + value + "'. 허용 값: FREE, DISCUSSION, RECOMMENDATION, NEWS"
+                        "유효하지 않은 카테고리입니다: '" + value + "'. 허용 값: FREE, DISCUSSION, RECOMMENDATION, NEWS, PLAYLIST_SHARE"
                 );
             }
         }
@@ -186,12 +208,13 @@ public class Post extends BaseAuditEntity {
     }
 
     @Builder
-    public Post(String userId, String title, String content, Category category, PostStatus status) {
+    public Post(String userId, String title, String content, Category category, PostStatus status, Long playlistId) {
         this.userId = userId;
         this.title = title;
         this.content = content;
         this.category = category;
         this.status = status != null ? status : PostStatus.PUBLISHED;
+        this.playlistId = playlistId;
         this.viewCount = 0;
         this.likeCount = 0;
         this.commentCount = 0;
