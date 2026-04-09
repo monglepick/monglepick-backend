@@ -9,6 +9,7 @@ import com.monglepick.monglepickbackend.domain.reward.repository.PointItemReposi
 import com.monglepick.monglepickbackend.domain.user.entity.Admin;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.global.constants.AdminRole;
 import com.monglepick.monglepickbackend.global.constants.UserRole;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -59,6 +60,20 @@ public class DataInitializer implements ApplicationRunner {
     @Value("${app.admin.nickname}")
     private String adminNickname;
 
+    /**
+     * 관리자 시드 계정 세부 역할 (환경변수: ADMIN_ROLE) — 2026-04-09 P2-⑫ 신규.
+     *
+     * <p>{@code admin.admin_role} 컬럼에 저장되는 세부 역할 코드. 기본값은 "SUPER_ADMIN"
+     * (시드 계정은 관리자 계정 관리 권한까지 보유해야 부팅 직후 다른 관리자 추가가 가능).
+     * 운영 환경에서는 {@code ADMIN_ROLE=SUPER_ADMIN} 그대로 두고, 추가 관리자 생성 시
+     * UI 에서 MODERATOR/FINANCE_ADMIN 등 세분화 역할을 지정한다.</p>
+     *
+     * <p>{@link AdminRole} 에 정의되지 않은 값이 들어오면 부팅 시 에러 로그 후
+     * "SUPER_ADMIN" 으로 fallback 한다 (부팅 중단하지 않고 운영 복구 여지 확보).</p>
+     */
+    @Value("${app.admin.role:SUPER_ADMIN}")
+    private String adminRole;
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
@@ -97,16 +112,32 @@ public class DataInitializer implements ApplicationRunner {
         // MyBatis insert — PK는 수동 생성한 UUID(userId)로 세팅되어 그대로 저장됨
         userMapper.insert(admin);
 
-        /* admin 테이블에도 레코드 생성 (별도 admin 테이블이 존재하므로 필수) */
+        /*
+         * admin 테이블 레코드 생성 — 2026-04-09 P2-⑫ 환경변수 기반 역할 지정.
+         *
+         * 기존에는 "ADMIN" 하드코딩이었으나, 세분화된 역할 체계(AdminRole enum)가 도입되어
+         * 시드 계정은 관리자 계정 관리 권한까지 가진 SUPER_ADMIN 으로 생성하는 것이 기본.
+         * 운영자가 ADMIN_ROLE 환경변수로 오버라이드 가능하며, 허용되지 않은 값은
+         * SUPER_ADMIN 으로 fallback 하여 부팅 중단을 방지한다 (잘못된 env 설정으로 서버
+         * 다운되는 상황 예방).
+         */
+        String resolvedRole = AdminRole.isAllowed(adminRole)
+                ? adminRole
+                : AdminRole.SUPER_ADMIN.getCode();
+        if (!resolvedRole.equals(adminRole)) {
+            log.warn("관리자 시드 역할이 허용되지 않음 — 입력값: {}, fallback: {} (허용값: {})",
+                    adminRole, resolvedRole, AdminRole.allowedCodesAsString());
+        }
+
         Admin adminRecord = Admin.builder()
                 .userId(admin.getUserId())
-                .adminRole("ADMIN")
+                .adminRole(resolvedRole)
                 .isActive(true)
                 .build();
         adminAccountRepository.save(adminRecord);
 
-        log.info("관리자 테스트 계정 초기화 완료 — email: {}, role: ADMIN, userId: {}",
-                adminEmail, admin.getUserId());
+        log.info("관리자 테스트 계정 초기화 완료 — email: {}, role: {}, userId: {}",
+                adminEmail, resolvedRole, admin.getUserId());
     }
 
     /**

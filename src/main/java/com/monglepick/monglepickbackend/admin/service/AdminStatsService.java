@@ -45,9 +45,31 @@ import java.util.stream.Collectors;
 /**
  * 관리자 통계/분석 서비스.
  *
- * <p>정한나 담당 영역: 서비스 KPI, 추천/검색 분석, 사용자 행동, 매출 통계.
- * 추천 로그·검색 로그 테이블이 아직 구현되지 않은 항목은 mock 데이터를 반환하며,
- * 실제 테이블 구현 후 교체한다.</p>
+ * <p>원 담당(정한나)은 monglepick-recommend(FastAPI) 전담으로 이관되었으며,
+ * 본 Backend 11 EP 는 윤형주가 유지보수한다 (CLAUDE.md "관리자 페이지 담당 배정").</p>
+ *
+ * <h3>구현 범위</h3>
+ * <ul>
+ *   <li>서비스 KPI (DAU/MAU/신규가입/리뷰/평점/게시글)</li>
+ *   <li>일별 추이 차트</li>
+ *   <li>추천 성능/분포/로그 — {@code recommendation_impact} 테이블 기반</li>
+ *   <li>검색 분석 — {@code search_history} 테이블 기반</li>
+ *   <li>사용자 행동(장르 선호) — {@code user_behavior_profile.genre_affinity}</li>
+ *   <li>코호트 리텐션 — {@code users.last_login_at} 기반</li>
+ *   <li>매출/구독 — {@code payment_orders}, {@code user_subscriptions}</li>
+ * </ul>
+ *
+ * <h3>변경 이력</h3>
+ * <ul>
+ *   <li>Phase 4: Mock 제거 — 모든 지표가 실제 테이블 집계 기반으로 전환됨</li>
+ *   <li>2026-04-08: outdated 주석("추천 로그·검색 로그 테이블 미구현") 정리 —
+ *       {@code recommendation_impact} / {@code search_history} 엔티티가 이미 존재하고
+ *       본 서비스는 해당 리포지토리만 호출한다. 별도의 {@code recommendation_logs} /
+ *       {@code search_histories} 테이블은 필요하지 않다 (단일 진실 원본 원칙).</li>
+ * </ul>
+ *
+ * <p>빈 DB 환경에서도 모든 메서드가 0/빈 리스트를 반환하도록 구성되어 있어
+ * 별도의 null/mock 분기가 없다.</p>
  */
 @Slf4j
 @Service
@@ -149,7 +171,7 @@ public class AdminStatsService {
     }
 
     // ──────────────────────────────────────────────
-    // 3. 추천 성능 지표 (mock)
+    // 3. 추천 성능 지표 — recommendation_impact 기반 (실측치)
     // ──────────────────────────────────────────────
 
     /**
@@ -195,12 +217,14 @@ public class AdminStatsService {
     /**
      * 추천 장르 분포를 반환한다.
      *
-     * <p>Phase 4 (Mock 제거): Movie 카탈로그의 상위 1000건을 ID 오름차순으로 로드하여
+     * <p>Movie 카탈로그의 상위 1000건을 ID 오름차순으로 로드하여
      * {@code movies.genres} JSON 배열을 Java 에서 파싱·집계한 뒤 상위 8개 장르를 반환한다.
-     * 추천 임팩트 테이블이 충분히 누적되기 전이라도 영화 카탈로그 자체의 장르 분포를 반영하므로
-     * 관리자 화면의 "추천될 가능성이 있는 영화의 장르 분포"로 해석할 수 있다.</p>
+     * 관리자 화면에서 이 지표는 "추천될 가능성이 있는 영화의 장르 분포" 로 해석된다.</p>
      *
-     * <p>향후 {@code recommendation_logs} 테이블이 구현되면 실제 추천 빈도 기반으로 교체한다.</p>
+     * <p>2026-04-08: 과거의 "recommendation_logs 테이블 구현 후 교체" 계획 주석을 제거.
+     * 실제 추천 이력은 {@code recommendation_impact} 에 누적되며,
+     * 관리자 화면은 별도의 {@code getRecommendationLogs()} 에서 해당 테이블을 직접 조회한다.
+     * 본 메서드는 "카탈로그 기반 장르 분포" 라는 독립 지표이므로 교체 대상이 아니다.</p>
      */
     public DistributionResponse getRecommendationDistribution() {
         log.debug("[admin-stats] 추천 분포 집계 시작 — Movie 카탈로그 기반");
@@ -313,7 +337,7 @@ public class AdminStatsService {
     }
 
     // ──────────────────────────────────────────────
-    // 4. 검색 분석 (mock)
+    // 4. 검색 분석 — search_history 기반 (실측치)
     // ──────────────────────────────────────────────
 
     /**

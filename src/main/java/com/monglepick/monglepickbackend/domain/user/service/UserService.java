@@ -7,6 +7,8 @@ import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.entity.UserPreference;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserPreferenceMapper;
+import com.monglepick.monglepickbackend.domain.userwatchhistory.dto.UserWatchHistoryResponse;
+import com.monglepick.monglepickbackend.domain.userwatchhistory.repository.UserWatchHistoryRepository;
 import com.monglepick.monglepickbackend.domain.wishlist.dto.WishlistResponse;
 import com.monglepick.monglepickbackend.domain.wishlist.entity.UserWishlist;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -25,8 +27,18 @@ import java.util.Optional;
 /**
  * 마이페이지 서비스
  *
- * <p>사용자 프로필, 위시리스트, 선호도 등 마이페이지에 필요한 비즈니스 로직을 처리합니다.
- * 시청 이력 탭은 reviews 단일 진실 원본 원칙에 따라 폐기되었습니다 (2026-04-08).</p>
+ * <p>사용자 프로필, 시청 이력, 위시리스트, 선호도 등 마이페이지에 필요한 비즈니스 로직을 처리합니다.</p>
+ *
+ * <h3>시청 이력 도메인 분리 (2026-04-08 재도입)</h3>
+ * <p>{@code user_watch_history} 테이블은 실 유저의 "봤어요" 행동 기록 전용이며,
+ * Kaggle MovieLens 26M 시드인 {@code kaggle_watch_history} 와 완전히 분리되어 있다.
+ * 추천 학습의 단일 진실 원본은 여전히 {@code reviews} 이며, 본 도메인은 유저 대면
+ * UX(시청 이력 탭, 재관람 카운트)를 담당한다.</p>
+ *
+ * <h3>JPA / MyBatis 혼용</h3>
+ * <p>UserMapper(MyBatis)와 UserWatchHistoryRepository(JPA)가 같은 클래스에 공존한다.
+ * 윤형주 도메인의 JpaRepository 유지 원칙(설계서 §15)에 따른 정상적인 하이브리드 구성이며,
+ * 1차 캐시 충돌 방지를 위해 동일 트랜잭션 내에서 같은 엔티티를 두 경로로 동시에 조회하지 않는다.</p>
  */
 @Slf4j
 @Service
@@ -40,6 +52,8 @@ public class UserService {
     private final UserPreferenceMapper userPreferenceMapper;
     /** 위시리스트 — 윤형주 도메인 JpaRepository 유지 */
     private final UserWishlistRepository userWishlistRepository;
+    /** 시청 이력 — 윤형주 도메인 JpaRepository 유지 (Kaggle 시드와 분리된 user_watch_history 테이블) */
+    private final UserWatchHistoryRepository userWatchHistoryRepository;
     private final PasswordEncoder passwordEncoder;
 
     /** 활동 리워드 서비스 — 위시리스트 추가(WISHLIST_ADD) 리워드 지급 위임 */
@@ -108,6 +122,25 @@ public class UserService {
         userMapper.update(user);
 
         return UserResponse.from(user);
+    }
+
+    /**
+     * 사용자의 시청 이력을 페이징으로 조회합니다.
+     *
+     * <p>마이페이지 통합 경로({@code GET /api/v1/users/me/watch-history})에서 호출된다.
+     * 독립 경로({@code /api/v1/watch-history})는 별도의 {@code UserWatchHistoryController} 가 처리하며,
+     * 두 경로 모두 같은 {@code user_watch_history} 테이블을 조회한다.</p>
+     *
+     * <p>본 메서드는 Kaggle MovieLens 시드({@code kaggle_watch_history})와 완전히 분리되어 있다.</p>
+     *
+     * @param userId 사용자 ID
+     * @param pageable 페이징 정보 (정렬은 호출 측에서 watchedAt DESC 권장)
+     * @return 페이지 단위의 시청 이력
+     */
+    public Page<UserWatchHistoryResponse> getWatchHistory(String userId, Pageable pageable) {
+        log.debug("시청 이력 조회 - userId: {}, page: {}", userId, pageable.getPageNumber());
+        return userWatchHistoryRepository.findByUserId(userId, pageable)
+                .map(UserWatchHistoryResponse::from);
     }
 
     /**

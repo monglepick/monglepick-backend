@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.user.controller;
 import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.UserPreference;
+import com.monglepick.monglepickbackend.domain.userwatchhistory.dto.UserWatchHistoryResponse;
 import com.monglepick.monglepickbackend.domain.wishlist.dto.WishlistResponse;
 import com.monglepick.monglepickbackend.domain.user.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -87,6 +88,35 @@ public class UserController {
         log.info("프로필 수정 요청 - userId: {}", userId);
         UserResponse updated = userService.updateProfile(userId, request);
         return ResponseEntity.ok(updated);
+    }
+
+    /**
+     * 시청 이력 조회 API (마이페이지 통합 경로)
+     *
+     * <p>로그인한 사용자의 시청 이력을 최신순으로 페이징 조회한다.
+     * 본 엔드포인트는 마이페이지 화면에서 프로필과 함께 렌더링되는 통합 경로이며,
+     * 독립 경로 {@code GET /api/v1/watch-history} 는 별도의 {@code UserWatchHistoryController} 가 제공한다.
+     * 두 경로 모두 같은 {@code user_watch_history} 테이블을 조회한다.</p>
+     *
+     * @param userId   JWT 에서 추출한 사용자 ID
+     * @param pageable 페이징 정보 (기본: 20 건, watchedAt 역순)
+     * @return 200 OK + 페이지 단위의 시청 이력
+     */
+    @Operation(
+            summary = "시청 이력 조회 (마이페이지)",
+            description = "사용자의 시청 이력을 최신순으로 페이징 조회. " +
+                    "독립 경로 /api/v1/watch-history 와 동일한 데이터를 반환한다."
+    )
+    @ApiResponse(responseCode = "200", description = "시청 이력 조회 성공")
+    @SecurityRequirement(name = "BearerAuth")
+    @GetMapping("/watch-history")
+    public ResponseEntity<Page<UserWatchHistoryResponse>> getWatchHistory(
+            @AuthenticationPrincipal String userId,
+            @PageableDefault(size = 20, sort = "watchedAt", direction = Sort.Direction.DESC)
+            Pageable pageable) {
+
+        Page<UserWatchHistoryResponse> history = userService.getWatchHistory(userId, pageable);
+        return ResponseEntity.ok(history);
     }
 
     /**

@@ -93,6 +93,13 @@ public class AdminPaymentService {
     /** 도메인 포인트 서비스 — 수동 지급/차감 로직 재사용 */
     private final PointService pointService;
 
+    /**
+     * 관리자 감사 로그 서비스 — 환불/보상/구독/포인트 모든 쓰기 액션의 성공 시점에
+     * 호출하여 admin_audit_logs 테이블에 흔적을 남긴다. REQUIRES_NEW 트랜잭션이므로
+     * 감사 로그 실패는 업무 트랜잭션에 영향을 주지 않는다. (2026-04-09 P1-1 추가)
+     */
+    private final AdminAuditService adminAuditService;
+
     // ======================== 결제 주문 ========================
 
     /**
@@ -176,6 +183,27 @@ public class AdminPaymentService {
         // 3. 도메인 레이어 환불 로직 재사용 — 실제 소유자 ID를 전달해서 BOLA 검증 통과
         RefundResponse response = paymentService.refundOrder(orderId, order.getUserId(), reason);
 
+        // 4. 감사 로그 기록 (성공 시에만) — 별도 REQUIRES_NEW 트랜잭션이므로 실패해도 환불은 유지
+        //    상세 스냅샷에 환불 금액과 주문 유형을 JSON으로 남겨 추후 분쟁 시 근거 자료로 사용한다.
+        // refundAmount 는 RefundResponse 에서 primitive int 이므로 null 체크 불필요
+        String afterSnapshot = String.format(
+                "{\"orderType\":\"%s\",\"refundAmount\":%d,\"reason\":\"%s\"}",
+                order.getOrderType().name(),
+                response.refundAmount(),
+                escapeJson(reason)
+        );
+        adminAuditService.log(
+                AdminAuditService.ACTION_PAYMENT_REFUND,
+                AdminAuditService.TARGET_PAYMENT,
+                orderId,
+                String.format("주문 %s 환불 처리 — 대상 사용자: %s, 금액: %d원, 사유: %s",
+                        orderId, order.getUserId(),
+                        response.refundAmount(),
+                        reason),
+                null,
+                afterSnapshot
+        );
+
         return new AdminRefundResponse(
                 response.success(),
                 response.orderId(),
@@ -251,6 +279,16 @@ public class AdminPaymentService {
         }
 
         log.info("[AdminPayment] 보상 복구 완료 — orderId={}, newStatus=COMPLETED", orderId);
+
+        // 감사 로그 — 보상 복구는 드물지만 금전 이동과 연관된 운영 액션이므로 반드시 기록
+        adminAuditService.log(
+                AdminAuditService.ACTION_PAYMENT_COMPENSATE,
+                AdminAuditService.TARGET_PAYMENT,
+                orderId,
+                String.format("주문 %s COMPENSATION_FAILED → COMPLETED 복구 (adminNote: %s)",
+                        orderId, request.adminNote())
+        );
+
         return new AdminCompensateResponse(
                 true,
                 orderId,
@@ -294,6 +332,17 @@ public class AdminPaymentService {
         log.info("[AdminPayment] 구독 취소 완료 — subscriptionId={}, userId={}",
                 subscriptionId, sub.getUserId());
 
+        // 감사 로그 — 구독 강제 취소 (사용자 불만 원인이 될 수 있는 민감 액션)
+        adminAuditService.log(
+                AdminAuditService.ACTION_SUBSCRIPTION_CANCEL,
+                AdminAuditService.TARGET_SUBSCRIPTION,
+                String.valueOf(subscriptionId),
+                String.format("구독 %d 관리자 취소 — 대상 사용자: %s, 플랜: %s, 만료 예정: %s",
+                        subscriptionId, sub.getUserId(),
+                        sub.getPlan() != null ? sub.getPlan().getPlanCode() : "UNKNOWN",
+                        sub.getExpiresAt())
+        );
+
         return new AdminCancelSubscriptionResponse(
                 true,
                 subscriptionId,
@@ -321,6 +370,15 @@ public class AdminPaymentService {
 
         // 도메인 서비스 호출 — 반환 타입이 도메인 DTO 이므로 관리자 DTO 로 변환
         var domainResponse = subscriptionService.extendSubscription(subscriptionId, adminNote);
+
+        // 감사 로그 — 구독 연장 (사용자에게 유리한 액션이지만 정책 남용 방지를 위해 기록)
+        adminAuditService.log(
+                AdminAuditService.ACTION_SUBSCRIPTION_EXTEND,
+                AdminAuditService.TARGET_SUBSCRIPTION,
+                String.valueOf(subscriptionId),
+                String.format("구독 %d 관리자 연장 — 새 만료일: %s, adminNote: %s",
+                        subscriptionId, domainResponse.newExpiresAt(), adminNote)
+        );
 
         return new AdminExtendSubscriptionResponse(
                 domainResponse.success(),
@@ -408,6 +466,26 @@ public class AdminPaymentService {
 
         log.info("[AdminPayment] 수동 포인트 변동 완료 — userId={}, change={}, newBalance={}, grade={}",
                 request.userId(), amount, newBalance, gradeCode);
+
+        // 감사 로그 — 수동 포인트 지급/차감은 금전 이동이므로 필수 기록
+        // targetType=USER (행위가 특정 사용자 잔액에 적용되므로)
+        String afterSnapshot = String.format(
+                "{\"delta\":%d,\"balanceAfter\":%d,\"grade\":\"%s\"}",
+                amount, newBalance != null ? newBalance : 0,
+                gradeCode != null ? gradeCode : ""
+        );
+        adminAuditService.log(
+                AdminAuditService.ACTION_POINT_MANUAL,
+                AdminAuditService.TARGET_USER,
+                request.userId(),
+                String.format("사용자 %s 수동 포인트 %s %dP (사유: %s)",
+                        request.userId(),
+                        amount > 0 ? "지급" : "차감",
+                        Math.abs(amount),
+                        request.reason()),
+                null,
+                afterSnapshot
+        );
 
         String message = amount > 0
                 ? String.format("%dP 지급 완료. 잔액: %dP", amount, newBalance)
@@ -599,5 +677,26 @@ public class AdminPaymentService {
                 item.getCreatedAt(),
                 item.getUpdatedAt()
         );
+    }
+
+    // ======================== 내부 헬퍼 ========================
+
+    /**
+     * 감사 로그 JSON 스냅샷 구성 시 사용자 입력 문자열(예: 환불 사유)을
+     * 큰따옴표/역슬래시 이스케이프하여 JSON 파싱 오류를 방지한다.
+     *
+     * <p>감사 로그는 Jackson 직렬화를 거치지 않고 문자열 조립으로 JSON 을 만들기 때문에
+     * 사용자가 입력한 {@code "} 나 {@code \} 가 그대로 삽입되면 파싱 실패가 발생한다.
+     * 라이브러리 의존을 늘리지 않기 위해 최소 이스케이프(백슬래시, 큰따옴표, 개행)만 수행한다.</p>
+     *
+     * @param raw 원본 문자열 (nullable)
+     * @return JSON-safe 문자열 (null → 빈 문자열)
+     */
+    private String escapeJson(String raw) {
+        if (raw == null) return "";
+        return raw.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r");
     }
 }

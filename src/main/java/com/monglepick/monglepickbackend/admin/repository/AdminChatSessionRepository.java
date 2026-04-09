@@ -4,8 +4,11 @@ import com.monglepick.monglepickbackend.domain.chat.entity.ChatSessionArchive;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -53,4 +56,67 @@ public interface AdminChatSessionRepository extends JpaRepository<ChatSessionArc
      * @return 해당 범위의 채팅 세션 수
      */
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
+
+    // ======================== Task 4: 챗봇 통계 집계 ========================
+    //
+    // AI 운영 탭의 GET /admin/ai/chat/stats 엔드포인트가 사용한다.
+    // 빈 DB 환경에서도 안전하게 0/빈 리스트를 반환하도록 모든 쿼리가 COUNT/SUM 기반이다.
+
+    /**
+     * 지정 기간 내 활성 세션 수(is_active=true 이고 is_deleted=false) 를 카운트한다.
+     *
+     * @param start 범위 시작 시각 (inclusive)
+     * @param end   범위 종료 시각 (exclusive)
+     * @return 활성 세션 수
+     */
+    long countByIsActiveTrueAndIsDeletedFalseAndCreatedAtBetween(
+            LocalDateTime start,
+            LocalDateTime end
+    );
+
+    /**
+     * 지정 기간 내 세션의 turn_count 합계를 조회한다 (총 대화 턴 수).
+     *
+     * <p>COALESCE 로 감싸 데이터가 없을 때 null 대신 0 을 반환한다.
+     * 빈 DB 환경에서도 안전하게 0 을 반환하므로 Service 레이어에서 별도 null 체크가 필요 없다.</p>
+     *
+     * @param start 범위 시작 시각 (inclusive)
+     * @param end   범위 종료 시각 (exclusive)
+     * @return 총 턴 수 (데이터 없으면 0)
+     */
+    @Query(
+            "SELECT COALESCE(SUM(c.turnCount), 0) " +
+            "FROM ChatSessionArchive c " +
+            "WHERE c.isDeleted = false " +
+            "  AND c.createdAt >= :start " +
+            "  AND c.createdAt < :end"
+    )
+    long sumTurnCountByCreatedAtBetween(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
+
+    /**
+     * 지정 기간 내 세션들의 intent_summary JSON 원문 목록을 조회한다.
+     *
+     * <p>통계 집계용으로 최대 1000 건까지만 가져와 서비스 레이어에서 파싱/합산한다.
+     * intent_summary 는 {@code {"recommend": 3, "search": 1, ...}} 형태의 JSON 객체이므로
+     * DB 수준 집계가 어렵다 (MySQL JSON 함수 의존성 회피).</p>
+     *
+     * @param start 범위 시작 시각 (inclusive)
+     * @param end   범위 종료 시각 (exclusive)
+     * @return intent_summary JSON 문자열 리스트 (null/공백 제외)
+     */
+    @Query(
+            "SELECT c.intentSummary " +
+            "FROM ChatSessionArchive c " +
+            "WHERE c.isDeleted = false " +
+            "  AND c.createdAt >= :start " +
+            "  AND c.createdAt < :end " +
+            "  AND c.intentSummary IS NOT NULL"
+    )
+    List<String> findIntentSummariesByCreatedAtBetween(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
 }

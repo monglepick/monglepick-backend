@@ -99,6 +99,58 @@ public class AdminRewardPolicyController {
         return ResponseEntity.ok(ApiResponse.ok(adminRewardPolicyService.getPolicyHistory(id)));
     }
 
+    /**
+     * 전체 정책 변경 이력 대시보드 — 2026-04-09 P2-⑰ 신규.
+     *
+     * <p>Spring MVC 는 리터럴 경로(`/history`)를 path variable(`/{id}/history`) 보다
+     * 우선 매치하므로, `/reward-policies/history` 와 `/reward-policies/{id}/history` 는
+     * 충돌 없이 공존한다. 전자는 전체 이력 통합 대시보드용, 후자는 개별 정책 이력 조회용.</p>
+     *
+     * <h3>필터 파라미터</h3>
+     * <ul>
+     *   <li>{@code policyId}: 특정 정책만 (생략 시 전체)</li>
+     *   <li>{@code changedBy}: 특정 관리자 userId 만 (생략 시 전체)</li>
+     *   <li>{@code fromDate} / {@code toDate}: 시간 범위 ISO-8601</li>
+     *   <li>{@code page} / {@code size}: 페이징 (기본 size=20)</li>
+     * </ul>
+     */
+    @Operation(
+            summary = "리워드 정책 변경 이력 대시보드 (전체)",
+            description = "모든 정책의 변경 이력을 복합 필터(policyId/changedBy/시간 범위)로 페이징 조회한다. " +
+                    "운영 감사 관점에서 '어떤 정책이 언제 누구에 의해 변경되었는가' 를 한 화면에서 파악한다. " +
+                    "2026-04-09 P2-⑰ 신규."
+    )
+    @GetMapping("/history")
+    public ResponseEntity<ApiResponse<Page<HistoryResponse>>> getAllHistory(
+            @Parameter(description = "특정 정책 ID 만 조회 (생략 시 전체)")
+            @RequestParam(required = false) Long policyId,
+
+            @Parameter(description = "변경한 관리자 userId (생략 시 전체)")
+            @RequestParam(required = false) String changedBy,
+
+            @Parameter(description = "시작 시각 inclusive (ISO-8601)")
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+            java.time.LocalDateTime fromDate,
+
+            @Parameter(description = "종료 시각 exclusive (ISO-8601)")
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+            java.time.LocalDateTime toDate,
+
+            @Parameter(description = "페이지 번호 (0부터 시작)")
+            @RequestParam(defaultValue = "0") int page,
+
+            @Parameter(description = "페이지 크기")
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<HistoryResponse> result = adminRewardPolicyService.getAllHistory(
+                policyId, changedBy, fromDate, toDate, pageable
+        );
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
     /** 신규 정책 등록 */
     @Operation(
             summary = "리워드 정책 신규 등록",

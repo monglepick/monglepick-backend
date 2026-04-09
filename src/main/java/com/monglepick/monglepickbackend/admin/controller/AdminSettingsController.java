@@ -6,9 +6,11 @@ import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AuditLogResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.BannerCreateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.BannerResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.BannerUpdateRequest;
+import com.monglepick.monglepickbackend.admin.dto.SettingsDto.CsvExportLogRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.TermsCreateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.TermsResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.TermsUpdateRequest;
+import com.monglepick.monglepickbackend.admin.service.AdminAuditService;
 import com.monglepick.monglepickbackend.admin.service.AdminSettingsService;
 import com.monglepick.monglepickbackend.global.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -63,6 +65,13 @@ public class AdminSettingsController {
 
     /** 설정 관련 비즈니스 로직 서비스 */
     private final AdminSettingsService adminSettingsService;
+
+    /**
+     * 관리자 감사 로그 기록 서비스 — CSV 내보내기 이벤트를 admin_audit_logs 에 남기기
+     * 위해 직접 주입받는다. AdminSettingsService 를 경유하지 않는 이유는 이 호출이
+     * 단순 로깅이라 별도의 비즈니스 검증/DTO 변환이 필요 없기 때문이다. (2026-04-09 P1-2 확장)
+     */
+    private final AdminAuditService adminAuditService;
 
     // ======================== 약관/정책 ========================
 
@@ -303,23 +312,136 @@ public class AdminSettingsController {
      * @return 감사 로그 목록 페이지 (Page&lt;AuditLogResponse&gt;)
      */
     @Operation(
-            summary = "감사 로그 목록 조회",
+            summary = "감사 로그 목록 조회 (고급 필터링)",
             description = "관리자 행위 감사 로그를 최신순으로 조회한다. " +
-                    "actionType 쿼리 파라미터로 행위 유형 필터링이 가능하다 (부분 일치, 대소문자 무시)."
+                    "actionType/targetType/targetId/시간 범위(from~to)를 조합하여 필터링할 수 있으며, " +
+                    "모든 파라미터는 선택사항이다. 2026-04-09 P1-⑤ 확장 + P2-⑮ targetId 추가."
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "날짜 형식 오류"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "관리자 권한 없음")
     })
     @GetMapping("/audit-logs")
     public ResponseEntity<ApiResponse<Page<AuditLogResponse>>> getAuditLogs(
-            @Parameter(description = "행위 유형 필터 키워드 (부분 일치, 생략 시 전체 조회)")
+            @Parameter(description = "행위 유형 부분 일치 키워드 (대소문자 무시, 생략 가능)")
             @RequestParam(required = false) String actionType,
+
+            @Parameter(description = "대상 유형 정확 일치 (예: USER, PAYMENT, SUBSCRIPTION, EXPORT_SOURCE)")
+            @RequestParam(required = false) String targetType,
+
+            @Parameter(description = "대상 엔티티 식별자 정확 일치 (예: user_abc123). " +
+                    "사용자 360도 뷰에서 특정 사용자 대상 관리 조치를 조회하는 용도.")
+            @RequestParam(required = false) String targetId,
+
+            @Parameter(description = "시작 시각 inclusive (ISO-8601, 예: 2026-04-01T00:00:00)")
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+            java.time.LocalDateTime fromDate,
+
+            @Parameter(description = "종료 시각 exclusive (ISO-8601)")
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+            java.time.LocalDateTime toDate,
+
             @PageableDefault(size = 20) Pageable pageable
     ) {
-        log.debug("[AdminSettings] 감사 로그 조회 요청 — actionType={}, page={}", actionType, pageable.getPageNumber());
-        Page<AuditLogResponse> result = adminSettingsService.getAuditLogs(actionType, pageable);
+        log.debug("[AdminSettings] 감사 로그 조회 — actionType={}, targetType={}, targetId={}, from={}, to={}, page={}",
+                actionType, targetType, targetId, fromDate, toDate, pageable.getPageNumber());
+        Page<AuditLogResponse> result =
+                adminSettingsService.getAuditLogs(actionType, targetType, targetId, fromDate, toDate, pageable);
         return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    /**
+     * CSV 내보내기 이벤트를 감사 로그에 기록한다 — 2026-04-09 신규 (P1-2 확장).
+     *
+     * <p>CSV 내보내기는 브라우저(클라이언트 측)에서 완료되므로, 서버는 기본적으로 이
+     * 이벤트를 감지할 수 없다. 따라서 프론트엔드의 {@code CsvExportButton} 이 다운로드
+     * 완료 직후 이 엔드포인트를 명시적으로 호출하여 {@code admin_audit_logs} 테이블에
+     * "누가 언제 어떤 소스를 몇 건 내보냈는가"를 남긴다.</p>
+     *
+     * <h3>왜 이 기록이 필요한가</h3>
+     * <ul>
+     *   <li><b>개인정보 유출 추적</b>: 사용자/결제 데이터 CSV 가 외부로 유출되는 경로의
+     *       상류(source) 지점을 식별하기 위함. GDPR/개인정보보호법 감사 대응.</li>
+     *   <li><b>내부 통제</b>: 관리자가 비정상적으로 대량의 민감 데이터를 내보내는 행위를
+     *       사후 탐지 가능.</li>
+     *   <li><b>사용 패턴 분석</b>: 운영팀이 어떤 데이터 소스에 의존하는지 파악하여 대시보드
+     *       개선 방향을 결정.</li>
+     * </ul>
+     *
+     * <h3>보안 고려사항</h3>
+     * <p>요청 측(프론트엔드)이 {@code rowCount} 를 조작할 수 있으나, 이 엔드포인트의
+     * 목적은 "기록"이지 "검증"이 아니다. 실제 내보낸 양을 서버가 정확히 알려면 CSV 생성
+     * 자체를 서버에서 해야 하는데 현재 아키텍처는 클라이언트 측 생성이므로, 일단 클라이언트
+     * 보고를 신뢰하되 비정상적 수치는 통계 분석으로 탐지한다.</p>
+     *
+     * @param request 내보내기 메타데이터 (source / filename / rowCount / filterInfo)
+     * @return 201 Created — 본문 없음
+     */
+    @Operation(
+            summary = "CSV 내보내기 이벤트 로그 기록",
+            description = "관리자가 브라우저에서 CSV 다운로드를 완료한 직후 호출하여, " +
+                    "admin_audit_logs 테이블에 CSV_EXPORT 액션을 기록한다. 파일 내용은 저장하지 않고 " +
+                    "소스/파일명/행 수/필터 정보만 남긴다."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "감사 로그 기록 완료"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "필수 필드 누락"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "관리자 권한 없음")
+    })
+    @PostMapping("/audit-logs/csv-export")
+    public ResponseEntity<ApiResponse<Void>> recordCsvExport(
+            @Valid @RequestBody CsvExportLogRequest request
+    ) {
+        log.info("[AdminSettings] CSV 내보내기 이벤트 기록 — source={}, rowCount={}, filename={}",
+                request.source(), request.rowCount(), request.filename());
+
+        // 사람이 읽을 수 있는 설명 — 감사 로그 조회 UI 에서 바로 이해 가능하도록 구성
+        // 예: "CSV 내보내기 — source=recommendation_logs, rows=523, file=recommendation_logs_7d_2026-04-09.csv, filters=period=7d"
+        String description = String.format(
+                "CSV 내보내기 — source=%s, rows=%d%s%s",
+                request.source(),
+                request.rowCount(),
+                request.filename() != null ? ", file=" + request.filename() : "",
+                request.filterInfo() != null ? ", filters=" + request.filterInfo() : ""
+        );
+
+        // 상세 스냅샷(JSON) — 구조적 필터링이 가능하도록 afterData 에 저장
+        String afterData = String.format(
+                "{\"source\":\"%s\",\"rowCount\":%d,\"filename\":%s,\"filterInfo\":%s}",
+                escapeJsonString(request.source()),
+                request.rowCount(),
+                request.filename() != null ? "\"" + escapeJsonString(request.filename()) + "\"" : "null",
+                request.filterInfo() != null ? "\"" + escapeJsonString(request.filterInfo()) + "\"" : "null"
+        );
+
+        // AdminAuditService 는 REQUIRES_NEW 로 격리되어 있어 실패해도 컨트롤러에 예외가 전파되지 않는다.
+        adminAuditService.log(
+                AdminAuditService.ACTION_CSV_EXPORT,
+                AdminAuditService.TARGET_EXPORT_SOURCE,
+                request.source(),
+                description,
+                null,
+                afterData
+        );
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(null));
+    }
+
+    /**
+     * 감사 로그 afterData JSON 직렬화용 문자열 이스케이프 헬퍼.
+     *
+     * <p>Jackson 의존을 피하고 문자열 조립으로 JSON 을 만들기 때문에, 사용자 입력
+     * 문자열에 포함된 큰따옴표/역슬래시/개행을 수동으로 이스케이프해야 한다.</p>
+     */
+    private String escapeJsonString(String raw) {
+        if (raw == null) return "";
+        return raw.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r");
     }
 
     // ======================== 관리자 계정 ========================

@@ -15,6 +15,7 @@ import com.monglepick.monglepickbackend.admin.repository.AdminTermsRepository;
 import com.monglepick.monglepickbackend.domain.admin.entity.AdminAuditLog;
 import com.monglepick.monglepickbackend.domain.content.entity.Banner;
 import com.monglepick.monglepickbackend.domain.content.entity.Terms;
+import com.monglepick.monglepickbackend.global.constants.AdminRole;
 import com.monglepick.monglepickbackend.domain.content.mapper.ContentMapper;
 import com.monglepick.monglepickbackend.domain.user.entity.Admin;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -28,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -258,25 +260,58 @@ public class AdminSettingsService {
     // ======================== 감사 로그 ========================
 
     /**
-     * 감사 로그 목록을 최신순으로 페이지네이션하여 조회한다.
+     * 감사 로그 목록을 복합 필터로 조회한다 — 2026-04-09 P1-⑤ 확장 + P2-⑮ targetId 추가.
      *
-     * <p>{@code actionType}이 null 또는 빈 문자열이면 전체 조회하고,
-     * 값이 있으면 해당 문자열을 포함하는 actionType만 필터링한다.</p>
+     * <p>모든 필터 파라미터는 optional 이며 null/빈 값이면 해당 조건을 무시한다.
+     * 실제 필터링 로직은 {@link AdminAuditLogRepository#searchByFilters} 의 JPQL 에서
+     * 처리된다 (한 번의 쿼리로 모든 조건 처리).</p>
      *
-     * @param actionType 행위 유형 필터 키워드 (부분 일치, null/빈 값이면 전체 조회)
-     * @param pageable   페이지 정보 (page, size, sort)
+     * <h3>필터 파라미터</h3>
+     * <ul>
+     *   <li>{@code actionType} — 행위 유형 부분 일치 (대소문자 무시)</li>
+     *   <li>{@code targetType} — 대상 엔티티 유형 정확 일치 (예: "USER", "PAYMENT")</li>
+     *   <li>{@code targetId}   — 대상 엔티티 식별자 정확 일치 (2026-04-09 P2-⑮ 추가).
+     *       사용자 360도 뷰에서 "이 사용자에게 가해진 관리 조치" 를 조회하는 용도.</li>
+     *   <li>{@code fromDate}   — 이 시각 이상 (inclusive)</li>
+     *   <li>{@code toDate}     — 이 시각 미만 (exclusive)</li>
+     * </ul>
+     *
+     * <p>빈 문자열이 들어오면 null 과 동일하게 취급하여 조건을 비활성화한다 — 프론트엔드가
+     * 폼 리셋 시 빈 문자열을 전달하는 일반적 패턴을 수용하기 위함.</p>
+     *
+     * @param actionType 행위 유형 필터 키워드 (nullable/blank)
+     * @param targetType 대상 유형 필터 (nullable/blank)
+     * @param targetId   대상 엔티티 식별자 필터 (nullable/blank)
+     * @param fromDate   시작 시각 inclusive (nullable)
+     * @param toDate     종료 시각 exclusive (nullable)
+     * @param pageable   페이지 정보 (ORDER BY 는 Repository 에서 고정)
      * @return 감사 로그 응답 DTO 페이지
      */
-    public Page<AuditLogResponse> getAuditLogs(String actionType, Pageable pageable) {
-        log.debug("[settings] 감사 로그 목록 조회 — actionType={}, page={}", actionType, pageable.getPageNumber());
+    public Page<AuditLogResponse> getAuditLogs(
+            String actionType,
+            String targetType,
+            String targetId,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Pageable pageable
+    ) {
+        log.debug("[settings] 감사 로그 조회 — actionType={}, targetType={}, targetId={}, from={}, to={}, page={}",
+                actionType, targetType, targetId, fromDate, toDate, pageable.getPageNumber());
 
-        /* actionType 필터 유무에 따라 다른 쿼리 사용 */
-        if (StringUtils.hasText(actionType)) {
-            return adminAuditLogRepository
-                    .findByActionTypeContainingIgnoreCaseOrderByCreatedAtDesc(actionType, pageable)
-                    .map(this::toAuditLogResponse);
-        }
-        return adminAuditLogRepository.findAllByOrderByCreatedAtDesc(pageable)
+        // 빈 문자열은 null 로 정규화 — JPQL :param IS NULL 조건이 반응하도록
+        String normalizedActionType = StringUtils.hasText(actionType) ? actionType : null;
+        String normalizedTargetType = StringUtils.hasText(targetType) ? targetType : null;
+        String normalizedTargetId   = StringUtils.hasText(targetId) ? targetId : null;
+
+        return adminAuditLogRepository
+                .searchByFilters(
+                        normalizedActionType,
+                        normalizedTargetType,
+                        normalizedTargetId,
+                        fromDate,
+                        toDate,
+                        pageable
+                )
                 .map(this::toAuditLogResponse);
     }
 
@@ -309,6 +344,22 @@ public class AdminSettingsService {
     @Transactional
     public AdminAccountResponse updateAdminRole(Long id, AdminRoleUpdateRequest request) {
         log.info("[settings] 관리자 역할 수정 — adminId={}, newRole={}", id, request.adminRole());
+
+        /*
+         * 2026-04-09 P2-⑫ 확장: 허용된 역할값 검증.
+         *
+         * 기존에는 request.adminRole() 을 그대로 저장하여 임의 문자열("foo" 등) 이 DB 에
+         * 들어갈 수 있었다. 본 검증은 AdminRole enum 에 정의된 7종 코드만 허용한다.
+         * 허용값이 아니면 BusinessException(INVALID_INPUT) 을 던져 저장을 차단한다.
+         */
+        if (!AdminRole.isAllowed(request.adminRole())) {
+            log.warn("[settings] 관리자 역할 수정 실패 — 허용되지 않은 역할 코드: {}", request.adminRole());
+            throw new BusinessException(
+                    ErrorCode.INVALID_INPUT,
+                    "허용되지 않은 역할 코드입니다: " + request.adminRole() +
+                    " (허용값: " + AdminRole.allowedCodesAsString() + ")"
+            );
+        }
 
         Admin admin = adminAccountRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
@@ -387,6 +438,9 @@ public class AdminSettingsService {
                 log.getTargetId(),
                 log.getDescription(),
                 log.getIpAddress(),
+                /* 2026-04-09 P2-⑲ 확장: JSON Diff 뷰어에 필요한 변경 전/후 스냅샷 */
+                log.getBeforeData(),
+                log.getAfterData(),
                 log.getCreatedAt()
         );
     }

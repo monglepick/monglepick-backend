@@ -42,6 +42,11 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
     implementation 'io.micrometer:micrometer-registry-prometheus'
+    // ELK 스택 연동 — Filebeat → Logstash → ES 파이프라인을 위해
+    // console 출력을 JSON 으로 전환한다. Backend 도커 컨테이너 stdout 이
+    // docker json-file driver 로 /var/lib/docker/containers/.../*.log 에 기록되고,
+    // Filebeat(VM2)가 이를 Logstash(VM3:5044)로 전송 → Logstash spring_json 필터 적용.
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-cache'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

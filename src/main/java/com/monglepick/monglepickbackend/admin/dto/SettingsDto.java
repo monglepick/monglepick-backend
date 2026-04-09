@@ -206,6 +206,10 @@ public class SettingsDto {
     /**
      * 감사 로그 단건 응답 DTO.
      *
+     * <p>2026-04-09 P2-⑲ 확장: {@code beforeData} / {@code afterData} 필드 추가.
+     * 엔티티에는 JSON 컬럼으로 존재했으나 기존 DTO 가 이를 노출하지 않아 Frontend 에서
+     * 변경 전/후 스냅샷을 볼 수 없었다. JSON Diff 뷰어 지원을 위해 필드를 추가한다.</p>
+     *
      * @param id          감사 로그 고유 ID
      * @param adminId     행위를 수행한 관리자 레코드 ID (시스템 자동 처리 시 null)
      * @param actionType  행위 유형 코드 (USER_SUSPEND, POINT_MANUAL 등)
@@ -213,6 +217,8 @@ public class SettingsDto {
      * @param targetId    대상 엔티티 식별자
      * @param description 행위에 대한 사람이 읽을 수 있는 설명
      * @param ipAddress   관리자 클라이언트 IP 주소
+     * @param beforeData  변경 전 데이터 스냅샷 (JSON 문자열, nullable). UPDATE/DELETE 에 사용
+     * @param afterData   변경 후 데이터 스냅샷 (JSON 문자열, nullable). INSERT/UPDATE 에 사용
      * @param createdAt   로그 기록 일시
      */
     public record AuditLogResponse(
@@ -223,6 +229,8 @@ public class SettingsDto {
             String targetId,
             String description,
             String ipAddress,
+            String beforeData,
+            String afterData,
             LocalDateTime createdAt
     ) {}
 
@@ -256,5 +264,44 @@ public class SettingsDto {
             @NotBlank(message = "관리자 역할은 필수입니다.")
             @Size(max = 50, message = "관리자 역할 코드는 최대 50자입니다.")
             String adminRole
+    ) {}
+
+    // ======================== CSV 내보내기 감사 로그 DTO ========================
+
+    /**
+     * CSV 내보내기 이벤트 기록 요청 DTO — 2026-04-09 신규 추가.
+     *
+     * <p>관리자가 브라우저에서 CSV 다운로드를 완료한 직후, 프론트엔드가 이 DTO 로
+     * {@code POST /api/v1/admin/audit-logs/csv-export} 를 호출하여
+     * {@code admin_audit_logs} 테이블에 해당 이벤트를 기록한다.</p>
+     *
+     * <h3>필드 설명</h3>
+     * <ul>
+     *   <li>{@code source}     — 내보낸 데이터 소스의 논리 식별자 (예: "recommendation_logs",
+     *       "users", "payments"). 프론트엔드 호출 측에서 명시적으로 지정한다.</li>
+     *   <li>{@code filename}   — 실제 다운로드된 파일명 (예: "recommendation_logs_7d_2026-04-09.csv")</li>
+     *   <li>{@code rowCount}   — 내보낸 행 수. 개인정보 유출 영향도 판단의 근거가 된다.</li>
+     *   <li>{@code filterInfo} — 내보내기 시점의 필터 조건을 사람이 읽을 수 있는 간단한
+     *       문자열로 직렬화한 값. 예: "period=7d, status=COMPLETED". nullable.</li>
+     * </ul>
+     *
+     * <h3>왜 파일 내용은 저장하지 않는가</h3>
+     * <p>파일 원본을 서버에 저장하면 저장 공간/개인정보 재유출 리스크가 커진다. 감사 목적
+     * 상으로는 "누가 언제 어떤 소스에서 몇 건을 내보냈는가" 메타데이터만으로 충분하며,
+     * 실제 데이터는 소스 테이블에서 언제든 재조회 가능하다.</p>
+     */
+    public record CsvExportLogRequest(
+            @NotBlank(message = "내보내기 소스는 필수입니다.")
+            @Size(max = 100, message = "소스 코드는 최대 100자입니다.")
+            String source,
+
+            @Size(max = 200, message = "파일명은 최대 200자입니다.")
+            String filename,
+
+            @NotNull(message = "행 수는 필수입니다.")
+            Integer rowCount,
+
+            @Size(max = 500, message = "필터 정보는 최대 500자입니다.")
+            String filterInfo
     ) {}
 }

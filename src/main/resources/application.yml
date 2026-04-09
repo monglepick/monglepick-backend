@@ -142,6 +142,44 @@ server:
       force: true
 
 ## -------------------------------------------------------------------------
+## Actuator / Micrometer Prometheus 설정
+## -------------------------------------------------------------------------
+## Prometheus(10.20.0.12)가 /actuator/prometheus 를 스크레이프한다.
+## 의존성: `io.micrometer:micrometer-registry-prometheus` (build.gradle:44)
+## 노출 엔드포인트: health(details: always), info, prometheus, metrics
+## SecurityConfig 에서 `/actuator/**` 는 이미 permitAll 처리되어 있다.
+## 태그: 모든 메트릭에 application=monglepick-backend, env=${SPRING_PROFILES_ACTIVE} 라벨 부여.
+## 히스토그램: http.server.requests 에 대해 SLO bucket 활성화하여 Grafana p50/p95/p99 관측.
+management:
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+    prometheus:
+      access: unrestricted
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      env: ${SPRING_PROFILES_ACTIVE:default}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+      slo:
+        http.server.requests: 50ms, 100ms, 200ms, 500ms, 1s, 2s
+
+## -------------------------------------------------------------------------
 ## P6Spy 데이터소스 데코레이터 설정
 ## -------------------------------------------------------------------------
 ## com.github.gavlyukovskiy:p6spy-spring-boot-starter 가 자동으로 DataSource 를
@@ -185,6 +223,11 @@ app:
     email: ${ADMIN_EMAIL}
     password: ${ADMIN_PASSWORD}
     nickname: ${ADMIN_NICKNAME}
+    ## 관리자 시드 계정 세부 역할 — 2026-04-09 P2-⑫ RBAC 추가
+    ## 허용값: SUPER_ADMIN / ADMIN / MODERATOR / FINANCE_ADMIN / SUPPORT_ADMIN / DATA_ADMIN / AI_OPS_ADMIN
+    ## 생략 시 SUPER_ADMIN (시드 계정은 관리자 계정 관리 권한까지 보유해야 초기 운영 가능)
+    ## 허용되지 않은 값이 들어오면 DataInitializer 가 SUPER_ADMIN 으로 fallback 하고 warning 로그
+    role: ${ADMIN_ROLE:SUPER_ADMIN}
   service:
     ## ⚠ 운영 환경에서는 반드시 SERVICE_API_KEY 환경변수를 설정해야 합니다
     key: ${SERVICE_API_KEY:dev-service-key-change-me}

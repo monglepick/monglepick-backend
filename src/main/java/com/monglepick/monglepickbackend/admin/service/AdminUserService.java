@@ -99,6 +99,14 @@ public class AdminUserService {
     /** AI 쿼터(이용권) 레포지토리 — 관리자 수동 이용권 발급에서 사용 */
     private final UserAiQuotaRepository userAiQuotaRepository;
 
+    /**
+     * 관리자 감사 로그 서비스 — 역할 변경/정지/복구/수동 포인트/이용권 발급 5개
+     * 쓰기 액션의 성공 시점에 호출하여 admin_audit_logs 에 흔적을 남긴다.
+     * REQUIRES_NEW 트랜잭션이므로 감사 로그 실패는 업무 트랜잭션에 영향을 주지 않는다.
+     * (2026-04-09 P1-1 추가)
+     */
+    private final AdminAuditService adminAuditService;
+
     // ──────────────────────────────────────────────
     // 조회 메서드 (readOnly = true 상속)
     // ──────────────────────────────────────────────
@@ -255,6 +263,9 @@ public class AdminUserService {
         // 사용자 조회
         User user = findActiveUser(userId);
 
+        // 변경 전 역할 스냅샷 — 감사 로그 beforeData 로 사용
+        UserRole previousRole = user.getUserRole();
+
         // 역할 enum 파싱
         UserRole newRole;
         try {
@@ -270,6 +281,19 @@ public class AdminUserService {
         userMapper.update(user);
 
         log.info("[AdminUserService] 역할 변경 — userId={}, newRole={}", userId, newRole);
+
+        // 감사 로그 — 권한 상승/하강은 보안 크리티컬 액션이므로 반드시 기록 (beforeData/afterData 포함)
+        adminAuditService.log(
+                AdminAuditService.ACTION_USER_ROLE_UPDATE,
+                AdminAuditService.TARGET_USER,
+                userId,
+                String.format("사용자 %s 역할 변경 — %s → %s",
+                        userId,
+                        previousRole != null ? previousRole.name() : "NULL",
+                        newRole.name()),
+                String.format("{\"role\":\"%s\"}", previousRole != null ? previousRole.name() : ""),
+                String.format("{\"role\":\"%s\"}", newRole.name())
+        );
 
         // 저장 후 상세 정보 반환
         return getUserDetail(userId);
@@ -340,6 +364,25 @@ public class AdminUserService {
 
         log.info("[AdminUserService] 계정 정지 — userId={}, reason={}, until={}, adminId={}",
                 userId, reason, suspendedUntil, adminId);
+
+        // 감사 로그 — 사용자 제재는 민원·법적 분쟁 가능성이 있으므로 반드시 기록
+        // user_status 이력은 김민규 도메인 원장이고, admin_audit_logs 는 운영 감사 관점의 별도 기록이다.
+        String afterSnapshot = String.format(
+                "{\"status\":\"SUSPENDED\",\"suspendedUntil\":%s,\"durationDays\":%s}",
+                suspendedUntil != null ? "\"" + suspendedUntil + "\"" : "null",
+                days != null ? days : "null"
+        );
+        adminAuditService.log(
+                AdminAuditService.ACTION_USER_SUSPEND,
+                AdminAuditService.TARGET_USER,
+                userId,
+                String.format("사용자 %s 계정 정지 (기간: %s, 사유: %s)",
+                        userId,
+                        suspendedUntil != null ? days + "일" : "영구",
+                        reason),
+                "{\"status\":\"ACTIVE\"}",
+                afterSnapshot
+        );
     }
 
     /**
@@ -400,6 +443,16 @@ public class AdminUserService {
         adminUserStatusRepository.save(activateHistory);
 
         log.info("[AdminUserService] 계정 복구 — userId={}, adminId={}", userId, adminId);
+
+        // 감사 로그 — 정지 해제 (정지와 짝을 이루는 운영 액션이므로 기록 필수)
+        adminAuditService.log(
+                AdminAuditService.ACTION_USER_UNSUSPEND,
+                AdminAuditService.TARGET_USER,
+                userId,
+                String.format("사용자 %s 계정 정지 해제 (관리자 복구)", userId),
+                "{\"status\":\"SUSPENDED\"}",
+                "{\"status\":\"ACTIVE\"}"
+        );
     }
 
     /**
@@ -478,6 +531,27 @@ public class AdminUserService {
         log.info("[AdminUserService] 수동 포인트 조정 — userId={}, delta={}, before={}, after={}, adminId={}",
                 userId, delta, balanceBefore, balanceAfter, adminId);
 
+        // 감사 로그 — 금전 이동(포인트는 크레딧 경제의 기본 재화)이므로 필수 기록
+        // PointsHistory 는 도메인 원장이고 admin_audit_logs 는 관리자 운영 감사 관점의 별도 기록이다.
+        String beforeSnapshot = String.format("{\"balance\":%d}", balanceBefore);
+        String afterSnapshot = String.format(
+                "{\"balance\":%d,\"delta\":%d,\"pointType\":\"%s\",\"historyId\":%d}",
+                balanceAfter, delta, pointType, savedHistory.getPointsHistoryId()
+        );
+        adminAuditService.log(
+                AdminAuditService.ACTION_POINT_MANUAL,
+                AdminAuditService.TARGET_USER,
+                userId,
+                String.format("사용자 %s 수동 포인트 %s %dP (before=%dP, after=%dP, 사유: %s)",
+                        userId,
+                        delta > 0 ? "지급" : "차감",
+                        Math.abs(delta),
+                        balanceBefore, balanceAfter,
+                        request.reason()),
+                beforeSnapshot,
+                afterSnapshot
+        );
+
         return new ManualPointResponse(
                 userId,
                 delta,
@@ -522,6 +596,23 @@ public class AdminUserService {
 
         log.info("[AdminUserService] 수동 이용권 발급 — userId={}, count={}, before={}, after={}, reason={}, adminId={}",
                 userId, request.count(), tokensBefore, tokensAfter, request.reason(), adminId);
+
+        // 감사 로그 — AI 이용권(purchased_ai_tokens)은 금전 가치가 있는 자산이므로 필수 기록
+        String beforeSnapshot = String.format("{\"purchasedAiTokens\":%d}", tokensBefore);
+        String afterSnapshot = String.format(
+                "{\"purchasedAiTokens\":%d,\"granted\":%d}", tokensAfter, request.count()
+        );
+        adminAuditService.log(
+                AdminAuditService.ACTION_AI_TOKEN_GRANT,
+                AdminAuditService.TARGET_USER,
+                userId,
+                String.format("사용자 %s AI 이용권 %d회 수동 발급 (before=%d, after=%d, 사유: %s)",
+                        userId, request.count(),
+                        tokensBefore, tokensAfter,
+                        request.reason()),
+                beforeSnapshot,
+                afterSnapshot
+        );
 
         return new GrantAiTokenResponse(
                 userId,

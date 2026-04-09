@@ -25,6 +25,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -85,6 +86,49 @@ public class AdminRewardPolicyService {
                 .stream()
                 .map(this::toHistoryResponse)
                 .toList();
+    }
+
+    /**
+     * 모든 리워드 정책의 변경 이력을 복합 필터로 페이징 조회한다 — 2026-04-09 P2-⑰ 신규.
+     *
+     * <p>기존 {@link #getPolicyHistory(Long)} 는 개별 정책 단위로만 이력을 조회할 수 있어서
+     * "운영 감사 관점에서 모든 정책의 변경 이력을 한 화면에서" 보는 것이 불가능했다.
+     * 본 메서드는 Repository 의 {@code searchAllByFilters()} 를 호출하여 정책 ID,
+     * 변경 관리자, 시간 범위를 조합한 복합 필터 조회를 제공한다.</p>
+     *
+     * <h3>필터 파라미터</h3>
+     * <ul>
+     *   <li>{@code policyId}: 특정 정책만 조회 (null 이면 전체)</li>
+     *   <li>{@code changedBy}: 특정 관리자의 변경만 조회 (null 이면 전체)</li>
+     *   <li>{@code fromDate}: 이 시각 이상 (inclusive, nullable)</li>
+     *   <li>{@code toDate}: 이 시각 미만 (exclusive, nullable)</li>
+     * </ul>
+     *
+     * <p>빈 문자열 {@code changedBy} 는 null 로 정규화하여 조건을 비활성화한다.</p>
+     *
+     * @param policyId  특정 정책 ID (nullable)
+     * @param changedBy 변경 관리자 userId (nullable/blank)
+     * @param fromDate  시작 시각 (nullable)
+     * @param toDate    종료 시각 (nullable)
+     * @param pageable  페이지 정보 (정렬은 Repository 에서 createdAt DESC 고정)
+     * @return 필터링된 이력 응답 DTO 페이지
+     */
+    public Page<HistoryResponse> getAllHistory(
+            Long policyId,
+            String changedBy,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Pageable pageable
+    ) {
+        log.debug("[RewardPolicy] 전체 변경 이력 조회 — policyId={}, changedBy={}, from={}, to={}, page={}",
+                policyId, changedBy, fromDate, toDate, pageable.getPageNumber());
+
+        // 빈 문자열은 null 로 정규화 — JPQL :param IS NULL 조건이 반응하도록
+        String normalizedChangedBy = (changedBy != null && !changedBy.isBlank()) ? changedBy : null;
+
+        return historyRepository
+                .searchAllByFilters(policyId, normalizedChangedBy, fromDate, toDate, pageable)
+                .map(this::toHistoryResponse);
     }
 
     // ─────────────────────────────────────────────

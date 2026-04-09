@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  Spring Boot 로그 설정 — 몽글픽 Backend
+  ============================================================================
+  목적: ELK 스택(Filebeat → Logstash → Elasticsearch)에 구조화된 로그를 공급
+       하기 위해 console 출력을 logstash-logback-encoder JSON 포맷으로 내보낸다.
+
+  동작 방식:
+    - 모든 로그 이벤트는 stdout(JSON)으로 출력된다.
+    - docker json-file driver 가 /var/lib/docker/containers/*/*-json.log 로 기록.
+    - VM2 Filebeat 가 해당 파일을 tail → VM3 Logstash 5044 → ES logs-monglepick-backend-YYYY.MM.dd.
+    - Logstash 파이프라인은 fields.log_type == "spring_json" 분기에서 JSON 을 파싱
+      하고 level / logger_name / thread_name / trace_id 필드를 플랫으로 전개한다.
+
+  프로파일:
+    - default / dev : stdout 컬러 콘솔 포맷 (사람이 읽기 쉬운 한 줄)
+    - prod / staging: JSON 포맷 (Logstash 인제스트 전용)
+  ============================================================================
+-->
+<configuration>
+
+    <!-- ======================================================================
+         1. 공통 속성
+         ====================================================================== -->
+    <property name="APP_NAME" value="monglepick-backend"/>
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%logger{36}) - %msg%n"/>
+
+    <!-- Spring Boot 가 기본 제공하는 console/file appender 정의 include -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- ======================================================================
+         2. 개발 프로파일 — 사람이 읽는 컬러 콘솔
+         ====================================================================== -->
+    <springProfile name="default,dev,local">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>${LOG_PATTERN}</pattern>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+
+        <logger name="com.monglepick" level="DEBUG"/>
+        <logger name="p6spy" level="INFO"/>
+    </springProfile>
+
+    <!-- ======================================================================
+         3. 운영/스테이징 — JSON 구조화 로그 (ELK 수집 대상)
+         ====================================================================== -->
+    <springProfile name="prod,staging">
+        <!--
+          LogstashEncoder:
+            - @timestamp, @version, message, logger_name, thread_name, level, level_value
+            - MDC 전체를 top-level 필드로 노출 → trace_id/span_id/user_id 가 자동으로 분리됨
+            - providers 섹션으로 application/env 커스텀 필드 추가
+        -->
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeContext>false</includeContext>
+                <includeMdc>true</includeMdc>
+                <customFields>{"application":"monglepick-backend","env":"${SPRING_PROFILES_ACTIVE:-prod}"}</customFields>
+                <fieldNames>
+                    <timestamp>@timestamp</timestamp>
+                    <message>message</message>
+                    <thread>thread_name</thread>
+                    <logger>logger_name</logger>
+                    <level>level</level>
+                    <stackTrace>stack_trace</stackTrace>
+                </fieldNames>
+                <!--
+                  스택트레이스 축약 — 긴 스택을 2KB 로 제한하고 java/io/org/spring 프레임워크
+                  프레임을 1회만 표시하여 ES 문서 크기를 줄인다.
+                -->
+                <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                    <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                    <maxLength>2048</maxLength>
+                    <shortenedClassNameLength>36</shortenedClassNameLength>
+                    <rootCauseFirst>true</rootCauseFirst>
+                    <exclude>^sun\\.reflect\\..*\\.invoke</exclude>
+                    <exclude>^net\\.sf\\.cglib\\.proxy\\.MethodProxy\\.invoke</exclude>
+                </throwableConverter>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+
+        <!-- 도메인 로그 레벨 — 운영 환경에서는 DEBUG 대신 INFO 로 잡는다 -->
+        <logger name="com.monglepick" level="INFO"/>
+        <!-- p6spy SQL 출력은 운영에서 WARN 이상만 (성능/저장공간 보호) -->
+        <logger name="p6spy" level="WARN"/>
+    </springProfile>
+
+</configuration>
