@@ -320,8 +320,7 @@ public class AdminStatsService {
      * 인기 검색어를 반환한다.
      *
      * <p>search_history 테이블의 실제 데이터를 집계한다.
-     * (user_id, keyword) UNIQUE 제약으로 인해 COUNT는 해당 키워드를 검색한
-     * 고유 사용자 수를 의미한다.</p>
+     * COUNT는 해당 키워드에 대해 저장된 검색 이력 레코드 수를 의미한다.</p>
      *
      * <p>ctr 필드는 키워드 검색 후 결과가 1건 이상인 검색 비율을 나타낸다.
      * totalResultCount &gt; 0이면 결과 있음으로 간주하고,

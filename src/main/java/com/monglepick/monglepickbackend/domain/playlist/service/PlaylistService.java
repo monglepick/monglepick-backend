@@ -149,7 +149,9 @@ public class PlaylistService {
         Playlist playlist = Playlist.builder()
                 .userId(userId)
                 .playlistName(request.playlistName())
-                .isPublic(false)    // 기본 비공개
+                .description(request.description())
+                .isPublic(request.isPublic() != null ? request.isPublic() : false)
+                .coverImageUrl(request.coverImageUrl())
                 .likeCount(0)
                 .build();
 

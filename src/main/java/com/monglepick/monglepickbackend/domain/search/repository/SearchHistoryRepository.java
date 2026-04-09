@@ -13,7 +13,7 @@ import java.util.Optional;
  *
  * <p>사용자의 검색 키워드 이력을 저장하고 조회하는 기능을 제공한다.
  * 동일 사용자가 같은 키워드를 재검색하면 searchedAt을 갱신하는 UPSERT 방식으로 처리한다
- * (user_id, keyword UNIQUE 제약 — 애플리케이션 레벨에서 처리).</p>
+ * (현재 서비스 정책 기준).</p>
  *
  * <h3>주요 메서드</h3>
  * <ul>
@@ -30,8 +30,8 @@ public interface SearchHistoryRepository extends JpaRepository<SearchHistory, Lo
      * 이미 검색 이력이 존재하면 searchedAt을 갱신하고,
      * 없으면 새 이력을 생성한다.</p>
      *
-     * <p>search_history 테이블의 (user_id, keyword) UNIQUE 제약을
-     * 애플리케이션 레벨에서 안전하게 처리하기 위한 메서드이다.</p>
+     * <p>동일 키워드를 하나의 최근 검색 항목으로 유지하려는
+     * 서비스 정책을 구현할 때 사용하는 조회 메서드이다.</p>
      *
      * @param userId  검색한 사용자 ID
      * @param keyword 검색 키워드
@@ -53,8 +53,7 @@ public interface SearchHistoryRepository extends JpaRepository<SearchHistory, Lo
     /**
      * 검색 키워드별 검색 사용자 수를 내림차순으로 반환한다 (인기 검색어 집계용).
      *
-     * <p>search_history는 (user_id, keyword) UNIQUE 제약이 있으므로,
-     * COUNT(sh)는 해당 키워드를 검색한 고유 사용자 수를 의미한다.
+     * <p>COUNT(sh)는 현재 저장된 검색 이력 레코드 수를 의미한다.
      * result_count 합산 값도 함께 반환하여 검색 품질(결과 있음 여부) 판단에 활용한다.</p>
      *
      * <p>반환 배열 구조: [keyword(String), userCount(Long), totalResultCount(Long)]</p>

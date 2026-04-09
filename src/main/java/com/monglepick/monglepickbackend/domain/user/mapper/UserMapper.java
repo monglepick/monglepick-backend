@@ -76,6 +76,9 @@ public interface UserMapper {
                                 @Param("suspendedUntil") LocalDateTime suspendedUntil,
                                 @Param("suspendReason") String suspendReason);
 
+    /** 이메일 기준 비밀번호 변경 (LOCAL 계정 전용) */
+    void updatePasswordByEmail(@Param("email") String email, @Param("passwordHash") String passwordHash);
+
     // ═══ 통계/집계 (관리자 통계/대시보드용) ═══
 
     /** 전체 사용자 수 (탈퇴 포함) */

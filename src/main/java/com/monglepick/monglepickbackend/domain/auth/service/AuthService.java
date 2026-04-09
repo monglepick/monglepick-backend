@@ -1,6 +1,8 @@
 package com.monglepick.monglepickbackend.domain.auth.service;
 
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.AuthResponse;
+import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.PasswordCheckRequest;
+import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.PasswordResetRequest;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.SignupRequest;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.UserInfo;
 import com.monglepick.monglepickbackend.domain.auth.dto.CustomOAuth2User;
@@ -133,6 +135,40 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         log.info("로컬 회원가입 완료 — userId: {}, email: {}", userId, request.email());
 
         return authResponse;
+    }
+
+    // ──────────────────────────────────────────────
+    // 비밀번호 찾기 (이메일 확인 + 재설정)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 이메일이 LOCAL 계정으로 존재하는지 확인한다.
+     *
+     * <p>소셜 로그인 계정(KAKAO, NAVER, GOOGLE)은 비밀번호가 없으므로 제외한다.
+     * 존재하지 않으면 USER_NOT_FOUND 예외를 던진다.</p>
+     */
+    public void checkEmailExists(PasswordCheckRequest request) {
+        User user = userMapper.findByEmail(request.email());
+        if (user == null || user.getProvider() != User.Provider.LOCAL) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
+    }
+
+    /**
+     * 이메일 기준으로 비밀번호를 재설정한다 (LOCAL 계정 전용).
+     *
+     * <p>MyBatis {@code updatePasswordByEmail}을 사용하여
+     * {@code provider = 'LOCAL'}인 행만 업데이트한다.</p>
+     */
+    @Transactional
+    public void resetPassword(PasswordResetRequest request) {
+        User user = userMapper.findByEmail(request.email());
+        if (user == null || user.getProvider() != User.Provider.LOCAL) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
+        String newHash = passwordEncoder.encode(request.newPassword());
+        userMapper.updatePasswordByEmail(request.email(), newHash);
+        log.info("비밀번호 재설정 완료 — email: {}", request.email());
     }
 
     // ──────────────────────────────────────────────
