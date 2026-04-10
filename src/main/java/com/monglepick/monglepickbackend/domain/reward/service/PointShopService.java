@@ -23,26 +23,30 @@ import java.util.List;
  * 구매된 이용권은 {@link com.monglepick.monglepickbackend.domain.reward.service.QuotaService}의
  * 4단계 모델 3단계(PURCHASED)에서 소비된다.</p>
  *
- * <h3>지원 상품 (packType)</h3>
+ * <h3>지원 상품 (packType) — 설계서 v3.2, 단가 10P/회 = 100원/회 통일</h3>
  * <table border="1">
- *   <tr><th>packType</th><th>차감 포인트</th><th>지급 토큰</th><th>단가</th></tr>
- *   <tr><td>AI_TOKEN_5</td><td>200P</td><td>5회</td><td>40P/회</td></tr>
- *   <tr><td>AI_TOKEN_20</td><td>700P</td><td>20회</td><td>35P/회 (번들 할인)</td></tr>
- *   <tr><td>AI_DAILY_EXTEND</td><td>100P</td><td>5회</td><td>20P/회 (일일 한도 우회 전용)</td></tr>
+ *   <tr><th>packType</th><th>차감 포인트</th><th>지급 토큰</th><th>단가</th><th>유효기간</th></tr>
+ *   <tr><td>AI_TOKEN_1</td><td>10P</td><td>1회</td><td>10P/회</td><td>30일</td></tr>
+ *   <tr><td>AI_TOKEN_5</td><td>50P</td><td>5회</td><td>10P/회</td><td>30일</td></tr>
+ *   <tr><td>AI_TOKEN_20</td><td>200P</td><td>20회</td><td>10P/회</td><td>30일</td></tr>
+ *   <tr><td>AI_TOKEN_50</td><td>500P</td><td>50회</td><td>10P/회</td><td>60일</td></tr>
  * </table>
+ *
+ * <p>v3.2 변경: AI_DAILY_EXTEND 폐지. PURCHASED 토큰 자체가 일일 무료 한도를 우회하므로
+ * 별도 "일일 한도 우회" 상품이 불필요하다.</p>
  *
  * <h3>처리 흐름</h3>
  * <ol>
  *   <li>packType 유효성 검증 → 차감 포인트·지급 토큰 결정</li>
  *   <li>{@link PointService#deductPoint} 호출 — 비관적 락 + 잔액 검증 + 이력 기록</li>
- *   <li>{@link UserPoint#addPurchasedTokens(int)} 호출 — purchased_ai_tokens 증가</li>
+ *   <li>{@link UserAiQuota#addPurchasedTokens(int)} 호출 — purchased_ai_tokens 증가 (v3.3)</li>
  *   <li>구매 결과 응답 반환</li>
  * </ol>
  *
  * <h3>트랜잭션 전략</h3>
  * <ul>
  *   <li>클래스 레벨: {@code @Transactional(readOnly = true)} — 목록 조회 기본값</li>
- *   <li>{@link #purchaseAiTokens} / {@link #purchaseAiDailyExtend}: 개별 {@code @Transactional} 오버라이드</li>
+ *   <li>{@link #purchaseAiTokens}: 개별 {@code @Transactional} 오버라이드</li>
  * </ul>
  *
  * <h3>동시성</h3>
@@ -61,26 +65,36 @@ import java.util.List;
 public class PointShopService {
 
     // ──────────────────────────────────────────────
-    // 상품 상수 (packType 식별자 → 포인트 비용 / 지급 토큰 수)
+    // 상품 상수 — 설계서 v3.2 기준 (1P=10원, 단가 10P/회 = 100원/회 통일)
+    // PURCHASED 토큰은 QuotaService 3-소스 모델 3단계에서 일일 무료 한도를 우회한다.
     // ──────────────────────────────────────────────
+
+    /** AI 이용권 1회 팩 — packType 식별자 */
+    private static final String PACK_AI_TOKEN_1 = "AI_TOKEN_1";
 
     /** AI 이용권 5회 팩 — packType 식별자 */
     private static final String PACK_AI_TOKEN_5 = "AI_TOKEN_5";
 
-    /** AI 이용권 20회 팩 — packType 식별자 (번들 할인) */
+    /** AI 이용권 20회 팩 — packType 식별자 */
     private static final String PACK_AI_TOKEN_20 = "AI_TOKEN_20";
 
-    /** 일일 한도 우회 5회 팩 — packType 식별자 */
-    private static final String PACK_AI_DAILY_EXTEND = "AI_DAILY_EXTEND";
+    /** AI 이용권 50회 팩 — packType 식별자 */
+    private static final String PACK_AI_TOKEN_50 = "AI_TOKEN_50";
 
-    /** AI 이용권 5회 팩 가격 (포인트) */
-    private static final int COST_AI_TOKEN_5 = 200;
+    /** AI 이용권 1회 팩 가격 (포인트, 10P/회 = 100원/회) */
+    private static final int COST_AI_TOKEN_1 = 10;
 
-    /** AI 이용권 20회 팩 가격 (포인트, 번들 할인 35P/회) */
-    private static final int COST_AI_TOKEN_20 = 700;
+    /** AI 이용권 5회 팩 가격 (포인트, 10P/회 = 100원/회) */
+    private static final int COST_AI_TOKEN_5 = 50;
 
-    /** 일일 한도 우회 5회 팩 가격 (포인트, 20P/회) */
-    private static final int COST_AI_DAILY_EXTEND = 100;
+    /** AI 이용권 20회 팩 가격 (포인트, 10P/회 = 100원/회) */
+    private static final int COST_AI_TOKEN_20 = 200;
+
+    /** AI 이용권 50회 팩 가격 (포인트, 10P/회 = 100원/회) */
+    private static final int COST_AI_TOKEN_50 = 500;
+
+    /** AI 이용권 1회 팩 지급 횟수 */
+    private static final int AMOUNT_AI_TOKEN_1 = 1;
 
     /** AI 이용권 5회 팩 지급 횟수 */
     private static final int AMOUNT_AI_TOKEN_5 = 5;
@@ -88,8 +102,8 @@ public class PointShopService {
     /** AI 이용권 20회 팩 지급 횟수 */
     private static final int AMOUNT_AI_TOKEN_20 = 20;
 
-    /** 일일 한도 우회 팩 지급 횟수 */
-    private static final int AMOUNT_AI_DAILY_EXTEND = 5;
+    /** AI 이용권 50회 팩 지급 횟수 */
+    private static final int AMOUNT_AI_TOKEN_50 = 50;
 
     // ──────────────────────────────────────────────
     // 의존성
@@ -161,19 +175,24 @@ public class PointShopService {
     // ──────────────────────────────────────────────
 
     /**
-     * AI 이용권 팩을 구매한다 (AI_TOKEN_5 / AI_TOKEN_20).
+     * AI 이용권 팩을 구매한다 (AI_TOKEN_1 / AI_TOKEN_5 / AI_TOKEN_20 / AI_TOKEN_50).
      *
      * <p>packType에 따라 포인트를 차감하고 {@code purchased_ai_tokens}에 이용권을 추가한다.
      * 포인트 차감은 {@link PointService#deductPoint}를 통해 비관적 락·이력 기록·잔액 검증을 수행한다.</p>
      *
-     * <h3>지원 packType</h3>
+     * <p>구매된 이용권은 QuotaService 3-소스 모델 3단계(PURCHASED)에서 소비되며,
+     * 등급 일일 무료 한도를 우회하여 사용할 수 있다.</p>
+     *
+     * <h3>지원 packType (설계서 v3.2 — 단가 10P/회 = 100원/회 통일)</h3>
      * <ul>
-     *   <li>{@code AI_TOKEN_5}  — 200P 차감, 5회 지급</li>
-     *   <li>{@code AI_TOKEN_20} — 700P 차감, 20회 지급 (번들 할인)</li>
+     *   <li>{@code AI_TOKEN_1}  — 10P 차감, 1회 지급</li>
+     *   <li>{@code AI_TOKEN_5}  — 50P 차감, 5회 지급</li>
+     *   <li>{@code AI_TOKEN_20} — 200P 차감, 20회 지급</li>
+     *   <li>{@code AI_TOKEN_50} — 500P 차감, 50회 지급</li>
      * </ul>
      *
      * @param userId   구매자 사용자 ID
-     * @param packType 구매할 팩 유형 ("AI_TOKEN_5" 또는 "AI_TOKEN_20")
+     * @param packType 구매할 팩 유형 ("AI_TOKEN_1", "AI_TOKEN_5", "AI_TOKEN_20", "AI_TOKEN_50")
      * @return 구매 결과 (차감 포인트, 추가 토큰, 잔여 잔액, 전체 토큰 잔여 횟수)
      * @throws BusinessException 잘못된 packType인 경우 {@code INVALID_INPUT}
      * @throws BusinessException 포인트 레코드가 없는 경우 {@code POINT_NOT_FOUND}
@@ -185,16 +204,22 @@ public class PointShopService {
         int cost;
         int tokenAmount;
 
-        if (PACK_AI_TOKEN_5.equals(packType)) {
+        if (PACK_AI_TOKEN_1.equals(packType)) {
+            cost = COST_AI_TOKEN_1;
+            tokenAmount = AMOUNT_AI_TOKEN_1;
+        } else if (PACK_AI_TOKEN_5.equals(packType)) {
             cost = COST_AI_TOKEN_5;
             tokenAmount = AMOUNT_AI_TOKEN_5;
         } else if (PACK_AI_TOKEN_20.equals(packType)) {
             cost = COST_AI_TOKEN_20;
             tokenAmount = AMOUNT_AI_TOKEN_20;
+        } else if (PACK_AI_TOKEN_50.equals(packType)) {
+            cost = COST_AI_TOKEN_50;
+            tokenAmount = AMOUNT_AI_TOKEN_50;
         } else {
             log.warn("잘못된 AI 이용권 팩 유형: userId={}, packType={}", userId, packType);
             throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "지원하지 않는 팩 유형입니다. 허용값: AI_TOKEN_5, AI_TOKEN_20");
+                    "지원하지 않는 팩 유형입니다. 허용값: AI_TOKEN_1, AI_TOKEN_5, AI_TOKEN_20, AI_TOKEN_50");
         }
 
         log.info("AI 이용권 구매 시작: userId={}, packType={}, cost={}P, tokenAmount={}",
@@ -202,29 +227,6 @@ public class PointShopService {
 
         return executeTokenPurchase(userId, cost, tokenAmount,
                 "AI 이용권 구매 (" + packType + ")", packType);
-    }
-
-    /**
-     * 일일 한도 우회 AI 이용권을 구매한다 (AI_DAILY_EXTEND).
-     *
-     * <p>일일 무료 AI 사용 횟수를 모두 소진한 사용자가 당일 추가 사용을 원할 때 구매한다.
-     * 지급된 토큰은 {@code purchased_ai_tokens}에 추가되며,
-     * QuotaService의 4단계 모델 3단계(PURCHASED)에서 소비된다 (일일 한도 우회 가능).</p>
-     *
-     * <p>비용: 100P 차감, 5회 지급.</p>
-     *
-     * @param userId 구매자 사용자 ID
-     * @return 구매 결과 (차감 포인트, 추가 토큰, 잔여 잔액, 전체 토큰 잔여 횟수)
-     * @throws BusinessException 포인트 레코드가 없는 경우 {@code POINT_NOT_FOUND}
-     * @throws com.monglepick.monglepickbackend.global.exception.InsufficientPointException 잔액 부족 시
-     */
-    @Transactional
-    public PurchaseResponse purchaseAiDailyExtend(String userId) {
-        log.info("일일 한도 우회 AI 이용권 구매 시작: userId={}, cost={}P, tokenAmount={}",
-                userId, COST_AI_DAILY_EXTEND, AMOUNT_AI_DAILY_EXTEND);
-
-        return executeTokenPurchase(userId, COST_AI_DAILY_EXTEND, AMOUNT_AI_DAILY_EXTEND,
-                "AI 이용권 구매 (일일 한도 우회)", PACK_AI_DAILY_EXTEND);
     }
 
     // ──────────────────────────────────────────────
@@ -294,29 +296,37 @@ public class PointShopService {
      */
     private List<ShopItem> buildShopItems() {
         return List.of(
-                // AI 이용권 5회 팩 — 기본 팩
+                // AI 이용권 1회 팩 — 소량 구매 (v3.2: 10P, 단가 100원/회)
+                new ShopItem(
+                        PACK_AI_TOKEN_1,
+                        "AI 이용권 1회",
+                        COST_AI_TOKEN_1,
+                        AMOUNT_AI_TOKEN_1,
+                        "AI 추천을 1회 추가로 사용할 수 있습니다. (10P/회)"
+                ),
+                // AI 이용권 5회 팩 (v3.2: 50P, 단가 100원/회)
                 new ShopItem(
                         PACK_AI_TOKEN_5,
                         "AI 이용권 5회",
                         COST_AI_TOKEN_5,
                         AMOUNT_AI_TOKEN_5,
-                        "AI 추천을 5회 추가로 사용할 수 있습니다. (40P/회)"
+                        "AI 추천을 5회 추가로 사용할 수 있습니다. (10P/회)"
                 ),
-                // AI 이용권 20회 팩 — 번들 할인
+                // AI 이용권 20회 팩 (v3.2: 200P, 단가 100원/회)
                 new ShopItem(
                         PACK_AI_TOKEN_20,
                         "AI 이용권 20회",
                         COST_AI_TOKEN_20,
                         AMOUNT_AI_TOKEN_20,
-                        "AI 추천을 20회 추가로 사용할 수 있습니다. 번들 할인 적용 (35P/회)"
+                        "AI 추천을 20회 추가로 사용할 수 있습니다. (10P/회)"
                 ),
-                // 일일 한도 우회 5회 팩 — 당일 무료 횟수 소진 후 사용
+                // AI 이용권 50회 팩 (v3.2: 500P, 단가 100원/회)
                 new ShopItem(
-                        PACK_AI_DAILY_EXTEND,
-                        "일일 한도 우회 5회",
-                        COST_AI_DAILY_EXTEND,
-                        AMOUNT_AI_DAILY_EXTEND,
-                        "오늘 무료 AI 추천 횟수를 다 쓴 경우 5회를 추가로 사용할 수 있습니다. (20P/회)"
+                        PACK_AI_TOKEN_50,
+                        "AI 이용권 50회",
+                        COST_AI_TOKEN_50,
+                        AMOUNT_AI_TOKEN_50,
+                        "AI 추천을 50회 추가로 사용할 수 있습니다. (10P/회)"
                 )
         );
     }

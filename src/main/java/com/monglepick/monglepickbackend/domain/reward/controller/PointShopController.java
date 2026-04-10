@@ -31,21 +31,24 @@ import java.security.Principal;
  * <h3>엔드포인트</h3>
  * <ul>
  *   <li>{@code GET  /api/v1/point/shop/items}           — 상점 아이템 목록 + 현재 잔액</li>
- *   <li>{@code POST /api/v1/point/shop/ai-tokens}       — AI 이용권 팩 구매 (5회/20회)</li>
- *   <li>{@code POST /api/v1/point/shop/ai-extend}       — 일일 한도 우회 5회 구매</li>
+ *   <li>{@code POST /api/v1/point/shop/ai-tokens}       — AI 이용권 팩 구매 (1/5/20/50회)</li>
  * </ul>
  *
  * <h3>인증</h3>
  * <p>모든 엔드포인트는 JWT Bearer 토큰이 필요하다.
  * {@link BaseController#resolveUserId(Principal)}를 통해 userId를 추출한다.</p>
  *
- * <h3>상품 정보</h3>
+ * <h3>상품 정보 (설계서 v3.2 — 단가 10P/회 = 100원/회 통일)</h3>
  * <table border="1">
  *   <tr><th>packType</th><th>가격</th><th>지급</th></tr>
- *   <tr><td>AI_TOKEN_5</td><td>200P</td><td>5회</td></tr>
- *   <tr><td>AI_TOKEN_20</td><td>700P</td><td>20회 (번들 할인)</td></tr>
- *   <tr><td>AI_DAILY_EXTEND</td><td>100P</td><td>5회 (일일 한도 우회)</td></tr>
+ *   <tr><td>AI_TOKEN_1</td><td>10P</td><td>1회</td></tr>
+ *   <tr><td>AI_TOKEN_5</td><td>50P</td><td>5회</td></tr>
+ *   <tr><td>AI_TOKEN_20</td><td>200P</td><td>20회</td></tr>
+ *   <tr><td>AI_TOKEN_50</td><td>500P</td><td>50회</td></tr>
  * </table>
+ *
+ * <p>v3.2 변경: AI_DAILY_EXTEND 엔드포인트 폐지. PURCHASED 토큰 자체가
+ * QuotaService 3-소스 모델에서 일일 무료 한도를 우회하므로 별도 상품 불필요.</p>
  *
  * @see PointShopService
  * @see com.monglepick.monglepickbackend.domain.reward.service.QuotaService
@@ -90,25 +93,28 @@ public class PointShopController extends BaseController {
     }
 
     /**
-     * AI 이용권 팩을 구매한다 (AI_TOKEN_5 / AI_TOKEN_20).
+     * AI 이용권 팩을 구매한다 (AI_TOKEN_1 / AI_TOKEN_5 / AI_TOKEN_20 / AI_TOKEN_50).
      *
      * <p>packType에 따라 포인트를 차감하고 AI 이용권을 지급한다.
-     * 잔액이 부족하면 402 Payment Required 응답이 반환된다.</p>
+     * 잔액이 부족하면 402 Payment Required 응답이 반환된다.
+     * 구매된 이용권은 등급 일일 무료 한도를 우회하여 사용 가능하다.</p>
      *
-     * <h3>packType별 상품</h3>
+     * <h3>packType별 상품 (설계서 v3.2 — 단가 10P/회 통일)</h3>
      * <ul>
-     *   <li>{@code AI_TOKEN_5}  — 200P 차감, 5회 지급 (40P/회)</li>
-     *   <li>{@code AI_TOKEN_20} — 700P 차감, 20회 지급 (35P/회, 번들 할인)</li>
+     *   <li>{@code AI_TOKEN_1}  — 10P 차감, 1회 지급</li>
+     *   <li>{@code AI_TOKEN_5}  — 50P 차감, 5회 지급</li>
+     *   <li>{@code AI_TOKEN_20} — 200P 차감, 20회 지급</li>
+     *   <li>{@code AI_TOKEN_50} — 500P 차감, 50회 지급</li>
      * </ul>
      *
      * @param principal JWT 인증 정보 (userId 추출용)
-     * @param packType  구매할 팩 유형 ("AI_TOKEN_5" 또는 "AI_TOKEN_20")
+     * @param packType  구매할 팩 유형 ("AI_TOKEN_1", "AI_TOKEN_5", "AI_TOKEN_20", "AI_TOKEN_50")
      * @return 200 OK + PurchaseResponse (차감 포인트, 추가 토큰, 잔여 잔액, 전체 토큰 잔여 횟수)
      */
     @Operation(
             summary = "AI 이용권 팩 구매",
             description = "포인트를 소비하여 AI 이용권을 구매합니다. "
-                    + "packType=AI_TOKEN_5(200P→5회) 또는 AI_TOKEN_20(700P→20회)를 지정하세요.",
+                    + "packType=AI_TOKEN_1(10P→1회), AI_TOKEN_5(50P→5회), AI_TOKEN_20(200P→20회), AI_TOKEN_50(500P→50회).",
             security = @SecurityRequirement(name = "bearerAuth")
     )
     @ApiResponses({
@@ -121,7 +127,7 @@ public class PointShopController extends BaseController {
     @PostMapping("/ai-tokens")
     public ResponseEntity<PurchaseResponse> purchaseAiTokens(
             Principal principal,
-            @Parameter(description = "구매할 팩 유형 (AI_TOKEN_5 또는 AI_TOKEN_20)", required = true)
+            @Parameter(description = "구매할 팩 유형 (AI_TOKEN_1, AI_TOKEN_5, AI_TOKEN_20, AI_TOKEN_50)", required = true)
             @RequestParam String packType
     ) {
         // JWT Principal에서 userId 추출
@@ -129,40 +135,6 @@ public class PointShopController extends BaseController {
         log.info("AI 이용권 팩 구매 요청: userId={}, packType={}", userId, packType);
 
         PurchaseResponse response = pointShopService.purchaseAiTokens(userId, packType);
-        return ResponseEntity.ok(response);
-    }
-
-    /**
-     * 일일 한도 우회 AI 이용권을 구매한다 (AI_DAILY_EXTEND).
-     *
-     * <p>오늘의 등급 무료 AI 사용 횟수를 모두 소진한 사용자가
-     * 당일 추가 사용을 원할 때 100P를 소비하여 5회를 구매한다.
-     * 구매된 토큰은 일일 한도를 우회하여 사용 가능하다.</p>
-     *
-     * <p>비용: 100P 차감, 5회 지급 (20P/회).</p>
-     *
-     * @param principal JWT 인증 정보 (userId 추출용)
-     * @return 200 OK + PurchaseResponse (차감 포인트, 추가 토큰, 잔여 잔액, 전체 토큰 잔여 횟수)
-     */
-    @Operation(
-            summary = "일일 한도 우회 AI 이용권 구매",
-            description = "오늘 무료 AI 추천 횟수를 다 쓴 경우, 100P를 소비하여 5회를 추가로 구매합니다. "
-                    + "구매한 이용권은 일일 한도를 우회하여 당일 즉시 사용 가능합니다.",
-            security = @SecurityRequirement(name = "bearerAuth")
-    )
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "구매 성공"),
-            @ApiResponse(responseCode = "401", description = "인증 필요"),
-            @ApiResponse(responseCode = "402", description = "포인트 잔액 부족 (P001)"),
-            @ApiResponse(responseCode = "404", description = "포인트 레코드 없음 (P002)")
-    })
-    @PostMapping("/ai-extend")
-    public ResponseEntity<PurchaseResponse> purchaseAiDailyExtend(Principal principal) {
-        // JWT Principal에서 userId 추출
-        String userId = resolveUserId(principal);
-        log.info("일일 한도 우회 AI 이용권 구매 요청: userId={}", userId);
-
-        PurchaseResponse response = pointShopService.purchaseAiDailyExtend(userId);
         return ResponseEntity.ok(response);
     }
 }
