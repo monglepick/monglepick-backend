@@ -19,7 +19,7 @@ import java.util.List;
  * <p>애플리케이션 시작 시 {@code subscription_plans} 테이블에 4개 구독 상품이 없으면 INSERT한다.
  * 이미 존재하는 상품(planCode 기준)은 건너뛰어 멱등(idempotent) 동작을 보장한다.</p>
  *
- * <h3>v3.0 AI 3-소스 모델 — 구독 상품 설계 원칙</h3>
+ * <h3>v3.2 AI 3-소스 모델 — 구독 상품 설계 원칙</h3>
  * <p>구독은 포인트 대량 지급 방식이 아닌 {@code monthly_ai_bonus} 를 통해
  * AI 쿼터를 직접 증가시킨다. 이로써 구독 가치가 명확해진다.</p>
  * <ul>
@@ -28,27 +28,28 @@ import java.util.List;
  *   <li>AI 요청 시 grade 일일 한도 초과 → {@code UserSubscription.consumeAiBonus()} 호출</li>
  * </ul>
  *
- * <h3>v3.0 시드 데이터 (4개 상품)</h3>
+ * <h3>v3.2 시드 데이터 (4개 상품, 엑셀 Table 49 기준)</h3>
  * <table border="1">
  *   <tr><th>planCode</th><th>이름</th><th>주기</th><th>가격</th><th>AI보너스/월</th><th>포인트/주기</th><th>원/AI회</th></tr>
- *   <tr><td>monthly_basic</td><td>월간 Basic</td><td>MONTHLY</td><td>4,900원</td><td>100회</td><td>200P</td><td>49원</td></tr>
- *   <tr><td>monthly_premium</td><td>월간 Premium</td><td>MONTHLY</td><td>9,900원</td><td>500회</td><td>500P</td><td>19.8원</td></tr>
- *   <tr><td>yearly_basic</td><td>연간 Basic</td><td>YEARLY</td><td>49,000원</td><td>150회/월</td><td>300P/월</td><td>27.2원</td></tr>
- *   <tr><td>yearly_premium</td><td>연간 Premium</td><td>YEARLY</td><td>99,000원</td><td>700회/월</td><td>800P/월</td><td>11.8원</td></tr>
+ *   <tr><td>monthly_basic</td><td>월간 Basic</td><td>MONTHLY</td><td>2,900원</td><td>30회</td><td>300P</td><td>96.7원</td></tr>
+ *   <tr><td>monthly_premium</td><td>월간 Premium</td><td>MONTHLY</td><td>5,900원</td><td>60회</td><td>600P</td><td>98.3원</td></tr>
+ *   <tr><td>yearly_basic</td><td>연간 Basic</td><td>YEARLY</td><td>29,000원</td><td>34회/월</td><td>340P/월</td><td>71.1원</td></tr>
+ *   <tr><td>yearly_premium</td><td>연간 Premium</td><td>YEARLY</td><td>59,000원</td><td>67회/월</td><td>670P/월</td><td>73.4원</td></tr>
  * </table>
  *
  * <h3>구독 vs AI 이용권 구매 가격 비교 (구독 유도 설계)</h3>
  * <ul>
- *   <li>AI 이용권 5회(80P=800원) → 160원/회 — 구독보다 3배 이상 비쌈</li>
- *   <li>monthly_basic → 49원/회 — 이용권 대비 70% 저렴</li>
- *   <li>monthly_premium → 19.8원/회 — 이용권 대비 88% 저렴</li>
- *   <li>→ 포인트 구매 AI 이용권은 구독 유도 수단, 구독이 AI 이용의 주요 경로</li>
+ *   <li>AI 이용권 단가: 10P/회 = 100원/회 (v3.2 통일 단가)</li>
+ *   <li>monthly_basic → 96.7원/회 — 이용권 대비 소폭 저렴 + 등급 보장·포인트 부가혜택</li>
+ *   <li>monthly_premium → 98.3원/회 — 이용권 대비 소폭 저렴 + 등급 보장·포인트 부가혜택</li>
+ *   <li>yearly_basic → 71.1원/회 — 이용권 대비 29% 저렴</li>
+ *   <li>yearly_premium → 73.4원/회 — 이용권 대비 27% 저렴</li>
  * </ul>
  *
  * <h3>연간 할인율</h3>
  * <ul>
- *   <li>yearly_basic: monthly_basic×12=58,800원 대비 49,000원 → 약 17% 할인</li>
- *   <li>yearly_premium: monthly_premium×12=118,800원 대비 99,000원 → 약 17% 할인</li>
+ *   <li>yearly_basic: monthly_basic×12=34,800원 대비 29,000원 → 약 17% 할인</li>
+ *   <li>yearly_premium: monthly_premium×12=70,800원 대비 59,000원 → 약 17% 할인</li>
  * </ul>
  *
  * <h3>실행 순서</h3>
@@ -81,7 +82,7 @@ public class SubscriptionPlanInitializer implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        log.info("구독 상품 초기화 시작 — subscription_plans 테이블 시드 데이터 확인 (v3.0)");
+        log.info("구독 상품 초기화 시작 — subscription_plans 테이블 시드 데이터 확인 (v3.2)");
 
         List<SubscriptionPlan> plans = buildDefaultPlans();
 
