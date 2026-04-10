@@ -577,4 +577,77 @@
           AND target_type = 'post'
     </select>
 
+    <!-- ═══ 커뮤니티 통계 분석용 집계 쿼리 ═══ -->
+
+    <!-- 전체 댓글 수 (소프트 삭제 제외) -->
+    <select id="countAllComments" resultType="long">
+        SELECT COUNT(*)
+        FROM post_comment
+        WHERE is_deleted = false
+    </select>
+
+    <!-- 지정 기간 내 생성된 댓글 수 (소프트 삭제 제외) -->
+    <select id="countCommentsByCreatedAtBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM post_comment
+        WHERE is_deleted = false
+          AND created_at >= #{start}
+          AND created_at &lt; #{end}
+    </select>
+
+    <!-- 카테고리별 PUBLISHED 게시글 수 (소프트 삭제 제외) -->
+    <select id="countPublishedGroupByCategory" resultType="java.util.HashMap">
+        SELECT category, COUNT(*) AS cnt
+        FROM posts
+        WHERE status = 'PUBLISHED'
+          AND is_deleted = false
+        GROUP BY category
+        ORDER BY cnt DESC
+    </select>
+
+    <!-- 전체 신고 수 -->
+    <select id="countAllDeclarations" resultType="long">
+        SELECT COUNT(*)
+        FROM post_declaration
+    </select>
+
+    <!-- 상태별 신고 수 -->
+    <select id="countDeclarationsByStatus" resultType="long">
+        SELECT COUNT(*)
+        FROM post_declaration
+        WHERE status = #{status}
+    </select>
+
+    <!-- 지정 기간 내 생성된 신고 수 -->
+    <select id="countDeclarationsByCreatedAtBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM post_declaration
+        WHERE created_at >= #{start}
+          AND created_at &lt; #{end}
+    </select>
+
+    <!-- 평균 독성 점수 (NOT NULL인 건만) -->
+    <select id="avgDeclarationToxicityScore" resultType="java.lang.Double">
+        SELECT AVG(toxicity_score)
+        FROM post_declaration
+        WHERE toxicity_score IS NOT NULL
+    </select>
+
+    <!-- 독성 점수 5구간 분포 (CASE WHEN 기반) -->
+    <select id="countDeclarationsByToxicityBucket" resultType="java.util.HashMap">
+        SELECT
+            CASE
+                WHEN toxicity_score &lt; 0.2 THEN '0.0~0.2'
+                WHEN toxicity_score &lt; 0.4 THEN '0.2~0.4'
+                WHEN toxicity_score &lt; 0.6 THEN '0.4~0.6'
+                WHEN toxicity_score &lt; 0.8 THEN '0.6~0.8'
+                ELSE '0.8~1.0'
+            END AS range_label,
+            COUNT(*) AS cnt
+        FROM post_declaration
+        WHERE toxicity_score IS NOT NULL
+        GROUP BY range_label
+        ORDER BY range_label ASC
+    </select>
+
 </mapper>

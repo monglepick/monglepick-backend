@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
  * @param createdAt    작성 시각
  * @param playlistId   연결된 플레이리스트 ID (PLAYLIST_SHARE 전용, 나머지 null)
  * @param playlistInfo 플레이리스트 상세 정보 (PLAYLIST_SHARE 전용, 나머지 null)
+ * @param rewardPoints 리워드 지급 포인트 (미지급 시 0, 조회 응답 시 null)
  */
 public record PostResponse(
         Long id,
@@ -33,7 +34,8 @@ public record PostResponse(
         String status,
         LocalDateTime createdAt,
         Long playlistId,
-        PlaylistDto.SharedPlaylistInfo playlistInfo
+        PlaylistDto.SharedPlaylistInfo playlistInfo,
+        Integer rewardPoints
 ) {
     /**
      * Post 엔티티를 PostResponse로 변환하는 팩토리 메서드.
@@ -44,7 +46,18 @@ public record PostResponse(
      * <p>PLAYLIST_SHARE 카테고리일 때는 {@code playlistInfo} 필드에 플레이리스트 상세 정보가
      * 담긴다 (findPlaylistSharePostsWithDetail 쿼리 결과에서 @Transient 필드로 채워진 경우).</p>
      */
+    /** 조회 API용 — rewardPoints=null (리워드 정보 미포함). */
     public static PostResponse from(Post post) {
+        return from(post, null);
+    }
+
+    /**
+     * 게시글 생성 API용 — 리워드 지급 결과를 포함한다.
+     *
+     * @param post         게시글 엔티티
+     * @param rewardPoints 지급된 리워드 포인트 (미지급 시 null 또는 0)
+     */
+    public static PostResponse from(Post post, Integer rewardPoints) {
         String nickname = post.getNickname() != null ? post.getNickname() : "알 수 없음";
 
         PlaylistDto.SharedPlaylistInfo playlistInfo = null;
@@ -71,7 +84,8 @@ public record PostResponse(
                 post.getStatus().name(),
                 post.getCreatedAt(),
                 post.getPlaylistId(),
-                playlistInfo
+                playlistInfo,
+                rewardPoints
         );
     }
 }

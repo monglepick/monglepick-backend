@@ -326,4 +326,559 @@ public class StatsDto {
             long count,
             double percentage
     ) {}
+
+    // ══════════════════════════════════════════════
+    // 9. 포인트 경제 분석
+    // ══════════════════════════════════════════════
+
+    /**
+     * 포인트 경제 개요 응답.
+     *
+     * <p>포인트 유통 현황의 핵심 지표 6개를 제공한다.</p>
+     *
+     * @param totalIssued      총 발행 포인트 (earn+bonus 합계)
+     * @param totalSpent       총 소비 포인트 (spend 합계, 절대값)
+     * @param totalBalance     전체 사용자 잔액 합계
+     * @param activeUsers      포인트 보유 사용자 수 (balance > 0)
+     * @param todayIssued      오늘 발행 포인트
+     * @param todaySpent       오늘 소비 포인트 (절대값)
+     */
+    public record PointEconomyOverviewResponse(
+            long totalIssued,
+            long totalSpent,
+            long totalBalance,
+            long activeUsers,
+            long todayIssued,
+            long todaySpent
+    ) {}
+
+    /**
+     * 포인트 유형별 분포 응답.
+     *
+     * @param distribution 유형(earn/spend/bonus/expire/refund/revoke)별 건수 + 포인트 합계
+     */
+    public record PointTypeDistributionResponse(
+            List<PointTypeItem> distribution
+    ) {}
+
+    /**
+     * 포인트 유형별 분포 단건.
+     *
+     * @param pointType  유형 코드 (earn/spend/bonus/expire/refund/revoke)
+     * @param label      한국어 라벨 (예: "활동 리워드", "AI 추천 사용")
+     * @param count      해당 유형 거래 건수
+     * @param totalAmount 해당 유형 포인트 합계 (절대값)
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record PointTypeItem(
+            String pointType,
+            String label,
+            long count,
+            long totalAmount,
+            double percentage
+    ) {}
+
+    /**
+     * 등급별 사용자 분포 응답.
+     *
+     * @param grades 등급별 사용자 수 + 비율
+     */
+    public record GradeDistributionResponse(
+            List<GradeItem> grades
+    ) {}
+
+    /**
+     * 등급별 사용자 분포 단건.
+     *
+     * @param gradeCode  등급 코드 (NORMAL/BRONZE/SILVER/GOLD/PLATINUM/DIAMOND)
+     * @param gradeName  한국어명 (알갱이/강냉이/팝콘/카라멜팝콘/몽글팝콘/몽아일체)
+     * @param count      해당 등급 사용자 수
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record GradeItem(
+            String gradeCode,
+            String gradeName,
+            long count,
+            double percentage
+    ) {}
+
+    /**
+     * 일별 포인트 발행/소비 추이 응답.
+     *
+     * @param trends 일별 발행/소비 추이 리스트
+     */
+    public record PointTrendsResponse(
+            List<DailyPointTrend> trends
+    ) {}
+
+    /**
+     * 일별 포인트 발행/소비 추이 단건.
+     *
+     * @param date    날짜 문자열 (yyyy-MM-dd)
+     * @param issued  해당일 발행 포인트 합계
+     * @param spent   해당일 소비 포인트 합계 (절대값)
+     * @param netFlow 순유입량 (issued - spent)
+     */
+    public record DailyPointTrend(
+            String date,
+            long issued,
+            long spent,
+            long netFlow
+    ) {}
+
+    // ══════════════════════════════════════════════
+    // 10. AI 서비스 분석
+    // ══════════════════════════════════════════════
+
+    /**
+     * AI 서비스 개요 응답.
+     *
+     * <p>AI 채팅 서비스의 핵심 KPI 6개를 제공한다.</p>
+     *
+     * @param totalSessions      전체 세션 수
+     * @param totalTurns         전체 대화 턴 수
+     * @param avgTurnsPerSession 세션당 평균 턴 수
+     * @param todaySessions      오늘 세션 수
+     * @param todayTurns         오늘 턴 수
+     * @param totalRecommendedMovies 추천된 영화 총 수
+     */
+    public record AiServiceOverviewResponse(
+            long totalSessions,
+            long totalTurns,
+            double avgTurnsPerSession,
+            long todaySessions,
+            long todayTurns,
+            long totalRecommendedMovies
+    ) {}
+
+    /**
+     * AI 세션 일별 추이 응답.
+     *
+     * @param trends 일별 세션/턴 추이 리스트
+     */
+    public record AiSessionTrendsResponse(
+            List<DailyAiTrend> trends
+    ) {}
+
+    /**
+     * AI 세션 일별 추이 단건.
+     *
+     * @param date     날짜 문자열 (yyyy-MM-dd)
+     * @param sessions 해당일 세션 수
+     * @param turns    해당일 총 턴 수
+     */
+    public record DailyAiTrend(
+            String date,
+            long sessions,
+            long turns
+    ) {}
+
+    /**
+     * AI 의도(Intent) 분포 응답.
+     *
+     * @param intents 의도별 건수 + 비율
+     */
+    public record AiIntentDistributionResponse(
+            List<IntentItem> intents
+    ) {}
+
+    /**
+     * 의도 분포 단건.
+     *
+     * @param intent     의도 코드 (recommend/search/general/relation/info/theater/booking 등)
+     * @param label      한국어 라벨
+     * @param count      발생 건수
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record IntentItem(
+            String intent,
+            String label,
+            long count,
+            double percentage
+    ) {}
+
+    /**
+     * AI 쿼터 소진 현황 응답.
+     *
+     * @param totalQuotaUsers      쿼터 레코드 보유 사용자 수
+     * @param avgDailyUsage        일일 평균 AI 사용 횟수
+     * @param avgMonthlyUsage      월간 평균 쿠폰 사용 횟수
+     * @param totalPurchasedTokens 전체 구매 이용권 보유량
+     * @param exhaustedUsers       일일 무료 한도 소진 사용자 수
+     */
+    public record AiQuotaStatsResponse(
+            long totalQuotaUsers,
+            double avgDailyUsage,
+            double avgMonthlyUsage,
+            long totalPurchasedTokens,
+            long exhaustedUsers
+    ) {}
+
+    // ══════════════════════════════════════════════
+    // 11. 커뮤니티 분석
+    // ══════════════════════════════════════════════
+
+    /**
+     * 커뮤니티 개요 응답.
+     *
+     * <p>커뮤니티 활동의 핵심 KPI 6개를 제공한다.</p>
+     *
+     * @param totalPosts       전체 게시글 수 (PUBLISHED)
+     * @param totalComments    전체 댓글 수
+     * @param totalReports     전체 신고 수
+     * @param pendingReports   미처리 신고 수
+     * @param todayPosts       오늘 게시글 수
+     * @param todayComments    오늘 댓글 수
+     */
+    public record CommunityOverviewResponse(
+            long totalPosts,
+            long totalComments,
+            long totalReports,
+            long pendingReports,
+            long todayPosts,
+            long todayComments
+    ) {}
+
+    /**
+     * 커뮤니티 일별 추이 응답.
+     *
+     * @param trends 일별 게시글/댓글 추이 리스트
+     */
+    public record CommunityTrendsResponse(
+            List<DailyCommunityTrend> trends
+    ) {}
+
+    /**
+     * 커뮤니티 일별 추이 단건.
+     *
+     * @param date     날짜 문자열 (yyyy-MM-dd)
+     * @param posts    해당일 게시글 수
+     * @param comments 해당일 댓글 수
+     * @param reports  해당일 신고 수
+     */
+    public record DailyCommunityTrend(
+            String date,
+            long posts,
+            long comments,
+            long reports
+    ) {}
+
+    /**
+     * 게시글 카테고리별 분포 응답.
+     *
+     * @param categories 카테고리별 게시글 수 + 비율
+     */
+    public record PostCategoryDistributionResponse(
+            List<CategoryItem> categories
+    ) {}
+
+    /**
+     * 카테고리별 게시글 분포 단건.
+     *
+     * @param category   카테고리 코드 (FREE/DISCUSSION/RECOMMENDATION/NEWS/PLAYLIST_SHARE)
+     * @param label      한국어 라벨
+     * @param count      해당 카테고리 게시글 수
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record CategoryItem(
+            String category,
+            String label,
+            long count,
+            double percentage
+    ) {}
+
+    /**
+     * 신고/독성 분석 응답.
+     *
+     * @param totalReports      전체 신고 건수
+     * @param resolvedRate      처리 완료율 (0.0~100.0)
+     * @param avgToxicityScore  평균 독성 점수 (0.0~1.0)
+     * @param statusDistribution 신고 상태별 분포
+     * @param toxicityBuckets   독성 점수 구간별 분포 (0~0.2/0.2~0.4/0.4~0.6/0.6~0.8/0.8~1.0)
+     */
+    public record ReportAnalysisResponse(
+            long totalReports,
+            double resolvedRate,
+            double avgToxicityScore,
+            List<ReportStatusItem> statusDistribution,
+            List<ToxicityBucket> toxicityBuckets
+    ) {}
+
+    /**
+     * 신고 상태별 분포 단건.
+     *
+     * @param status     상태 코드 (pending/reviewed/resolved/dismissed)
+     * @param label      한국어 라벨
+     * @param count      해당 상태 건수
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record ReportStatusItem(
+            String status,
+            String label,
+            long count,
+            double percentage
+    ) {}
+
+    /**
+     * 독성 점수 구간 분포 단건.
+     *
+     * @param range      구간 라벨 (예: "0.0~0.2")
+     * @param count      해당 구간 건수
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record ToxicityBucket(
+            String range,
+            long count,
+            double percentage
+    ) {}
+
+    // ══════════════════════════════════════════════
+    // 12. 사용자 참여도 분석
+    // ══════════════════════════════════════════════
+
+    /**
+     * 사용자 참여도 개요 KPI 응답.
+     *
+     * <p>출석 체크 현황, 활동 진행 사용자 수, 위시리스트 수,
+     * 평균 연속 출석일 5개 지표를 제공한다.</p>
+     *
+     * @param totalAttendance      전체 출석 체크 레코드 수 (중복 포함 — 날짜별 1건)
+     * @param todayAttendance      오늘 출석 체크 수
+     * @param totalActivityUsers   활동 진행 레코드 보유 사용자 수 (user_activity_progress 행 수)
+     * @param totalWishlists       전체 위시리스트 추가 수
+     * @param avgStreakDays        전체 사용자의 현재 연속 출석일 평균 (소수점 1자리)
+     */
+    public record EngagementOverviewResponse(
+            long totalAttendance,
+            long todayAttendance,
+            long totalActivityUsers,
+            long totalWishlists,
+            double avgStreakDays
+    ) {}
+
+    /**
+     * 활동별 참여 현황 응답.
+     *
+     * @param activities 활동 유형별 참여자 수 + 총 활동 횟수 리스트
+     */
+    public record ActivityDistributionResponse(
+            List<ActivityItem> activities
+    ) {}
+
+    /**
+     * 활동별 참여 현황 단건.
+     *
+     * @param actionType   활동 유형 코드 (review_write/movie_like/attendance 등)
+     * @param label        한국어 라벨
+     * @param userCount    해당 활동에 참여한 고유 사용자 수
+     * @param totalActions 해당 활동의 전체 누적 횟수 합계
+     */
+    public record ActivityItem(
+            String actionType,
+            String label,
+            long userCount,
+            long totalActions
+    ) {}
+
+    /**
+     * 연속 출석일 구간 분포 응답.
+     *
+     * @param buckets 구간별 사용자 수 리스트 (1일/2-3일/4-7일/8-14일/15-30일/31일+)
+     */
+    public record AttendanceStreakDistributionResponse(
+            List<StreakBucket> buckets
+    ) {}
+
+    /**
+     * 연속 출석일 구간 단건.
+     *
+     * @param range      구간 라벨 (예: "1일", "2-3일", "4-7일")
+     * @param userCount  해당 구간에 속하는 사용자 수
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record StreakBucket(
+            String range,
+            long userCount,
+            double percentage
+    ) {}
+
+    // ══════════════════════════════════════════════
+    // 13. 콘텐츠 성과 분석
+    // ══════════════════════════════════════════════
+
+    /**
+     * 콘텐츠 성과 개요 KPI 응답.
+     *
+     * <p>도장깨기 코스 진행/완주, 업적 달성, 퀴즈 정답률 지표를 제공한다.</p>
+     *
+     * @param totalCourseProgress 전체 코스 진행 레코드 수 (시작한 사람 수)
+     * @param completedCourses    전체 완주 코스 수
+     * @param courseCompletionRate 전체 완주율 (0.0~100.0, completedCourses/totalCourseProgress)
+     * @param totalAchievements   전체 업적 달성 수
+     * @param totalQuizAttempts   전체 퀴즈 시도 수
+     * @param quizCorrectRate     퀴즈 정답률 (0.0~100.0)
+     */
+    public record ContentPerformanceOverviewResponse(
+            long totalCourseProgress,
+            long completedCourses,
+            double courseCompletionRate,
+            long totalAchievements,
+            long totalQuizAttempts,
+            double quizCorrectRate
+    ) {}
+
+    /**
+     * 코스별 완주율 응답.
+     *
+     * @param courses 코스별 완주율 리스트 (완주자 수 내림차순)
+     */
+    public record CourseCompletionResponse(
+            List<CourseCompletionItem> courses
+    ) {}
+
+    /**
+     * 코스별 완주율 단건.
+     *
+     * @param courseId          코스 ID (slug 형태, 예: "nolan-filmography")
+     * @param totalStarters     코스를 시작한 사용자 수
+     * @param completedCount    완주한 사용자 수
+     * @param completionRate    완주율 (0.0~100.0)
+     * @param avgProgressPercent 평균 진행률 (0.0~100.0, 소수점 1자리)
+     */
+    public record CourseCompletionItem(
+            String courseId,
+            long totalStarters,
+            long completedCount,
+            double completionRate,
+            double avgProgressPercent
+    ) {}
+
+    /**
+     * 리뷰 품질 지표 응답.
+     *
+     * @param categoryDistribution 리뷰 카테고리별 건수 분포
+     * @param ratingDistribution   평점(1~5)별 리뷰 건수 분포
+     * @param totalReviews         전체 유효 리뷰 수 (소프트 삭제 제외)
+     * @param avgRating            전체 평균 평점 (1.0~5.0)
+     */
+    public record ReviewQualityResponse(
+            List<ReviewCategoryItem> categoryDistribution,
+            List<ReviewRatingItem> ratingDistribution,
+            long totalReviews,
+            double avgRating
+    ) {}
+
+    /**
+     * 리뷰 카테고리별 분포 단건.
+     *
+     * @param categoryCode 카테고리 코드 (THEATER_RECEIPT/COURSE/WORLDCUP/WISHLIST/AI_RECOMMEND/PLAYLIST/NONE)
+     * @param label        한국어 라벨
+     * @param count        해당 카테고리 리뷰 수
+     * @param percentage   전체 대비 비율 (0.0~100.0)
+     */
+    public record ReviewCategoryItem(
+            String categoryCode,
+            String label,
+            long count,
+            double percentage
+    ) {}
+
+    /**
+     * 평점별 리뷰 분포 단건.
+     *
+     * @param rating     평점 (1~5 정수)
+     * @param count      해당 평점 리뷰 수
+     * @param percentage 전체 대비 비율 (0.0~100.0)
+     */
+    public record ReviewRatingItem(
+            int rating,
+            long count,
+            double percentage
+    ) {}
+
+    // ══════════════════════════════════════════════
+    // 14. 전환 퍼널 분석
+    // ══════════════════════════════════════════════
+
+    /**
+     * 전환 퍼널 응답.
+     *
+     * <p>6단계 퍼널을 통해 신규 가입자가 결제까지 이어지는 전환율을 측정한다.
+     * 각 단계는 이전 단계 대비 전환율과 1단계(가입) 대비 전환율을 모두 제공한다.</p>
+     *
+     * @param period 분석 기간 문자열 (예: "30d")
+     * @param steps  6단계 퍼널 리스트
+     */
+    public record FunnelConversionResponse(
+            String period,
+            List<FunnelStep> steps
+    ) {}
+
+    /**
+     * 퍼널 단계 단건.
+     *
+     * @param step              단계 번호 (1~6)
+     * @param label             단계 라벨 (예: "신규 가입", "AI 채팅 사용")
+     * @param count             해당 단계 달성 사용자 수 (고유)
+     * @param conversionFromPrev 전 단계 대비 전환율 (0.0~100.0, 단계 1은 100.0)
+     * @param conversionFromTop  1단계(가입) 대비 전환율 (0.0~100.0)
+     */
+    public record FunnelStep(
+            int step,
+            String label,
+            long count,
+            double conversionFromPrev,
+            double conversionFromTop
+    ) {}
+
+    // ══════════════════════════════════════════════
+    // 15. 이탈 위험 분석
+    // ══════════════════════════════════════════════
+
+    /**
+     * 이탈 위험 개요 KPI 응답.
+     *
+     * <p>전체 사용자를 위험도 점수(0~100)로 분류한 결과를 제공한다.
+     * 점수 계산 기준:
+     * <ul>
+     *   <li>로그인 공백 7일+: +10점, 14일+: +25점, 30일+: +40점</li>
+     *   <li>포인트 잔액 0 + 가입 7일 이상: +15점</li>
+     *   <li>구독 미보유: +10점</li>
+     *   <li>AI 세션 없음 (가입 14일 이상): +20점</li>
+     * </ul>
+     * </p>
+     *
+     * @param noRisk     위험 없음 (0~24점) 사용자 수
+     * @param lowRisk    낮은 위험 (25~49점) 사용자 수
+     * @param mediumRisk 중간 위험 (50~74점) 사용자 수
+     * @param highRisk   높은 위험 (75~100점) 사용자 수
+     * @param totalAnalyzed 분석된 전체 사용자 수 (최대 1000명 샘플)
+     */
+    public record ChurnRiskOverviewResponse(
+            long noRisk,
+            long lowRisk,
+            long mediumRisk,
+            long highRisk,
+            long totalAnalyzed
+    ) {}
+
+    /**
+     * 이탈 위험 신호 집계 응답.
+     *
+     * <p>구체적인 이탈 위험 신호별 사용자 수를 제공하여
+     * 운영팀이 타깃 리텐션 캠페인을 기획할 수 있도록 한다.</p>
+     *
+     * @param inactive7days     7일+ 미로그인 사용자 수
+     * @param inactive14days    14일+ 미로그인 사용자 수
+     * @param inactive30days    30일+ 미로그인 사용자 수
+     * @param zeroPointUsers    포인트 잔액 0 사용자 수
+     * @param expiredNoRenewal  구독 만료 후 미갱신 사용자 수
+     */
+    public record ChurnRiskSignalsResponse(
+            long inactive7days,
+            long inactive14days,
+            long inactive30days,
+            long zeroPointUsers,
+            long expiredNoRenewal
+    ) {}
 }

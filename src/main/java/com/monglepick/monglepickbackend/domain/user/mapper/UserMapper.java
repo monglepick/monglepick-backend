@@ -113,4 +113,15 @@ public interface UserMapper {
     long countCohortRetention(@Param("userIds") List<String> userIds,
                                @Param("start") LocalDateTime start,
                                @Param("end") LocalDateTime end);
+
+    /**
+     * 지정 시각 이전에 마지막으로 로그인한 사용자 수 — 이탈 위험 신호 집계용.
+     *
+     * <p>7일/14일/30일 미로그인 사용자 수를 측정한다.
+     * last_login_at IS NULL(한 번도 로그인 안 한 경우)도 이탈 위험으로 간주하여 포함한다.</p>
+     *
+     * @param before 기준 시각 — 이 시각 이전 마지막 로그인 또는 미로그인 사용자를 카운트
+     * @return 기준 시각 이전 마지막 로그인 사용자 수
+     */
+    long countByLastLoginAtBefore(@Param("before") LocalDateTime before);
 }

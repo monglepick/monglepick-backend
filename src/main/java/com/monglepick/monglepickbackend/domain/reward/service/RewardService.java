@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.reward.service;
 
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardResult;
 import com.monglepick.monglepickbackend.domain.reward.entity.Grade;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
 import com.monglepick.monglepickbackend.domain.reward.entity.RewardPolicy;
@@ -116,7 +117,7 @@ public class RewardService {
      * @param contentLength 콘텐츠 길이 — min_content_length 검사에 사용 (없으면 0 전달)
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void grantReward(String userId, String actionType, String referenceId, int contentLength) {
+    public RewardResult grantReward(String userId, String actionType, String referenceId, int contentLength) {
         try {
             log.debug("리워드 지급 시작: userId={}, actionType={}, referenceId={}, contentLength={}",
                     userId, actionType, referenceId, contentLength);
@@ -126,7 +127,7 @@ public class RewardService {
             if (policyOpt.isEmpty()) {
                 /* 정책 없음 또는 비활성 → 지급 없이 종료 */
                 log.debug("리워드 정책 없음 또는 비활성: actionType={}", actionType);
-                return;
+                return RewardResult.EMPTY;
             }
             RewardPolicy policy = policyOpt.get();
 
@@ -148,7 +149,7 @@ public class RewardService {
                 progress.incrementTotalCount();
                 progress.incrementDailyCount();
                 progress.updateLastActionAt();
-                return;
+                return RewardResult.EMPTY;
             }
 
             /* ⑤ canGrant() 검사 — daily_limit / max_count / cooldown / min_content_length */
@@ -161,7 +162,7 @@ public class RewardService {
                 progress.updateLastActionAt();
                 /* threshold 달성 여부는 여전히 확인 (활동은 발생했으므로) */
                 checkThresholdRewards(userId, actionType, progress);
-                return;
+                return RewardResult.EMPTY;
             }
 
             /* ⑥ 등급 배율 적용
@@ -171,8 +172,10 @@ public class RewardService {
 
             /* ⑦ 포인트 지급 — amount > 0인 경우에만 earnPoint 호출
              *    amount = 0이면 AI_CHAT_USE 등 카운팅 전용 활동 → earnPoint 스킵 */
+            String previousGrade = null;
+            String currentGrade = null;
             if (amount > 0) {
-                pointService.earnPoint(
+                var earnResult = pointService.earnPoint(
                         userId,
                         amount,
                         policy.getPointType(),            /* earn 또는 bonus */
@@ -181,6 +184,8 @@ public class RewardService {
                         actionType,
                         true                               /* isActivityReward=true → earned_by_activity 반영 */
                 );
+                previousGrade = earnResult.previousGrade();
+                currentGrade = earnResult.grade();
                 log.info("리워드 지급 완료: userId={}, actionType={}, amount={}P, referenceId={}",
                         userId, actionType, amount, referenceId);
             } else {
@@ -203,10 +208,24 @@ public class RewardService {
              *    달성 시 보너스 지급 (재귀 호출). 자식 정책의 parent=NULL이므로 무한 재귀 불가. */
             checkThresholdRewards(userId, actionType, progress);
 
+            /* ⑩ 등급 승격 보너스 — earnPoint 결과에서 등급 변경을 감지하여 GRADE_UP_* 지급.
+             *    GRADE_UP_* 정책의 max_count=1이므로 중복 지급 불가. */
+            if (previousGrade != null && currentGrade != null
+                    && !currentGrade.equals(previousGrade)) {
+                String gradeUpAction = "GRADE_UP_" + currentGrade;
+                log.info("등급 승격 감지 → 보너스 지급 시도: userId={}, {} → {}, actionType={}",
+                        userId, previousGrade, currentGrade, gradeUpAction);
+                grantReward(userId, gradeUpAction, "grade_" + currentGrade + "_" + userId, 0);
+            }
+
+            /* ⑪ 지급 결과 반환 — 호출자가 API 응답에 포함할 수 있도록 */
+            return RewardResult.of(amount, policy.getActivityName());
+
         } catch (Exception e) {
             /* 리워드 서비스 예외는 본 기능에 전파하지 않는다 — warn 로그만 남김 */
             log.warn("리워드 지급 중 예외 발생 (본 기능에 영향 없음): userId={}, actionType={}, error={}",
                     userId, actionType, e.getMessage(), e);
+            return RewardResult.EMPTY;
         }
     }
 
@@ -231,7 +250,7 @@ public class RewardService {
      * @param amount     지급할 포인트 (외부 지정, policy.pointsAmount 무시)
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void grantRewardWithAmount(String userId, String actionType, String referenceId, int amount) {
+    public RewardResult grantRewardWithAmount(String userId, String actionType, String referenceId, int amount) {
         try {
             log.debug("가변 금액 리워드 지급 시작: userId={}, actionType={}, referenceId={}, amount={}",
                     userId, actionType, referenceId, amount);
@@ -240,7 +259,7 @@ public class RewardService {
             Optional<RewardPolicy> policyOpt = rewardPolicyRepository.findByActionTypeAndIsActiveTrue(actionType);
             if (policyOpt.isEmpty()) {
                 log.debug("리워드 정책 없음 또는 비활성: actionType={}", actionType);
-                return;
+                return RewardResult.EMPTY;
             }
             RewardPolicy policy = policyOpt.get();
 
@@ -259,7 +278,7 @@ public class RewardService {
                 progress.incrementTotalCount();
                 progress.incrementDailyCount();
                 progress.updateLastActionAt();
-                return;
+                return RewardResult.EMPTY;
             }
 
             /* ⑤ canGrant() 검사 (contentLength=0 — 가변 금액 리워드는 길이 검사 생략) */
@@ -270,7 +289,7 @@ public class RewardService {
                 progress.incrementDailyCount();
                 progress.updateLastActionAt();
                 checkThresholdRewards(userId, actionType, progress);
-                return;
+                return RewardResult.EMPTY;
             }
 
             /* ⑥ 외부 지정 amount 사용 (policy.pointsAmount 무시)
@@ -302,9 +321,13 @@ public class RewardService {
             /* ⑧ threshold 달성 연쇄 확인 */
             checkThresholdRewards(userId, actionType, progress);
 
+            /* ⑨ 지급 결과 반환 */
+            return RewardResult.of(amount, policy.getActivityName());
+
         } catch (Exception e) {
             log.warn("가변 금액 리워드 지급 중 예외 발생: userId={}, actionType={}, error={}",
                     userId, actionType, e.getMessage(), e);
+            return RewardResult.EMPTY;
         }
     }
 

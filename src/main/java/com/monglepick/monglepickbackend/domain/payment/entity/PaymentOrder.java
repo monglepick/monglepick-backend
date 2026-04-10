@@ -316,6 +316,23 @@ public class PaymentOrder extends BaseAuditEntity {
      *
      * @param reason 보상 취소 실패 사유 (Toss 에러 메시지 등)
      */
+    /**
+     * 웹훅 환불 시 포인트 회수 실패를 기록한다.
+     *
+     * <p>PG에서 환불 웹훅이 도착했으나 포인트 회수에 실패한 경우 호출한다.
+     * 주문 상태는 COMPLETED를 유지하면서 failedReason에 사유를 기록하여
+     * 관리자가 수동으로 포인트 회수 후 환불 처리할 수 있도록 한다.</p>
+     *
+     * <p>REFUNDED로 즉시 전환하면 포인트가 미회수된 채 환불 완료로 기록되어
+     * 사용자가 포인트를 공짜로 획득하는 문제가 발생한다.</p>
+     *
+     * @param reason 포인트 회수 실패 사유 (failedReason 컬럼에 저장)
+     */
+    public void setRefundPointFailed(String reason) {
+        // 상태는 COMPLETED를 유지하되 failedReason에 포인트 회수 실패 사유를 기록
+        this.failedReason = reason;
+    }
+
     public void markCompensationFailed(String reason) {
         // PENDING 또는 FAILED 상태에서만 보상 실패 처리 가능
         // (이미 COMPLETED·REFUNDED인 경우는 보상 대상이 아님)

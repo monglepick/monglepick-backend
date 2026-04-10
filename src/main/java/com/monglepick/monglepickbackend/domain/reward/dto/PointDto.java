@@ -219,9 +219,17 @@ public final class PointDto {
      * @param balanceAfter 획득 후 잔액
      * @param grade        현재 등급 (변경될 수 있음)
      */
+    /**
+     * 포인트 획득 응답.
+     *
+     * @param balanceAfter  획득 후 잔액
+     * @param grade         현재(변경 후) 등급 코드
+     * @param previousGrade 변경 전 등급 코드 (등급 변경 없으면 grade와 동일)
+     */
     public record EarnResponse(
             int balanceAfter,
-            String grade
+            String grade,
+            String previousGrade
     ) {
     }
 

@@ -272,4 +272,32 @@ public interface PostMapper {
      */
     boolean existsDeclarationByPostIdAndUserId(@Param("postId") Long postId,
                                                 @Param("userId") String userId);
+
+    // ═══ 커뮤니티 통계 분석용 집계 쿼리 ═══
+
+    /** 전체 댓글 수 (소프트 삭제 제외) */
+    long countAllComments();
+
+    /** 지정 기간 내 생성된 댓글 수 (소프트 삭제 제외) */
+    long countCommentsByCreatedAtBetween(@Param("start") LocalDateTime start,
+                                          @Param("end") LocalDateTime end);
+
+    /** 카테고리별 게시글 수 집계 (PUBLISHED 상태, 소프트 삭제 제외) — [category, count] 배열 리스트 */
+    List<java.util.Map<String, Object>> countPublishedGroupByCategory();
+
+    /** 전체 신고 수 */
+    long countAllDeclarations();
+
+    /** 상태별 신고 수 */
+    long countDeclarationsByStatus(@Param("status") String status);
+
+    /** 지정 기간 내 생성된 신고 수 */
+    long countDeclarationsByCreatedAtBetween(@Param("start") LocalDateTime start,
+                                              @Param("end") LocalDateTime end);
+
+    /** 평균 독성 점수 (toxicity_score 가 NOT NULL인 신고만 대상) */
+    Double avgDeclarationToxicityScore();
+
+    /** 독성 점수 구간별 분포 — [range_label, count] 배열 리스트 */
+    List<java.util.Map<String, Object>> countDeclarationsByToxicityBucket();
 }

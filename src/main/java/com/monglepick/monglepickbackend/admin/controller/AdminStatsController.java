@@ -198,4 +198,292 @@ public class AdminStatsController {
         log.debug("[admin-stats-api] GET /subscription");
         return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getSubscriptionStats()));
     }
+
+    // ──────────────────────────────────────────────
+    // 6. 포인트 경제
+    // ──────────────────────────────────────────────
+
+    /**
+     * 포인트 경제 개요 KPI를 조회한다.
+     * 총 발행/소비, 전체 잔액, 활성 사용자, 오늘 발행/소비.
+     */
+    @Operation(summary = "포인트 경제 개요", description = "포인트 유통 KPI 6개 (총발행/소비/잔액/활성사용자/오늘)")
+    @GetMapping("/point-economy/overview")
+    public ResponseEntity<ApiResponse<PointEconomyOverviewResponse>> getPointEconomyOverview() {
+        log.debug("[admin-stats-api] GET /point-economy/overview");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getPointEconomyOverview()));
+    }
+
+    /**
+     * 포인트 유형별 분포를 조회한다.
+     * earn/spend/bonus/expire/refund/revoke 유형별 건수 + 합계.
+     */
+    @Operation(summary = "포인트 유형별 분포", description = "포인트 유형(earn/spend/bonus 등)별 건수 + 합계")
+    @GetMapping("/point-economy/distribution")
+    public ResponseEntity<ApiResponse<PointTypeDistributionResponse>> getPointTypeDistribution() {
+        log.debug("[admin-stats-api] GET /point-economy/distribution");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getPointTypeDistribution()));
+    }
+
+    /**
+     * 등급별 사용자 분포를 조회한다.
+     */
+    @Operation(summary = "등급별 사용자 분포", description = "6등급(알갱이~몽아일체) 사용자 수 + 비율")
+    @GetMapping("/point-economy/grades")
+    public ResponseEntity<ApiResponse<GradeDistributionResponse>> getGradeDistribution() {
+        log.debug("[admin-stats-api] GET /point-economy/grades");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getGradeDistribution()));
+    }
+
+    /**
+     * 일별 포인트 발행/소비 추이를 조회한다.
+     */
+    @Operation(summary = "일별 포인트 추이", description = "일별 발행/소비/순유입 추이")
+    @GetMapping("/point-economy/trends")
+    public ResponseEntity<ApiResponse<PointTrendsResponse>> getPointTrends(
+            @RequestParam(defaultValue = "7d") String period) {
+        log.debug("[admin-stats-api] GET /point-economy/trends — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getPointTrends(period)));
+    }
+
+    // ──────────────────────────────────────────────
+    // 7. AI 서비스
+    // ──────────────────────────────────────────────
+
+    /**
+     * AI 서비스 개요 KPI를 조회한다.
+     * 전체/오늘 세션, 턴, 세션당 평균 턴, 추천 영화 수.
+     */
+    @Operation(summary = "AI 서비스 개요", description = "AI 채팅 KPI 6개 (세션/턴/평균/오늘)")
+    @GetMapping("/ai-service/overview")
+    public ResponseEntity<ApiResponse<AiServiceOverviewResponse>> getAiServiceOverview() {
+        log.debug("[admin-stats-api] GET /ai-service/overview");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAiServiceOverview()));
+    }
+
+    /**
+     * AI 세션 일별 추이를 조회한다.
+     */
+    @Operation(summary = "AI 세션 일별 추이", description = "일별 세션 수 + 턴 수 추이")
+    @GetMapping("/ai-service/trends")
+    public ResponseEntity<ApiResponse<AiSessionTrendsResponse>> getAiSessionTrends(
+            @RequestParam(defaultValue = "7d") String period) {
+        log.debug("[admin-stats-api] GET /ai-service/trends — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAiSessionTrends(period)));
+    }
+
+    /**
+     * AI 의도(Intent) 분포를 조회한다.
+     */
+    @Operation(summary = "AI 의도 분포", description = "추천/검색/일반대화/관계 등 의도별 건수 + 비율")
+    @GetMapping("/ai-service/intents")
+    public ResponseEntity<ApiResponse<AiIntentDistributionResponse>> getAiIntentDistribution() {
+        log.debug("[admin-stats-api] GET /ai-service/intents");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAiIntentDistribution()));
+    }
+
+    /**
+     * AI 쿼터 소진 현황을 조회한다.
+     */
+    @Operation(summary = "AI 쿼터 소진 현황", description = "평균 사용량/구매 이용권/한도 소진 사용자 수")
+    @GetMapping("/ai-service/quota")
+    public ResponseEntity<ApiResponse<AiQuotaStatsResponse>> getAiQuotaStats() {
+        log.debug("[admin-stats-api] GET /ai-service/quota");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAiQuotaStats()));
+    }
+
+    // ──────────────────────────────────────────────
+    // 8. 커뮤니티
+    // ──────────────────────────────────────────────
+
+    /**
+     * 커뮤니티 개요 KPI를 조회한다.
+     * 게시글, 댓글, 신고 수 + 오늘 수치.
+     */
+    @Operation(summary = "커뮤니티 개요", description = "커뮤니티 KPI 6개 (게시글/댓글/신고/오늘)")
+    @GetMapping("/community/overview")
+    public ResponseEntity<ApiResponse<CommunityOverviewResponse>> getCommunityOverview() {
+        log.debug("[admin-stats-api] GET /community/overview");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getCommunityOverview()));
+    }
+
+    /**
+     * 커뮤니티 일별 추이를 조회한다.
+     */
+    @Operation(summary = "커뮤니티 일별 추이", description = "일별 게시글/댓글/신고 추이")
+    @GetMapping("/community/trends")
+    public ResponseEntity<ApiResponse<CommunityTrendsResponse>> getCommunityTrends(
+            @RequestParam(defaultValue = "7d") String period) {
+        log.debug("[admin-stats-api] GET /community/trends — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getCommunityTrends(period)));
+    }
+
+    /**
+     * 게시글 카테고리별 분포를 조회한다.
+     */
+    @Operation(summary = "카테고리별 게시글 분포", description = "자유/토론/추천/뉴스/플레이리스트 카테고리별 건수 + 비율")
+    @GetMapping("/community/categories")
+    public ResponseEntity<ApiResponse<PostCategoryDistributionResponse>> getPostCategoryDistribution() {
+        log.debug("[admin-stats-api] GET /community/categories");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getPostCategoryDistribution()));
+    }
+
+    /**
+     * 신고/독성 분석을 조회한다.
+     */
+    @Operation(summary = "신고/독성 분석", description = "신고 상태별 분포 + 독성 점수 구간 분포 + 처리 완료율")
+    @GetMapping("/community/reports")
+    public ResponseEntity<ApiResponse<ReportAnalysisResponse>> getReportAnalysis() {
+        log.debug("[admin-stats-api] GET /community/reports");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getReportAnalysis()));
+    }
+
+    // ──────────────────────────────────────────────
+    // 9. 사용자 참여도
+    // ──────────────────────────────────────────────
+
+    /**
+     * 사용자 참여도 개요 KPI를 조회한다.
+     *
+     * <p>총 출석 체크 수, 오늘 출석 수, 활동 진행 사용자 수,
+     * 총 위시리스트 수, 평균 연속 출석일 5가지 지표를 반환한다.</p>
+     */
+    @Operation(summary = "사용자 참여도 개요",
+               description = "총 출석 수/오늘 출석/활동 진행 사용자/위시리스트/평균 연속 출석일 KPI")
+    @GetMapping("/engagement/overview")
+    public ResponseEntity<ApiResponse<EngagementOverviewResponse>> getEngagementOverview() {
+        log.debug("[admin-stats-api] GET /engagement/overview");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getEngagementOverview()));
+    }
+
+    /**
+     * 활동 유형별 참여 현황을 조회한다.
+     *
+     * <p>user_activity_progress 테이블에서 actionType별 참여 사용자 수와
+     * 총 활동 횟수를 집계한다. totalActions 내림차순 정렬.</p>
+     */
+    @Operation(summary = "활동별 참여 현황",
+               description = "활동 유형(리뷰 작성/출석/좋아요 등)별 참여 사용자 수 + 총 활동 횟수")
+    @GetMapping("/engagement/activity-distribution")
+    public ResponseEntity<ApiResponse<ActivityDistributionResponse>> getActivityDistribution() {
+        log.debug("[admin-stats-api] GET /engagement/activity-distribution");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getActivityDistribution()));
+    }
+
+    /**
+     * 연속 출석일 구간별 사용자 분포를 조회한다.
+     *
+     * <p>사용자별 현재 연속 출석일(streakCount)을 기준으로
+     * 1일/2-3일/4-7일/8-14일/15-30일/31일+ 구간으로 분류한다.</p>
+     */
+    @Operation(summary = "연속 출석일 구간 분포",
+               description = "사용자별 최신 연속 출석일을 6구간으로 분류한 분포")
+    @GetMapping("/engagement/attendance-streak")
+    public ResponseEntity<ApiResponse<AttendanceStreakDistributionResponse>> getAttendanceStreakDistribution() {
+        log.debug("[admin-stats-api] GET /engagement/attendance-streak");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAttendanceStreakDistribution()));
+    }
+
+    // ──────────────────────────────────────────────
+    // 10. 콘텐츠 성과
+    // ──────────────────────────────────────────────
+
+    /**
+     * 콘텐츠 성과 개요 KPI를 조회한다.
+     *
+     * <p>도장깨기 코스 진행/완주/완주율, 업적 달성 수,
+     * 퀴즈 시도 수, 퀴즈 정답률 6가지 지표를 반환한다.</p>
+     */
+    @Operation(summary = "콘텐츠 성과 개요",
+               description = "코스 진행/완주/완주율 + 업적 달성 + 퀴즈 시도/정답률 KPI")
+    @GetMapping("/content-performance/overview")
+    public ResponseEntity<ApiResponse<ContentPerformanceOverviewResponse>> getContentPerformanceOverview() {
+        log.debug("[admin-stats-api] GET /content-performance/overview");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getContentPerformanceOverview()));
+    }
+
+    /**
+     * 코스별 완주율을 조회한다.
+     *
+     * <p>courseId별 시작자 수, 완주자 수, 완주율, 평균 진행률을
+     * 완주자 수 내림차순으로 반환한다.</p>
+     */
+    @Operation(summary = "코스별 완주율",
+               description = "도장깨기 코스별 시작자/완주자 수 + 완주율 + 평균 진행률")
+    @GetMapping("/content-performance/course-completion")
+    public ResponseEntity<ApiResponse<CourseCompletionResponse>> getCourseCompletion() {
+        log.debug("[admin-stats-api] GET /content-performance/course-completion");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getCourseCompletion()));
+    }
+
+    /**
+     * 리뷰 품질 지표를 조회한다.
+     *
+     * <p>카테고리별 건수 분포, 평점(1~5)별 건수 분포, 전체 리뷰 수, 평균 평점을 반환한다.</p>
+     */
+    @Operation(summary = "리뷰 품질 지표",
+               description = "리뷰 카테고리별 건수 + 평점 분포 + 전체 리뷰 수 + 평균 평점")
+    @GetMapping("/content-performance/review-quality")
+    public ResponseEntity<ApiResponse<ReviewQualityResponse>> getReviewQualityStats() {
+        log.debug("[admin-stats-api] GET /content-performance/review-quality");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getReviewQualityStats()));
+    }
+
+    // ──────────────────────────────────────────────
+    // 11. 전환 퍼널
+    // ──────────────────────────────────────────────
+
+    /**
+     * 6단계 전환 퍼널을 조회한다.
+     *
+     * <p>신규 가입 → 첫 활동 → AI 채팅 → 리뷰 작성 → 구독 → 결제 순서의
+     * 전환율을 분석한다. 각 단계별 전 단계 대비 전환율과 1단계 대비 전환율을 제공한다.</p>
+     *
+     * @param period 분석 기간 (예: "7d", "30d", "90d", 기본값 "30d")
+     */
+    @Operation(summary = "전환 퍼널",
+               description = "가입→첫활동→AI채팅→리뷰→구독→결제 6단계 전환율 분석")
+    @GetMapping("/funnel/conversion")
+    public ResponseEntity<ApiResponse<FunnelConversionResponse>> getFunnelConversion(
+            @Parameter(description = "분석 기간 (7d/30d/90d)", example = "30d")
+            @RequestParam(defaultValue = "30d") String period) {
+        log.debug("[admin-stats-api] GET /funnel/conversion — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getFunnelConversion(period)));
+    }
+
+    // ──────────────────────────────────────────────
+    // 12. 이탈 위험
+    // ──────────────────────────────────────────────
+
+    /**
+     * 이탈 위험 개요 KPI를 조회한다.
+     *
+     * <p>최대 1000명 샘플을 로드하여 위험도 점수(0~100)를 계산하고
+     * 없음(0-24) / 낮음(25-49) / 중간(50-74) / 높음(75+) 4구간으로 분류한다.</p>
+     *
+     * <p>점수 기준: 30일+ 미로그인(40점), 14일+ 미로그인(25점), 7일+ 미로그인(10점),
+     * 포인트 잔액 0 + 가입 7일 이상(15점), AI 세션 없음 + 가입 14일 이상(20점),
+     * 구독 미보유(10점).</p>
+     */
+    @Operation(summary = "이탈 위험 개요",
+               description = "위험도 점수 기반 4구간(없음/낮음/중간/높음) 사용자 수 (최대 1000명 샘플)")
+    @GetMapping("/churn-risk/overview")
+    public ResponseEntity<ApiResponse<ChurnRiskOverviewResponse>> getChurnRiskOverview() {
+        log.debug("[admin-stats-api] GET /churn-risk/overview");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getChurnRiskOverview()));
+    }
+
+    /**
+     * 이탈 위험 신호 집계를 조회한다.
+     *
+     * <p>7일/14일/30일+ 미로그인 사용자 수, 포인트 잔액 0 사용자 수,
+     * 구독 만료 후 미갱신 사용자 수를 반환한다.</p>
+     */
+    @Operation(summary = "이탈 위험 신호",
+               description = "미로그인 기간별 사용자 수 + 포인트 잔액 0 + 구독 만료 미갱신 집계")
+    @GetMapping("/churn-risk/signals")
+    public ResponseEntity<ApiResponse<ChurnRiskSignalsResponse>> getChurnRiskSignals() {
+        log.debug("[admin-stats-api] GET /churn-risk/signals");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getChurnRiskSignals()));
+    }
 }

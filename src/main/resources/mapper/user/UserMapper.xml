@@ -160,6 +160,18 @@
           AND last_login_at BETWEEN #{start} AND #{end}
     </select>
 
+    <!--
+        지정 시각 이전에 마지막으로 로그인한 사용자 수 — 이탈 위험 신호 집계.
+        last_login_at IS NULL(한 번도 로그인 안 한 경우)도 이탈 위험으로 포함한다.
+        AdminStatsService.getChurnRiskSignals() 에서 7일/14일/30일 미로그인 집계에 사용.
+    -->
+    <select id="countByLastLoginAtBefore" resultType="long">
+        SELECT COUNT(*)
+        FROM users
+        WHERE last_login_at IS NULL
+           OR last_login_at &lt; #{before}
+    </select>
+
     <!-- ═══ INSERT ═══ -->
 
     <!-- 사용자 신규 등록 -->

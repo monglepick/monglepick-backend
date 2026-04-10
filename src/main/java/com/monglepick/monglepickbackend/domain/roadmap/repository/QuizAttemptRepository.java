@@ -71,4 +71,19 @@ public interface QuizAttemptRepository extends JpaRepository<QuizAttempt, Long> 
             @Param("courseId") String courseId,
             @Param("movieId") String movieId
     );
+
+    // ══════════════════════════════════════════════
+    // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 13 — 콘텐츠 성과)
+    // ══════════════════════════════════════════════
+
+    /**
+     * isCorrect=true 인 시도 수를 집계한다 (퀴즈 정답률 분자).
+     *
+     * <p>전체 퀴즈 정답률 = countCorrect / count() × 100
+     * 데이터 없으면 0을 반환하므로 NPE 위험 없음.</p>
+     *
+     * @return 정답(isCorrect=true) 시도 수
+     */
+    @Query("SELECT COUNT(a) FROM QuizAttempt a WHERE a.isCorrect = true")
+    long countCorrect();
 }

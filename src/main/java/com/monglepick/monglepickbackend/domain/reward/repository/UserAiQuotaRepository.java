@@ -73,4 +73,22 @@ public interface UserAiQuotaRepository extends JpaRepository<UserAiQuota, Long> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT q FROM UserAiQuota q WHERE q.userId = :userId")
     Optional<UserAiQuota> findByUserIdWithLock(@Param("userId") String userId);
+
+    // ═══ AI 서비스 통계용 집계 ═══
+
+    /** 평균 일일 AI 사용량 */
+    @Query("SELECT COALESCE(AVG(q.dailyAiUsed), 0) FROM UserAiQuota q")
+    double avgDailyAiUsed();
+
+    /** 평균 월간 쿠폰 사용량 */
+    @Query("SELECT COALESCE(AVG(q.monthlyCouponUsed), 0) FROM UserAiQuota q")
+    double avgMonthlyCouponUsed();
+
+    /** 전체 구매 이용권 보유량 합계 */
+    @Query("SELECT COALESCE(SUM(q.purchasedAiTokens), 0) FROM UserAiQuota q")
+    long sumPurchasedAiTokens();
+
+    /** 일일 무료 한도 소진 사용자 수 (dailyAiUsed >= 3, 기본 NORMAL 등급 한도) */
+    @Query("SELECT COUNT(q) FROM UserAiQuota q WHERE q.dailyAiUsed >= 3")
+    long countExhaustedUsers();
 }

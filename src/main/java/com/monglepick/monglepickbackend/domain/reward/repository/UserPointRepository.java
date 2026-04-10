@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -68,4 +69,33 @@ public interface UserPointRepository extends JpaRepository<UserPoint, Long> {
      * @return 존재하면 true, 없으면 false
      */
     boolean existsByUserId(String userId);
+
+    // ═══ 포인트 경제 통계용 집계 ═══
+
+    /** 전체 사용자 잔액 합계 */
+    @Query("SELECT COALESCE(SUM(p.balance), 0) FROM UserPoint p")
+    long sumTotalBalance();
+
+    /** 잔액이 0보다 큰 사용자 수 (활성 포인트 보유자) */
+    @Query("SELECT COUNT(p) FROM UserPoint p WHERE p.balance > 0")
+    long countActiveUsers();
+
+    /**
+     * 포인트 잔액이 정확히 0인 사용자 수를 반환한다 (이탈 위험 신호용).
+     *
+     * <p>balance = 0 이면 소비 동기가 없어 이탈 위험이 높다고 판단한다.
+     * AdminStatsService.getChurnRiskSignals() 에서 사용.</p>
+     *
+     * @return 포인트 잔액이 0인 user_points 레코드 수
+     */
+    @Query("SELECT COUNT(p) FROM UserPoint p WHERE p.balance = 0")
+    long countZeroBalanceUsers();
+
+    /**
+     * 등급별 사용자 수를 집계한다.
+     *
+     * <p>반환 배열: [gradeCode(String), count(Long)]</p>
+     */
+    @Query("SELECT g.gradeCode, COUNT(p) FROM UserPoint p JOIN p.grade g GROUP BY g.gradeCode ORDER BY g.sortOrder ASC")
+    List<Object[]> countGroupByGrade();
 }

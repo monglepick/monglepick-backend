@@ -27,6 +27,7 @@ import java.time.LocalDateTime;
  * @param likeCount       좋아요 수 (비정규화 캐시)
  * @param isDeleted       소프트 삭제 여부
  * @param createdAt       작성 일시
+ * @param rewardPoints    리워드 지급 포인트 (미지급 시 0, 조회 응답 시 null)
  */
 public record PostCommentResponse(
         Long commentId,
@@ -37,7 +38,8 @@ public record PostCommentResponse(
         Long parentCommentId,
         int likeCount,
         boolean isDeleted,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        Integer rewardPoints
 ) {
 
     /** 소프트 삭제된 댓글의 마스킹 문자열 */
@@ -58,7 +60,18 @@ public record PostCommentResponse(
      * @param entity 댓글 엔티티
      * @return 댓글 응답 DTO
      */
+    /** 조회 API용 — rewardPoints=null (리워드 정보 미포함). */
     public static PostCommentResponse from(PostComment entity) {
+        return from(entity, null);
+    }
+
+    /**
+     * 댓글 생성 API용 — 리워드 지급 결과를 포함한다.
+     *
+     * @param entity       댓글 엔티티
+     * @param rewardPoints 지급된 리워드 포인트 (미지급 시 null 또는 0)
+     */
+    public static PostCommentResponse from(PostComment entity, Integer rewardPoints) {
         /* 소프트 삭제 댓글은 내용을 마스킹하여 대댓글 스레드 구조 보존 */
         String displayContent = Boolean.TRUE.equals(entity.getIsDeleted())
                 ? DELETED_CONTENT
@@ -78,7 +91,8 @@ public record PostCommentResponse(
                 entity.getParentCommentId(),
                 entity.getLikeCount(),
                 Boolean.TRUE.equals(entity.getIsDeleted()),
-                entity.getCreatedAt()
+                entity.getCreatedAt(),
+                rewardPoints
         );
     }
 }

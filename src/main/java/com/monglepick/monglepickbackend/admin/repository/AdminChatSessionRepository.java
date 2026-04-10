@@ -119,4 +119,46 @@ public interface AdminChatSessionRepository extends JpaRepository<ChatSessionArc
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end
     );
+
+    // ═══ AI 서비스 통계 분석용 집계 ═══
+
+    /** 삭제되지 않은 전체 세션 수 */
+    long countByIsDeletedFalse();
+
+    /** 삭제되지 않은 전체 세션의 턴 수 합계 */
+    @Query("SELECT COALESCE(SUM(c.turnCount), 0) FROM ChatSessionArchive c WHERE c.isDeleted = false")
+    long sumAllTurnCount();
+
+    /** 삭제되지 않은 전체 세션의 추천 영화 수 합계 */
+    @Query("SELECT COALESCE(SUM(c.recommendedMovieCount), 0) FROM ChatSessionArchive c WHERE c.isDeleted = false")
+    long sumAllRecommendedMovieCount();
+
+    /** 전체 기간 intent_summary JSON 목록 (최대 5000건) */
+    @Query("SELECT c.intentSummary FROM ChatSessionArchive c " +
+           "WHERE c.isDeleted = false AND c.intentSummary IS NOT NULL")
+    List<String> findAllIntentSummaries();
+
+    // ══════════════════════════════════════════════
+    // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 14 — 전환 퍼널)
+    // ══════════════════════════════════════════════
+
+    /**
+     * 지정 기간 내 AI 채팅을 사용한 고유 사용자 수를 반환한다 (전환 퍼널 단계 3).
+     *
+     * <p>DISTINCT user_id 로 중복을 제거하여 실제로 채팅을 시작한 고유 사용자만 카운트한다.
+     * 소프트 삭제 레코드도 포함한다(퍼널 분석은 실제 발생량 기준).</p>
+     *
+     * @param start 기간 시작 시각 (inclusive)
+     * @param end   기간 종료 시각 (exclusive)
+     * @return 해당 기간 AI 채팅 고유 사용자 수
+     */
+    @Query("""
+            SELECT COUNT(DISTINCT c.userId)
+            FROM ChatSessionArchive c
+            WHERE c.createdAt >= :start AND c.createdAt < :end
+            """)
+    long countDistinctUserByCreatedAtBetween(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
 }

@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.domain.recommendation.entity.Recommendat
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationImpactRepository;
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewCreateRequest;
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewResponse;
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardResult;
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewUpdateRequest;
 import com.monglepick.monglepickbackend.domain.review.entity.Review;
 import com.monglepick.monglepickbackend.domain.review.entity.ReviewLike;
@@ -72,9 +73,22 @@ public class ReviewService {
                 review.getReviewId(), userId, movieId,
                 request.reviewSource(), request.reviewCategoryCode());
 
-        // 리워드 지급
+        // 리워드 지급 — 결과를 캡처하여 응답에 포함
         int contentLength = request.content() != null ? request.content().length() : 0;
-        rewardService.grantReward(userId, "REVIEW_CREATE", "movie_" + movieId, contentLength);
+        RewardResult rewardResult = rewardService.grantReward(userId, "REVIEW_CREATE", "movie_" + movieId, contentLength);
+
+        // 첫 리뷰 작성 보너스 — INSERT 후 카운트가 1이면 첫 리뷰
+        long reviewCount = reviewMapper.countByUserId(userId);
+        if (reviewCount == 1) {
+            RewardResult firstResult = rewardService.grantReward(userId, "FIRST_REVIEW", "first_review_" + userId, 0);
+            // 첫 리뷰 보너스가 지급되면 합산하여 응답에 포함
+            if (firstResult.earned()) {
+                rewardResult = RewardResult.of(
+                        rewardResult.points() + firstResult.points(),
+                        rewardResult.policyName()
+                );
+            }
+        }
 
         // recommendation_impact.rated 업데이트 (퍼널 완성)
         // 윤형주 recommendation 도메인은 JPA 유지 — dirty checking 정상 동작
@@ -86,7 +100,9 @@ public class ReviewService {
                     userId, movieId, impacts.size());
         }
 
-        return ReviewResponse.from(review);
+        // 리워드 지급 포인트를 응답에 포함 (earned=true일 때만 포인트 표시)
+        Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
+        return ReviewResponse.from(review, rewardPoints);
     }
 
     /**

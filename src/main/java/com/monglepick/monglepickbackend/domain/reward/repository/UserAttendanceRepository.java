@@ -2,6 +2,8 @@ package com.monglepick.monglepickbackend.domain.reward.repository;
 
 import com.monglepick.monglepickbackend.domain.reward.entity.UserAttendance;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -83,4 +85,88 @@ public interface UserAttendanceRepository extends JpaRepository<UserAttendance, 
      * @return 해당 기간의 출석 기록 목록 (없으면 빈 리스트)
      */
     List<UserAttendance> findByUserIdAndCheckDateBetween(String userId, LocalDate start, LocalDate end);
+
+    // ══════════════════════════════════════════════
+    // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 12)
+    // ══════════════════════════════════════════════
+
+    /**
+     * 특정 날짜의 전체 출석 체크 수를 집계한다 (AdminStats 사용자 참여도 KPI).
+     *
+     * <p>오늘 총 출석 수 지표에 사용된다. check_date = 오늘로 호출하면
+     * 오늘 출석한 사용자의 레코드 수를 반환한다.</p>
+     *
+     * @param checkDate 집계 기준 날짜
+     * @return 해당 날짜에 출석 체크한 레코드 수
+     */
+    long countByCheckDate(@Param("checkDate") LocalDate checkDate);
+
+    /**
+     * 전체 사용자의 최신 연속 출석일(streakCount) 평균을 반환한다.
+     *
+     * <p>각 사용자별 가장 최근 출석 레코드의 streakCount를 평균낸다.
+     * 데이터가 없으면 COALESCE로 0.0을 반환하여 NPE를 방지한다.</p>
+     *
+     * <p>서브쿼리로 사용자별 최대 check_date를 찾아 최신 streak을 집계한다.</p>
+     *
+     * @return 전체 사용자의 평균 연속 출석일 (출석 이력 없으면 0.0)
+     */
+    @Query("""
+            SELECT COALESCE(AVG(a.streakCount), 0.0)
+            FROM UserAttendance a
+            WHERE a.checkDate = (
+                SELECT MAX(a2.checkDate)
+                FROM UserAttendance a2
+                WHERE a2.userId = a.userId
+            )
+            """)
+    double avgLatestStreakCount();
+
+    /**
+     * 연속 출석일 구간별 사용자 수를 반환한다 (연속 출석 분포 집계).
+     *
+     * <p>각 사용자의 최신 streak을 기준으로 구간을 분류한다.
+     * 반환: [구간라벨(String), 사용자수(Long)] 형태의 Object[] 리스트.</p>
+     *
+     * <p>구간 정의:
+     * <ul>
+     *   <li>1일</li>
+     *   <li>2~3일</li>
+     *   <li>4~7일</li>
+     *   <li>8~14일</li>
+     *   <li>15~30일</li>
+     *   <li>31일+</li>
+     * </ul>
+     * </p>
+     *
+     * @return [rangeLabel, userCount] Object[] 리스트
+     */
+    @Query("""
+            SELECT
+                CASE
+                    WHEN a.streakCount = 1           THEN '1일'
+                    WHEN a.streakCount <= 3          THEN '2-3일'
+                    WHEN a.streakCount <= 7          THEN '4-7일'
+                    WHEN a.streakCount <= 14         THEN '8-14일'
+                    WHEN a.streakCount <= 30         THEN '15-30일'
+                    ELSE '31일+'
+                END,
+                COUNT(DISTINCT a.userId)
+            FROM UserAttendance a
+            WHERE a.checkDate = (
+                SELECT MAX(a2.checkDate)
+                FROM UserAttendance a2
+                WHERE a2.userId = a.userId
+            )
+            GROUP BY
+                CASE
+                    WHEN a.streakCount = 1           THEN '1일'
+                    WHEN a.streakCount <= 3          THEN '2-3일'
+                    WHEN a.streakCount <= 7          THEN '4-7일'
+                    WHEN a.streakCount <= 14         THEN '8-14일'
+                    WHEN a.streakCount <= 30         THEN '15-30일'
+                    ELSE '31일+'
+                END
+            """)
+    List<Object[]> countGroupByStreakRange();
 }

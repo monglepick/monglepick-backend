@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.roadmap.repository;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
@@ -48,4 +49,42 @@ public interface UserCourseProgressRepository extends JpaRepository<UserCoursePr
      * @return 해당 상태의 코스 수
      */
     long countByUserIdAndStatus(String userId, CourseProgressStatus status);
+
+    // ══════════════════════════════════════════════
+    // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 13 — 콘텐츠 성과)
+    // ══════════════════════════════════════════════
+
+    /**
+     * 전체 완주 코스 수를 집계한다 (관리자 KPI용).
+     *
+     * <p>status=COMPLETED 인 레코드 전체 수를 반환한다.
+     * 특정 사용자 기준이 아닌 전체 합산이다.</p>
+     *
+     * @param status 집계할 상태 ({@link CourseProgressStatus})
+     * @return 해당 상태의 전체 코스 진행 레코드 수
+     */
+    long countByStatus(CourseProgressStatus status);
+
+    /**
+     * courseId별 시작자 수, 완주자 수, 평균 진행률을 집계한다.
+     *
+     * <p>관리자 통계 "코스별 완주율" 테이블에 사용된다.
+     * 반환: [courseId(String), totalStarters(Long), completedCount(Long), avgProgress(Double)]
+     * 형태의 Object[] 리스트. completedCount 내림차순 정렬.</p>
+     *
+     * <p>CASE WHEN으로 COMPLETED 상태만 카운트하여 완주자 수를 계산한다.
+     * COALESCE로 평균 진행률이 null일 경우 0.0을 반환하여 NPE를 방지한다.</p>
+     *
+     * @return [courseId, totalStarters, completedCount, avgProgressPercent] Object[] 리스트
+     */
+    @Query("""
+            SELECT ucp.courseId,
+                   COUNT(ucp),
+                   SUM(CASE WHEN ucp.status = com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus.COMPLETED THEN 1 ELSE 0 END),
+                   COALESCE(AVG(ucp.progressPercent), 0.0)
+            FROM UserCourseProgress ucp
+            GROUP BY ucp.courseId
+            ORDER BY SUM(CASE WHEN ucp.status = com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus.COMPLETED THEN 1 ELSE 0 END) DESC
+            """)
+    List<Object[]> countGroupByCourseId();
 }
