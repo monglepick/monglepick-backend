@@ -58,7 +58,11 @@ public final class PaymentDto {
      * @param planCode     구독 상품 코드 (구독인 경우 필수, 포인트팩이면 null 가능)
      */
     public record CreateOrderRequest(
-            @NotBlank(message = "사용자 ID는 필수입니다")
+            /**
+             * 사용자 ID — 클라이언트는 전송하지 않아도 된다.
+             * PaymentController가 JWT Principal에서 추출하여 서비스에 별도 전달한다 (BOLA 방지).
+             * Agent/내부 호출 시 body에 포함할 수 있으나, 컨트롤러에서 무시된다.
+             */
             String userId,
 
             @NotBlank(message = "주문 유형은 필수입니다 (point_pack 또는 subscription)")
