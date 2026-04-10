@@ -328,4 +328,53 @@
         WHERE review_vote_id = #{reviewVoteId}
     </update>
 
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 13, 14) -->
+    <!-- ══════════════════════════════════════════════ -->
+
+    <!--
+        review_category_code 별 리뷰 건수 집계.
+        소프트 삭제(is_deleted=true) 제외.
+        반환: [{categoryCode, cnt}] — cnt 내림차순.
+        AdminStatsService.getReviewQualityStats() 에서 사용.
+    -->
+    <select id="countGroupByCategory" resultType="java.util.LinkedHashMap">
+        SELECT
+            COALESCE(review_category_code, 'NONE') AS categoryCode,
+            COUNT(*)                               AS cnt
+        FROM reviews
+        WHERE is_deleted = false
+        GROUP BY review_category_code
+        ORDER BY cnt DESC
+    </select>
+
+    <!--
+        평점(1~5)별 리뷰 건수 집계.
+        소프트 삭제(is_deleted=true) 제외.
+        반환: [{rating, cnt}] — rating 오름차순.
+        AdminStatsService.getReviewQualityStats() 에서 사용.
+    -->
+    <select id="countGroupByRating" resultType="java.util.LinkedHashMap">
+        SELECT
+            rating AS rating,
+            COUNT(*) AS cnt
+        FROM reviews
+        WHERE is_deleted = false
+          AND rating IS NOT NULL
+        GROUP BY rating
+        ORDER BY rating ASC
+    </select>
+
+    <!--
+        지정 기간 내 리뷰 작성 고유 사용자 수.
+        소프트 삭제 레코드도 포함 (퍼널 분석은 발생량 기준).
+        AdminStatsService.getFunnelConversion() 전환 퍼널 단계 4 에서 사용.
+    -->
+    <select id="countDistinctUserByCreatedAtBetween" resultType="long">
+        SELECT COUNT(DISTINCT user_id)
+        FROM reviews
+        WHERE created_at >= #{start}
+          AND created_at  &lt; #{end}
+    </select>
+
 </mapper>

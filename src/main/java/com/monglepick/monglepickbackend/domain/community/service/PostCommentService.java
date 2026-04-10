@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.domain.community.service;
 
 import com.monglepick.monglepickbackend.domain.community.dto.PostCommentCreateRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCommentResponse;
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardResult;
 import com.monglepick.monglepickbackend.domain.community.entity.CommentLike;
 import com.monglepick.monglepickbackend.domain.community.entity.PostComment;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
@@ -85,20 +86,21 @@ public class PostCommentService {
         // 비정규화 comment_count 증가 (원자적 UPDATE)
         postMapper.updateCommentCount(postId, 1);
 
-        // COMMENT_CREATE 활동 리워드 지급
-        rewardService.grantReward(
+        // COMMENT_CREATE 활동 리워드 지급 — 결과를 캡처하여 응답에 포함
+        RewardResult rewardResult = rewardService.grantReward(
                 userId,
                 "COMMENT_CREATE",
                 "comment_" + comment.getPostCommentId(),
                 request.content().length()
         );
+        Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
 
         /*
          * 응답 정합성 보강 — INSERT 후 nickname JOIN 으로 재조회.
          * 재조회 실패(이론상 발생 어려움) 시에도 build 객체로 폴백하여 리워드 지급은 유지.
          */
         PostComment fullyLoaded = postMapper.findCommentByIdWithNickname(comment.getPostCommentId());
-        return PostCommentResponse.from(fullyLoaded != null ? fullyLoaded : comment);
+        return PostCommentResponse.from(fullyLoaded != null ? fullyLoaded : comment, rewardPoints);
     }
 
     // ─────────────────────────────────────────────

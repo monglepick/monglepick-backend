@@ -4,6 +4,11 @@ import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 관리자 전용 포인트 이력 리포지토리.
@@ -48,4 +53,45 @@ public interface AdminPointsHistoryRepository extends JpaRepository<PointsHistor
      * @return 해당 사용자의 포인트 변동 이력 페이지 (최신순)
      */
     Page<PointsHistory> findByUserIdOrderByCreatedAtDesc(String userId, Pageable pageable);
+
+    // ═══ 포인트 경제 통계 집계 쿼리 ═══
+
+    /**
+     * 포인트 유형별 건수와 포인트 합계를 집계한다.
+     *
+     * <p>반환 배열: [pointType(String), count(Long), totalAmount(Long)]</p>
+     */
+    @Query("SELECT p.pointType, COUNT(p), COALESCE(SUM(ABS(p.pointChange)), 0) " +
+           "FROM PointsHistory p GROUP BY p.pointType ORDER BY COUNT(p) DESC")
+    List<Object[]> countAndSumGroupByPointType();
+
+    /**
+     * 지정 기간 내 발행(earn+bonus) 포인트 합계를 조회한다.
+     */
+    @Query("SELECT COALESCE(SUM(p.pointChange), 0) FROM PointsHistory p " +
+           "WHERE p.pointType IN ('earn', 'bonus') " +
+           "AND p.createdAt >= :start AND p.createdAt < :end")
+    long sumIssuedBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 지정 기간 내 소비(spend) 포인트 합계를 조회한다 (절대값 반환).
+     */
+    @Query("SELECT COALESCE(SUM(ABS(p.pointChange)), 0) FROM PointsHistory p " +
+           "WHERE p.pointType = 'spend' " +
+           "AND p.createdAt >= :start AND p.createdAt < :end")
+    long sumSpentBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 전체 발행 포인트 합계 (earn + bonus).
+     */
+    @Query("SELECT COALESCE(SUM(p.pointChange), 0) FROM PointsHistory p " +
+           "WHERE p.pointType IN ('earn', 'bonus')")
+    long sumTotalIssued();
+
+    /**
+     * 전체 소비 포인트 합계 (spend, 절대값).
+     */
+    @Query("SELECT COALESCE(SUM(ABS(p.pointChange)), 0) FROM PointsHistory p " +
+           "WHERE p.pointType = 'spend'")
+    long sumTotalSpent();
 }

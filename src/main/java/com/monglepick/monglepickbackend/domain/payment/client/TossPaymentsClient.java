@@ -337,10 +337,13 @@ public class TossPaymentsClient {
      * @return true면 검증 통과 또는 검증 비활성화
      */
     public boolean verifyWebhookSignature(String rawBody, String signature) {
-        // 웹훅 시크릿 미설정 → 검증 비활성화 (개발 환경)
+        // 웹훅 시크릿 미설정 → 운영환경에서는 보안 취약점이므로 거부, 개발환경에서만 경고 허용
         if (webhookSecret == null || webhookSecret.isBlank()) {
-            log.warn("웹훅 서명 검증 비활성화 (toss.payments.webhook-secret 미설정)");
-            return true;
+            // 운영환경 여부는 로그 레벨로 판단하지 않고 항상 거부한다.
+            // 개발/테스트에서 웹훅을 테스트하려면 반드시 TOSS_WEBHOOK_SECRET을 설정해야 한다.
+            log.error("[보안] 웹훅 서명 검증 실패 — TOSS_WEBHOOK_SECRET 미설정. " +
+                    "운영환경에서는 모든 웹훅이 거부됩니다. 환경변수를 설정하세요.");
+            return false;
         }
 
         if (signature == null || signature.isBlank()) {

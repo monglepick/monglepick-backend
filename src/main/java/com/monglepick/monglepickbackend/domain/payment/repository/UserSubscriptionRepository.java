@@ -153,6 +153,55 @@ public interface UserSubscriptionRepository extends JpaRepository<UserSubscripti
             @Param("now") LocalDateTime now,
             Pageable pageable);
 
+    // ══════════════════════════════════════════════
+    // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 14, 15)
+    // ══════════════════════════════════════════════
+
+    /**
+     * 지정 기간 내 ACTIVE 구독으로 전환한 고유 사용자 수를 반환한다 (전환 퍼널 단계 5).
+     *
+     * <p>구독 생성 시각(createdAt) 기준으로 기간 내 신규 구독을 시작한 고유 사용자 수를 카운트한다.
+     * DISTINCT userId 로 중복을 제거하며, 구독 상태는 ACTIVE/CANCELLED/EXPIRED 모두 포함하여
+     * 기간 내 구독 전환 자체를 측정한다.</p>
+     *
+     * @param start 기간 시작 시각 (inclusive)
+     * @param end   기간 종료 시각 (exclusive)
+     * @return 해당 기간 구독 전환 고유 사용자 수
+     */
+    @Query("""
+            SELECT COUNT(DISTINCT s.userId)
+            FROM UserSubscription s
+            WHERE s.createdAt >= :start AND s.createdAt < :end
+            """)
+    long countDistinctUserByCreatedAtBetween(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
+
+    /**
+     * 지정 시각 이전에 만료되고 이후 갱신(신규 구독)이 없는 사용자 수를 반환한다 (이탈 위험 신호).
+     *
+     * <p>만료 후 미갱신 사용자 수를 계산한다:
+     * status = EXPIRED 이고 expiresAt &lt; cutoff 인 구독 중,
+     * 해당 사용자가 cutoff 이후 신규 ACTIVE 구독이 없는 경우를 카운트한다.</p>
+     *
+     * <p>서브쿼리로 cutoff 이후 활성 구독이 있는 userId를 제외한다.</p>
+     *
+     * @param cutoff 만료 기준 시각 (이 시각 이전 만료된 구독이 대상)
+     * @return 만료 후 미갱신 고유 사용자 수
+     */
+    @Query("""
+            SELECT COUNT(DISTINCT s.userId)
+            FROM UserSubscription s
+            WHERE s.status = com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription.Status.EXPIRED
+              AND s.expiresAt < :cutoff
+              AND s.userId NOT IN (
+                  SELECT s2.userId FROM UserSubscription s2
+                  WHERE s2.status = com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription.Status.ACTIVE
+              )
+            """)
+    long countExpiredWithoutRenewal(@Param("cutoff") LocalDateTime cutoff);
+
     /**
      * 구독 ID로 구독을 plan과 함께 즉시 로딩 조회한다 (N+1 방지).
      *

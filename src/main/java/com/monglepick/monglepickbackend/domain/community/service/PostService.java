@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.community.service;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCreateRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostReportRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardResult;
 import com.monglepick.monglepickbackend.domain.community.entity.Post;
 import com.monglepick.monglepickbackend.domain.community.entity.PostDeclaration;
 import com.monglepick.monglepickbackend.domain.community.entity.PostLike;
@@ -84,10 +85,23 @@ public class PostService {
         log.info("게시글 작성 완료 — postId: {}, userId: {}, category: {}",
                 post.getPostId(), userId, category);
 
-        // 리워드 지급 — 게시글 ID 기준 1회 (reference_id = "post_{postId}")
-        rewardService.grantReward(userId, "POST_REWARD", "post_" + post.getPostId(), request.content().length());
+        // 리워드 지급 — 게시글 ID 기준 1회 (reference_id = "post_{postId}"), 결과를 응답에 포함
+        RewardResult rewardResult = rewardService.grantReward(userId, "POST_REWARD", "post_" + post.getPostId(), request.content().length());
 
-        return PostResponse.from(post);
+        // 첫 게시글 작성 보너스 — INSERT 후 카운트가 1이면 첫 게시글
+        long postCount = postMapper.countByUserId(userId);
+        if (postCount == 1) {
+            RewardResult firstResult = rewardService.grantReward(userId, "FIRST_POST", "first_post_" + userId, 0);
+            if (firstResult.earned()) {
+                rewardResult = RewardResult.of(
+                        rewardResult.points() + firstResult.points(),
+                        rewardResult.policyName()
+                );
+            }
+        }
+
+        Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
+        return PostResponse.from(post, rewardPoints);
     }
 
     /**
@@ -281,10 +295,11 @@ public class PostService {
 
         log.info("임시저장 게시 완료 — postId: {}", postId);
 
-        // 리워드 지급 (createPost와 동일, RewardService 내부 중복 검사)
-        rewardService.grantReward(userId, "POST_REWARD", "post_" + postId, post.getContent().length());
+        // 리워드 지급 (createPost와 동일, RewardService 내부 중복 검사) — 결과를 응답에 포함
+        RewardResult rewardResult = rewardService.grantReward(userId, "POST_REWARD", "post_" + postId, post.getContent().length());
+        Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
 
-        return PostResponse.from(post);
+        return PostResponse.from(post, rewardPoints);
     }
 
     // ──────────────────────────────────────────────

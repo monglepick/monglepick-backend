@@ -77,4 +77,25 @@ public interface UserActivityProgressRepository extends JpaRepository<UserActivi
      * @return 해당 활동의 모든 사용자 진행률
      */
     List<UserActivityProgress> findAllByActionType(String actionType);
+
+    // ══════════════════════════════════════════════
+    // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 12 — 사용자 참여도)
+    // ══════════════════════════════════════════════
+
+    /**
+     * actionType별 참여 사용자 수와 총 활동 횟수를 집계한다.
+     *
+     * <p>관리자 통계 "활동별 참여 현황" 차트에 사용된다.
+     * 반환: [actionType(String), userCount(Long), totalActions(Long)] 형태의 Object[] 리스트.
+     * totalActions 내림차순으로 정렬하여 가장 활발한 활동 유형이 먼저 반환된다.</p>
+     *
+     * @return [actionType, userCount, totalActions] Object[] 리스트
+     */
+    @Query("""
+            SELECT uap.actionType, COUNT(uap), SUM(uap.totalCount)
+            FROM UserActivityProgress uap
+            GROUP BY uap.actionType
+            ORDER BY SUM(uap.totalCount) DESC
+            """)
+    List<Object[]> countGroupByActionType();
 }

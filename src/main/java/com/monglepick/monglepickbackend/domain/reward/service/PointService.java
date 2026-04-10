@@ -499,10 +499,10 @@ public class PointService {
         // 0P 레코드가 원장에 쌓이면 point_after 체인 검증과 통계 집계에 노이즈 발생.
         if (amount == 0) {
             log.debug("0P 지급 스킵 (카운팅 전용): userId={}, actionType={}", userId, actionType);
-            // 현재 잔액/등급만 조회하여 반환 (변경 없음)
+            // 현재 잔액/등급만 조회하여 반환 (변경 없음, 등급 변경도 없음)
             return userPointRepository.findByUserId(userId)
-                    .map(up -> new EarnResponse(up.getBalance(), up.getGradeCode()))
-                    .orElse(new EarnResponse(0, "NORMAL"));
+                    .map(up -> new EarnResponse(up.getBalance(), up.getGradeCode(), up.getGradeCode()))
+                    .orElse(new EarnResponse(0, "NORMAL", "NORMAL"));
         }
 
         // 1. 비관적 락으로 포인트 레코드 조회
@@ -527,7 +527,7 @@ public class PointService {
                 if (capAfter > currentGrade.getDailyEarnCap()) {
                     log.info("일일 활동 리워드 상한 도달: userId={}, capUsed={}, amount={}, cap={}",
                             userId, userPoint.getDailyCapUsed(), amount, currentGrade.getDailyEarnCap());
-                    return new EarnResponse(userPoint.getBalance(), userPoint.getGradeCode());
+                    return new EarnResponse(userPoint.getBalance(), userPoint.getGradeCode(), userPoint.getGradeCode());
                 }
             }
         }
@@ -564,8 +564,8 @@ public class PointService {
         log.info("포인트 획득 완료: userId={}, 획득={}, 잔액={}, 등급={}, actionType={}",
                 userId, amount, newBalance, newGradeCode, actionType);
 
-        // 5. 응답 반환
-        return new EarnResponse(newBalance, newGradeCode);
+        // 5. 응답 반환 — previousGrade를 포함하여 등급 변경 감지 가능
+        return new EarnResponse(newBalance, newGradeCode, oldGradeCode);
     }
 
     // ──────────────────────────────────────────────

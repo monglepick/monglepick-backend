@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 영화 리뷰 통합 MyBatis Mapper.
@@ -122,6 +123,45 @@ public interface ReviewMapper {
     /** 관리자 리뷰 전체 페이징 조회 (필터 없음, 최신순, 닉네임 포함) */
     List<Review> findAllAdminReviews(@Param("offset") int offset,
                                       @Param("limit") int limit);
+
+    // ══════════════════════════════════════════════
+    // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 13, 14 — 콘텐츠 성과/전환 퍼널)
+    // ══════════════════════════════════════════════
+
+    /**
+     * review_category_code별 리뷰 건수를 집계한다.
+     *
+     * <p>관리자 통계 "리뷰 품질 — 카테고리별 건수" 차트에 사용된다.
+     * 소프트 삭제(is_deleted=true)된 리뷰는 제외한다.
+     * 반환: [{categoryCode, cnt}] 형태의 Map 리스트.</p>
+     *
+     * @return categoryCode별 건수 맵 리스트 (cnt 내림차순)
+     */
+    List<Map<String, Object>> countGroupByCategory();
+
+    /**
+     * 평점(1~5점)별 리뷰 건수를 집계한다.
+     *
+     * <p>관리자 통계 "리뷰 품질 — 평점 분포" 차트에 사용된다.
+     * 소프트 삭제(is_deleted=true)된 리뷰는 제외한다.
+     * 반환: [{rating, cnt}] 형태의 Map 리스트.</p>
+     *
+     * @return 평점별 건수 맵 리스트 (rating 오름차순)
+     */
+    List<Map<String, Object>> countGroupByRating();
+
+    /**
+     * 지정 기간 내 리뷰를 작성한 고유 사용자 수를 반환한다 (전환 퍼널 단계 4용).
+     *
+     * <p>DISTINCT user_id 로 중복을 제거하여 실제로 리뷰를 작성한 고유 사용자만 카운트한다.
+     * 소프트 삭제된 리뷰도 포함한다(퍼널 분석은 실제 발생량 기준).</p>
+     *
+     * @param start 기간 시작 시각
+     * @param end   기간 종료 시각
+     * @return 해당 기간 리뷰 작성 고유 사용자 수
+     */
+    long countDistinctUserByCreatedAtBetween(@Param("start") LocalDateTime start,
+                                              @Param("end") LocalDateTime end);
 
     // ═══ ReviewLike ═══
 

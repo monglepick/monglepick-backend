@@ -193,10 +193,22 @@ public class SubscriptionService {
                 .expiresAt(expiresAt)
                 .autoRenew(true)
                 .build();
+
+        // 4. AI 보너스 풀 초기화 (v3.0 — 3-소스 모델 소스 2: SUB_BONUS)
+        //    구독 활성화 직후 remainingAiBonus를 plan.monthlyAiBonus로 설정하고
+        //    aiBonusReset을 오늘 날짜로 기록한다.
+        //    이 호출이 누락되면 구독 후 AI 보너스가 0회로 남아 SUB_BONUS 소스가 작동하지 않는다.
+        if (plan.getMonthlyAiBonus() != null && plan.getMonthlyAiBonus() > 0) {
+            subscription.initAiBonus(plan.getMonthlyAiBonus());
+            log.info("구독 AI 보너스 초기화: userId={}, monthlyAiBonus={}",
+                    userId, plan.getMonthlyAiBonus());
+        }
+
         subscriptionRepository.save(subscription);
 
-        log.info("구독 생성 완료: userId={}, planCode={}, expiresAt={}",
-                userId, plan.getPlanCode(), expiresAt);
+        log.info("구독 생성 완료: userId={}, planCode={}, expiresAt={}, aiBonus={}",
+                userId, plan.getPlanCode(), expiresAt,
+                subscription.getRemainingAiBonus());
     }
 
     // ──────────────────────────────────────────────
@@ -267,6 +279,13 @@ public class SubscriptionService {
 
         // 100건씩 페이징하여 만료 구독 처리 (OOM 방지)
         // 처리 후 상태가 EXPIRED로 변경되므로 항상 page 0을 조회한다.
+        //
+        // ★ 무한 루프 방지: expire() 실패 시 상태가 ACTIVE로 유지되어
+        //   다음 루프에서 동일 레코드가 재조회된다. maxIterations 상한으로 무한 루프를 차단한다.
+        //   실패 건은 다음 스케줄러 실행(내일 새벽 2시)에서 재시도된다.
+        final int maxIterations = 100; // 최대 100 * 100 = 10,000건 처리 상한
+        int iteration = 0;
+
         Page<UserSubscription> page;
         do {
             page = subscriptionRepository.findExpiredWithPlan(
@@ -277,6 +296,7 @@ public class SubscriptionService {
                 return;
             }
 
+            int pageErrors = 0;
             for (UserSubscription sub : page.getContent()) {
                 try {
                     // TODO: PG 정기결제(빌링키) 연동 시 자동 갱신 시도 로직 추가.
@@ -286,11 +306,25 @@ public class SubscriptionService {
                     totalProcessed++;
                 } catch (Exception e) {
                     totalErrors++;
+                    pageErrors++;
                     log.error("구독 만료 처리 실패: subscriptionId={}, error={}",
                             sub.getUserSubscriptionId(), e.getMessage(), e);
                 }
             }
-        } while (page.hasContent());
+
+            // 현재 페이지의 모든 건이 실패하면 다음 루프에서도 동일 건이 조회되므로 즉시 탈출
+            if (pageErrors == page.getNumberOfElements()) {
+                log.error("만료 처리 현재 페이지 전건 실패 — 무한 루프 방지 탈출. 실패 {}건은 다음 실행에서 재시도",
+                        pageErrors);
+                break;
+            }
+
+            iteration++;
+        } while (page.hasContent() && iteration < maxIterations);
+
+        if (iteration >= maxIterations) {
+            log.warn("만료 처리 최대 반복 횟수({}) 도달 — 잔여 건은 다음 실행에서 처리", maxIterations);
+        }
 
         log.info("만료 구독 처리 완료: 성공 {}건, 실패 {}건", totalProcessed, totalErrors);
     }
