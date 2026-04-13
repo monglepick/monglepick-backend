@@ -157,7 +157,7 @@
                pi.created_at, pi.updated_at,
                m.title AS movie_title, m.poster_path, m.rating
         FROM playlist_item pi
-        LEFT JOIN movies m ON pi.movie_id COLLATE utf8mb4_0900_ai_ci = m.movie_id
+        LEFT JOIN movies m ON pi.movie_id = m.movie_id
         WHERE pi.playlist_id = #{playlistId}
         ORDER BY pi.sort_order ASC, pi.added_at ASC
     </select>

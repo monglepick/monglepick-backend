@@ -89,6 +89,10 @@ public class AdminRoadmapCourseController {
             @Parameter(description = "반환 건수 (최대 30)", example = "10")
             @RequestParam(defaultValue = "10") int size
     ) {
+        // keyword가 null 또는 공백이면 빈 목록 즉시 반환 (불필요한 DB 쿼리 방지)
+        if (keyword == null || keyword.isBlank()) {
+            return ResponseEntity.ok(ApiResponse.ok(List.of()));
+        }
         log.debug("[관리자] 도장깨기 영화 검색 — keyword={}, size={}", keyword, size);
         return ResponseEntity.ok(ApiResponse.ok(adminRoadmapCourseService.searchMovies(keyword, size)));
     }

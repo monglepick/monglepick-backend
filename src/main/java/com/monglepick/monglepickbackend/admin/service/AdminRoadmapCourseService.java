@@ -87,7 +87,8 @@ public class AdminRoadmapCourseService {
      * @return 영화 검색 결과 목록
      */
     public List<MovieSearchResult> searchMovies(String keyword, int size) {
-        int limit = Math.min(size, 30);
+        // size <= 0 방어: 최소 1, 최대 30으로 클램핑
+        int limit = Math.max(1, Math.min(size, 30));
         Pageable pageable = PageRequest.of(0, limit);
         return movieRepository.searchByTitle(keyword, pageable)
                 .map(MovieSearchResult::from)

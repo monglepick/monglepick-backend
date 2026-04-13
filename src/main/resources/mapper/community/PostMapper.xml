@@ -234,13 +234,13 @@
     </update>
 
     <select id="findByPlaylistId" resultMap="postResultMap">
-        SELECT post_id, user_id, title, content, category, view_count, status,
-               like_count, comment_count, is_deleted, deleted_at, is_blinded, playlist_id,
-               created_at, updated_at, created_by, updated_by
-        FROM posts
-        WHERE playlist_id = #{playlistId}
-          AND category = 'PLAYLIST_SHARE'
-          AND is_deleted = false
+        SELECT p.post_id, p.user_id, p.title, p.content, p.category, p.view_count, p.status,
+               p.like_count, p.comment_count, p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
+               p.created_at, p.updated_at, p.created_by, p.updated_by
+        FROM posts p
+        WHERE p.playlist_id = #{playlistId}
+          AND p.category = 'PLAYLIST_SHARE'
+          AND p.is_deleted = false
         LIMIT 1
     </select>
 

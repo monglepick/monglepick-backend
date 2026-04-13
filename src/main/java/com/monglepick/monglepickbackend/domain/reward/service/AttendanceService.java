@@ -162,14 +162,19 @@ public class AttendanceService {
         //    - referenceId: "date_YYYY-MM-DD" 형식으로 날짜별 중복 방지
         //    ※ 기존 pointService.earnPoint() 직접 호출(하드코딩 10P/30P/60P)은
         //      이중 지급 방지를 위해 제거하고 이 한 줄로 대체한다.
-        rewardService.grantReward(userId, "ATTENDANCE_BASE", "date_" + today, 0);
+        //    ※ grantReward()는 REQUIRES_NEW 트랜잭션으로 실행되어 즉시 커밋되므로
+        //      반환된 RewardResult에서 실제 지급 포인트를 읽어 응답에 포함한다.
+        var rewardResult = rewardService.grantReward(userId, "ATTENDANCE_BASE", "date_" + today, 0);
+        int earnedPoints = rewardResult.points();
 
-        log.info("출석 체크 완료 (리워드 위임): userId={}, streak={}", userId, streak);
+        log.info("출석 체크 완료: userId={}, streak={}, earnedPoints={}P", userId, streak, earnedPoints);
 
         // 6. 출석 응답 반환
-        //    실제 지급 포인트·잔액은 RewardService(REQUIRES_NEW 트랜잭션)가 처리하므로
-        //    응답에는 streak 정보만 포함하고 포인트/잔액은 0으로 반환한다.
-        return new AttendanceResponse(today, streak, 0, 0);
+        //    earnedPoints: grantReward() 반환값 (기본 출석 포인트, 등급 배율 적용)
+        //    currentBalance: 0 — 클라이언트가 별도 loadBalance() 호출로 갱신하므로 0 반환
+        //    ※ streak 보너스(7/15/30일)는 checkThresholdRewards()에서 별도 지급되어
+        //      earnedPoints에 미포함. 포인트 이력에서 확인 가능.
+        return new AttendanceResponse(today, streak, earnedPoints, 0);
     }
 
     // ──────────────────────────────────────────────

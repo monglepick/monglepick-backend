@@ -54,6 +54,10 @@ public class MovieController {
             @RequestParam String keyword,
             @RequestParam(defaultValue = "12") int size
     ) {
+        // keyword가 null 또는 공백이면 빈 목록 즉시 반환 (불필요한 DB 쿼리 방지)
+        if (keyword == null || keyword.isBlank()) {
+            return ResponseEntity.ok(List.of());
+        }
         log.debug("영화 키워드 검색 - keyword: {}, size: {}", keyword, size);
         return ResponseEntity.ok(movieService.searchByKeyword(keyword, size));
     }
