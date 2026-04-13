@@ -517,20 +517,12 @@ public class PointService {
         LocalDate today = LocalDate.now();
         userPoint.resetDailyIfNeeded(today);
 
-        // 1-2. ★ 일일 활동 리워드 상한 검사 (설계서 v2.3 §4.1)
-        // isActivityReward=true이고 amount > 0인 경우에만 검사.
-        // 구독 포인트/관리자 지급은 상한 미적용.
-        if (isActivityReward && amount > 0) {
-            Grade currentGrade = userPoint.getGrade();
-            if (currentGrade != null && currentGrade.getDailyEarnCap() > 0) {
-                int capAfter = userPoint.getDailyCapUsed() + amount;
-                if (capAfter > currentGrade.getDailyEarnCap()) {
-                    log.info("일일 활동 리워드 상한 도달: userId={}, capUsed={}, amount={}, cap={}",
-                            userId, userPoint.getDailyCapUsed(), amount, currentGrade.getDailyEarnCap());
-                    return new EarnResponse(userPoint.getBalance(), userPoint.getGradeCode(), userPoint.getGradeCode());
-                }
-            }
-        }
+        // 1-2. ★ 일일 활동 리워드 상한 검사
+        //    2026-04-13 변경: RewardService.checkDailyEarnCap()에서 사전 검사 + lazy reset을 일원화했으므로
+        //    여기서는 이중 검사를 제거한다. 비리워드 경로(관리자 지급 등)는 isActivityReward=false이므로
+        //    원래 이 검사를 타지 않았다. earnPoint()는 RewardService 경유(isActivityReward=true) 또는
+        //    직접 호출(isActivityReward=false) 두 경로만 존재하며, 전자는 이미 상한 검사 통과 후 도달한다.
+        //    기존 이중 검사는 resetDailyIfNeeded() 호출 타이밍 불일치로 capUsed 동기화 문제를 일으켰다.
 
         // 2. 포인트 추가 (도메인 메서드: balance/totalEarned/dailyEarned + 활동이면 earnedByActivity/dailyCapUsed)
         userPoint.addPoints(amount, today, isActivityReward);

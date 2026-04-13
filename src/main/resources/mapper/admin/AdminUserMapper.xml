@@ -37,6 +37,7 @@
         <result property="marketingAgreed" column="marketing_agreed"/>
         <result property="status" column="status"/>
         <result property="suspendedAt" column="suspended_at"/>
+        <result property="suspendedUntil" column="suspended_until"/>
         <result property="suspendReason" column="suspend_reason"/>
         <result property="isDeleted" column="is_deleted"/>
         <result property="deletedAt" column="deleted_at"/>
@@ -52,7 +53,7 @@
         user_id, email, nickname, password_hash, profile_image,
         provider, provider_id, user_role, user_birth, name,
         required_term, option_term, marketing_agreed,
-        status, suspended_at, suspend_reason,
+        status, suspended_at, suspended_until, suspend_reason,
         is_deleted, deleted_at, last_login_at,
         created_at, updated_at, created_by, updated_by
     </sql>

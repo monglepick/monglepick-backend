@@ -67,6 +67,17 @@ public class ChatService {
 
         return sessionRepository.findBySessionId(request.sessionId())
                 .map(existing -> {
+                    // [FIX] 소프트 삭제된 세션에 새 메시지가 저장될 경우 자동 복원.
+                    // 원인: Agent가 세션을 로드할 때 isDeleted=false 필터로 못 찾으면 신규 세션처럼
+                    // 처리하지만, 동일한 sessionId로 저장 시 이 코드 경로를 탄다.
+                    // isDeleted=true 상태가 유지되면 이력 조회(findByUserIdAndIsDeletedFalse)에서
+                    // 영원히 제외되므로, 새 메시지 저장 시 isDeleted를 false로 복원한다.
+                    if (Boolean.TRUE.equals(existing.getIsDeleted())) {
+                        existing.restore();
+                        log.info("chat_session_restored_from_deleted: sessionId={}, userId={}",
+                                request.sessionId(), request.userId());
+                    }
+
                     // 기존 세션 업데이트
                     existing.updateMessages(request.messages(), request.turnCount(), now);
                     if (request.sessionState() != null) {

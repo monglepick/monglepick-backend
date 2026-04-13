@@ -100,9 +100,10 @@ public final class AuthDto {
      * 이 DTO는 HTTP 응답 body로 직접 반환하지 않고,
      * AuthController에서 쿠키 설정 후 {@link AuthResponseBody}로 변환하여 반환한다.</p>
      *
-     * @param accessToken  JWT Access Token
-     * @param refreshToken JWT Refresh Token (서비스 레이어 내부 전달용 — body 노출 금지)
-     * @param user         사용자 요약 정보
+     * @param accessToken       JWT Access Token
+     * @param refreshToken      JWT Refresh Token (서비스 레이어 내부 전달용 — body 노출 금지)
+     * @param user              사용자 요약 정보
+     * @param signupBonusPoints 회원가입 보너스 포인트 (가입 시에만 값이 존재, 로그인 시 0)
      */
     @Schema(description = "인증 성공 응답 (서비스 레이어 내부 전달용 — refreshToken 포함)")
     public record AuthResponse(
@@ -114,7 +115,10 @@ public final class AuthDto {
             String refreshToken,
 
             @Schema(description = "사용자 요약 정보")
-            UserInfo user
+            UserInfo user,
+
+            @Schema(description = "회원가입 보너스 포인트 (가입 시에만 > 0)", example = "200")
+            int signupBonusPoints
     ) {
     }
 
@@ -124,8 +128,9 @@ public final class AuthDto {
      * <p>Refresh Token을 HttpOnly 쿠키로 전달한 후 HTTP 응답 body에는
      * Access Token과 사용자 정보만 포함한다 (XSS 방어).</p>
      *
-     * @param accessToken JWT Access Token
-     * @param user        사용자 요약 정보
+     * @param accessToken       JWT Access Token
+     * @param user              사용자 요약 정보
+     * @param signupBonusPoints 회원가입 보너스 포인트 (SIGNUP_BONUS 정책 기반, 0이면 미지급)
      */
     @Schema(description = "회원가입 HTTP 응답 body (accessToken + user, refreshToken은 쿠키로 전달)")
     public record AuthResponseBody(
@@ -133,7 +138,10 @@ public final class AuthDto {
             String accessToken,
 
             @Schema(description = "사용자 요약 정보")
-            UserInfo user
+            UserInfo user,
+
+            @Schema(description = "회원가입 보너스 포인트 (가입 시에만 > 0, 로그인 시 0)", example = "200")
+            int signupBonusPoints
     ) {
     }
 

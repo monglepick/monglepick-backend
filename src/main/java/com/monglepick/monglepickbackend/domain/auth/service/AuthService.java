@@ -6,6 +6,7 @@ import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.PasswordResetReq
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.SignupRequest;
 import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.UserInfo;
 import com.monglepick.monglepickbackend.domain.auth.dto.CustomOAuth2User;
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardResult;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
@@ -123,16 +124,18 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         //      기존 initializePoint(userId, 500) 방식에서 변경 — 하드코딩 500P 제거
         pointService.initializePoint(userId, 0);
 
-        // R-1: 회원가입 보너스 — SIGNUP_BONUS 정책 기반 500P 지급
+        // R-1: 회원가입 보너스 — SIGNUP_BONUS 정책 기반 200P 지급
         //      max_count=1 정책으로 중복 지급 자동 차단
         //      referenceId "signup" 고정으로 동일 사용자의 중복 요청도 방지
-        rewardService.grantReward(userId, "SIGNUP_BONUS", "signup", 0);
+        //      결과를 캡처하여 프론트엔드에서 가입 보너스 토스트를 표시할 수 있도록 응답에 포함
+        RewardResult bonusResult = rewardService.grantReward(userId, "SIGNUP_BONUS", "signup", 0);
 
         /* C-2: Refresh Token을 DB 화이트리스트에 저장 */
-        AuthResponse authResponse = buildAuthResponse(user);
+        AuthResponse authResponse = buildAuthResponse(user, bonusResult.points());
         jwtService.addRefresh(userId, authResponse.refreshToken());
 
-        log.info("로컬 회원가입 완료 — userId: {}, email: {}", userId, request.email());
+        log.info("로컬 회원가입 완료 — userId: {}, email: {}, signupBonus: {}P",
+                userId, request.email(), bonusResult.points());
 
         return authResponse;
     }
@@ -365,8 +368,11 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     /**
      * User 엔티티로부터 인증 응답을 빌드한다.
      * (회원가입 시 사용 — 로그인은 LoginSuccessHandler에서 처리)
+     *
+     * @param user              사용자 엔티티
+     * @param signupBonusPoints 회원가입 보너스 포인트 (가입 시에만 > 0)
      */
-    private AuthResponse buildAuthResponse(User user) {
+    private AuthResponse buildAuthResponse(User user, int signupBonusPoints) {
         String accessToken = jwtTokenProvider.generateAccessToken(user.getUserId(), user.getUserRole().name());
         String refreshToken = jwtTokenProvider.generateRefreshToken(user.getUserId());
 
@@ -379,6 +385,6 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                 user.getUserRole().name()
         );
 
-        return new AuthResponse(accessToken, refreshToken, userInfo);
+        return new AuthResponse(accessToken, refreshToken, userInfo, signupBonusPoints);
     }
 }

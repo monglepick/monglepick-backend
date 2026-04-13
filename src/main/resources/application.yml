@@ -78,18 +78,10 @@ spring:
       ddl-auto: update
     ## Hibernate 초기화 후 data.sql 실행 (시드 데이터 적재)
     defer-datasource-initialization: true
-
-  sql:
-    init:
-      ## C-7: 운영 환경에서 매번 data.sql을 실행하면 중복 삽입 위험이 있으므로
-      ## 환경변수로 제어한다. 기본값 never, 개발 환경에서만 SQL_INIT_MODE=always 설정
-      mode: ${SQL_INIT_MODE:never}
-
-    ## Hibernate 속성
+    ## Hibernate 속성 — spring.jpa.properties.hibernate.* 경로에 위치해야 적용됨
     properties:
       hibernate:
-        ## MySQL 8.0 방언 (자동 감지되지만 명시적으로 지정)
-        dialect: org.hibernate.dialect.MySQLDialect
+        ## MySQL 8.0 방언은 Hibernate가 자동 감지 — 명시 지정 시 HHH90000025 경고 발생하므로 제거
         ## SQL 포맷팅 (개발 시 가독성 향상)
         format_sql: true
         ## 배치 INSERT/UPDATE 최적화
@@ -97,11 +89,16 @@ spring:
           batch_size: 50
         order_inserts: true
         order_updates: true
-
     ## 콘솔에 실행 SQL 출력 여부 (운영 환경에서는 false 권장)
-    show-sql: false
+    show-sql: ${JPA_SHOW_SQL:false}
     ## Open Session In View 비활성화 (성능 + LazyInitializationException 명시적 처리)
     open-in-view: false
+
+  sql:
+    init:
+      ## C-7: 운영 환경에서 매번 data.sql을 실행하면 중복 삽입 위험이 있으므로
+      ## 환경변수로 제어한다. 기본값 never, 개발 환경에서만 SQL_INIT_MODE=always 설정
+      mode: ${SQL_INIT_MODE:never}
 
 ## -------------------------------------------------------------------------
 ## Swagger/OpenAPI 설정
@@ -207,9 +204,11 @@ logging:
     ## P6Spy SQL 로그 (P6SpyConfig 가 Hibernate 포맷터로 정리한 SQL 출력)
     ## 운영에서 끄려면 P6SPY_LOG_LEVEL=OFF 또는 위 P6SPY_LOGGING=false
     p6spy: ${P6SPY_LOG_LEVEL:INFO}
-    ## SQL 디버깅 시 아래 주석 해제 (Hibernate 직접 출력 — P6Spy 와 중복되므로 보통 OFF)
-    # org.hibernate.SQL: DEBUG
-    # org.hibernate.orm.jdbc.bind: TRACE
+    ## Hibernate SQL 로깅 (실행 SQL + 바인드 파라미터)
+    ## 환경변수로 제어: HIBERNATE_SQL_LOG=DEBUG, HIBERNATE_BIND_LOG=TRACE
+    ## P6Spy와 중복될 수 있으므로 P6Spy OFF 시 활성화 권장
+    org.hibernate.SQL: ${HIBERNATE_SQL_LOG:DEBUG}
+    org.hibernate.orm.jdbc.bind: ${HIBERNATE_BIND_LOG:TRACE}
 
 ## -------------------------------------------------------------------------
 ## 앱 커스텀 설정
