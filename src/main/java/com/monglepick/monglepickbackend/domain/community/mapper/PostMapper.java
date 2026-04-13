@@ -40,6 +40,9 @@ public interface PostMapper {
     /** PK로 게시글 + 작성자 닉네임 조회 (JOIN users, 상세 화면용) */
     Post findByIdWithNickname(@Param("postId") Long postId);
 
+    /** playlistId로 PLAYLIST_SHARE 게시글 조회 — 플레이리스트 공개/비공개 전환용 (없으면 null) */
+    Post findByPlaylistId(@Param("playlistId") Long playlistId);
+
     // ═══ Post 목록 조회 (JOIN users) ═══
 
     /**

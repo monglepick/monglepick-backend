@@ -16,7 +16,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 영화 컨트롤러
@@ -34,6 +37,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class MovieController {
 
     private final MovieService movieService;
+
+    /**
+     * 영화 제목 키워드 검색 API (플레이리스트 영화 추가용).
+     *
+     * <p>한국어/영어 제목 LIKE 검색. 비로그인 사용자도 접근 가능.</p>
+     *
+     * @param keyword 검색 키워드
+     * @param size    반환 건수 (기본 12, 최대 30)
+     * @return 200 OK + 영화 목록
+     */
+    @Operation(summary = "영화 키워드 검색", description = "한국어/영어 제목 검색 (비로그인 가능)")
+    @SecurityRequirement(name = "")
+    @GetMapping("/search")
+    public ResponseEntity<List<MovieResponse>> searchMovies(
+            @RequestParam String keyword,
+            @RequestParam(defaultValue = "12") int size
+    ) {
+        log.debug("영화 키워드 검색 - keyword: {}, size: {}", keyword, size);
+        return ResponseEntity.ok(movieService.searchByKeyword(keyword, size));
+    }
 
     /**
      * 인기 영화 목록 조회 API (평점순)

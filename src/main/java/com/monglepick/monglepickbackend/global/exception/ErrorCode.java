@@ -362,7 +362,10 @@ public enum ErrorCode {
     INVALID_COURSE_MOVIE_IDS(HttpStatus.BAD_REQUEST, "ROAD004", "코스 영화 ID 형식이 올바르지 않습니다"),
 
     /** 관리자 — 허용되지 않은 퀴즈 상태 전이 시도. */
-    INVALID_QUIZ_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "ROAD005", "허용되지 않은 퀴즈 상태 전이입니다");
+    INVALID_QUIZ_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "ROAD005", "허용되지 않은 퀴즈 상태 전이입니다"),
+
+    /** 도장깨기 — 이미 완료 처리한 영화를 중복 완료 시도. */
+    ALREADY_VERIFIED_MOVIE(HttpStatus.CONFLICT, "ROAD006", "이미 완료 처리한 영화입니다");
 
     // ─────────────────────────────────────────────
     // 필드

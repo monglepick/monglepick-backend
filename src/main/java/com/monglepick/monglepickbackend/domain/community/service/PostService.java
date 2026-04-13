@@ -69,6 +69,13 @@ public class PostService {
         Long playlistId = null;
         if (category == Post.Category.PLAYLIST_SHARE) {
             playlistId = validateAndGetPlaylistId(request.playlistId(), userId);
+
+            // 멱등성 보장 — 이미 공유된 게시글이 있으면 기존 게시글 반환 (중복 생성 방지)
+            Post existing = postMapper.findByPlaylistId(playlistId);
+            if (existing != null) {
+                log.info("PLAYLIST_SHARE 중복 공유 방지 — 기존 postId={} 반환", existing.getPostId());
+                return PostResponse.from(existing, null);
+            }
         }
 
         Post post = Post.builder()
@@ -205,6 +212,29 @@ public class PostService {
 
         // 리워드 회수
         rewardService.revokeReward(userId, "POST_REWARD", "post_" + postId);
+    }
+
+    /**
+     * 플레이리스트 ID로 공유 게시글을 찾아 삭제합니다 (비공개 전환 전용).
+     *
+     * <p>sharedPostId를 프론트엔드 세션에서 관리하면 새로고침 시 소실되므로,
+     * 비공개 전환 시에는 postId 대신 playlistId로 게시글을 조회하여 삭제합니다.
+     * 공유 게시글이 없으면 조용히 무시합니다.</p>
+     *
+     * @param playlistId 비공개로 전환할 플레이리스트 ID
+     * @param userId     요청 사용자 ID (소유자 검증)
+     */
+    @Transactional
+    public void deletePostByPlaylistId(Long playlistId, String userId) {
+        Post post = postMapper.findByPlaylistId(playlistId);
+        if (post == null) {
+            log.debug("비공개 전환 — playlistId={}에 연결된 공유 게시글 없음 (이미 삭제됐거나 미공유)", playlistId);
+            return;
+        }
+        validatePostOwner(post, userId);
+        postMapper.deleteById(post.getPostId());
+        rewardService.revokeReward(userId, "POST_REWARD", "post_" + post.getPostId());
+        log.info("플레이리스트 비공개 전환 — postId={} 삭제 완료 (playlistId={})", post.getPostId(), playlistId);
     }
 
     // ──────────────────────────────────────────────

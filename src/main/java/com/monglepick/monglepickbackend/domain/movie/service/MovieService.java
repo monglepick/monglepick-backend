@@ -8,9 +8,12 @@ import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 /**
  * 영화 서비스
@@ -63,6 +66,24 @@ public class MovieService {
                 });
 
         return MovieResponse.from(movie);
+    }
+
+    /**
+     * 키워드로 영화를 검색합니다 (한국어/영어 제목 LIKE 검색).
+     *
+     * <p>플레이리스트 영화 추가 등 간단한 제목 검색에 사용됩니다.
+     * 고급 검색(유사도/전문검색)은 FastAPI Recommend 서버를 사용하세요.</p>
+     *
+     * @param keyword 검색 키워드
+     * @param size    반환 건수 (최대 30)
+     * @return 영화 검색 결과 목록
+     */
+    public List<MovieResponse> searchByKeyword(String keyword, int size) {
+        int limit = Math.min(size, 30);
+        Pageable pageable = PageRequest.of(0, limit);
+        return movieRepository.searchByTitle(keyword, pageable)
+                .map(MovieResponse::from)
+                .getContent();
     }
 
     /**

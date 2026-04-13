@@ -8,8 +8,10 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.CourseResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.CreateCourseRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.MovieSearchResult;
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.UpdateActiveRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.UpdateCourseRequest;
+import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.RoadmapCourse;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.RoadmapCourseRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -17,6 +19,7 @@ import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,12 +62,37 @@ public class AdminRoadmapCourseService {
     /** 도장깨기 코스 레포지토리 (JPA, 윤형주 admin 도메인) */
     private final RoadmapCourseRepository roadmapCourseRepository;
 
+    /** 영화 레포지토리 — 도장깨기 템플릿 생성 시 영화 검색에 사용 */
+    private final MovieRepository movieRepository;
+
     /**
      * Jackson ObjectMapper 인스턴스.
      *
      * <p>movieIds JSON 직렬화/역직렬화에 사용한다. Spring Boot가 자동 등록하는 빈을 주입.</p>
      */
     private final ObjectMapper objectMapper;
+
+    // ─────────────────────────────────────────────
+    // 영화 검색 (도장깨기 템플릿 영화 추가용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 영화 제목으로 영화를 검색한다 (관리자 도장깨기 템플릿 영화 추가 전용).
+     *
+     * <p>한국어·영어 제목 모두 LIKE 검색하며, 인기도 내림차순으로 정렬한다.
+     * 결과는 최대 {@code size}건으로 제한한다.</p>
+     *
+     * @param keyword 검색 키워드 (한국어 또는 영어 제목)
+     * @param size    반환 건수 제한 (기본 10, 최대 30)
+     * @return 영화 검색 결과 목록
+     */
+    public List<MovieSearchResult> searchMovies(String keyword, int size) {
+        int limit = Math.min(size, 30);
+        Pageable pageable = PageRequest.of(0, limit);
+        return movieRepository.searchByTitle(keyword, pageable)
+                .map(MovieSearchResult::from)
+                .getContent();
+    }
 
     // ─────────────────────────────────────────────
     // 조회

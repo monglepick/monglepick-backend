@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.admin.controller;
 
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.CourseResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.CreateCourseRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.MovieSearchResult;
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.UpdateActiveRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminRoadmapCourseDto.UpdateCourseRequest;
 import com.monglepick.monglepickbackend.admin.service.AdminRoadmapCourseService;
@@ -27,6 +28,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 관리자 도장깨기(RoadmapCourse) 템플릿 관리 API 컨트롤러.
@@ -59,6 +62,36 @@ public class AdminRoadmapCourseController {
 
     /** 도장깨기 코스 마스터 관리 서비스 */
     private final AdminRoadmapCourseService adminRoadmapCourseService;
+
+    // ─────────────────────────────────────────────
+    // 영화 검색 (도장깨기 템플릿 영화 추가용)
+    // ─────────────────────────────────────────────
+
+    /**
+     * 영화 제목으로 영화를 검색한다 (도장깨기 템플릿 영화 추가 전용).
+     *
+     * <p>관리자가 코스 템플릿 생성·수정 시 영화 ID를 직접 입력하는 대신
+     * 제목으로 검색하여 선택하도록 지원하는 자동완성 API.</p>
+     *
+     * @param keyword 검색 키워드 (한국어 또는 영어 제목)
+     * @param size    반환 건수 (기본 10, 최대 30)
+     * @return 200 OK + 영화 검색 결과 목록 (movieId, title, releaseYear, director, posterPath)
+     */
+    @Operation(
+            summary = "영화 검색 (도장깨기 템플릿용)",
+            description = "제목 키워드로 영화를 검색합니다. " +
+                    "코스 템플릿 생성·수정 화면에서 영화 ID 대신 제목으로 영화를 선택할 때 사용합니다."
+    )
+    @GetMapping("/movies/search")
+    public ResponseEntity<ApiResponse<List<MovieSearchResult>>> searchMovies(
+            @Parameter(description = "검색 키워드 (한국어 또는 영어 제목)", required = true, example = "인셉션")
+            @RequestParam String keyword,
+            @Parameter(description = "반환 건수 (최대 30)", example = "10")
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        log.debug("[관리자] 도장깨기 영화 검색 — keyword={}, size={}", keyword, size);
+        return ResponseEntity.ok(ApiResponse.ok(adminRoadmapCourseService.searchMovies(keyword, size)));
+    }
 
     // ─────────────────────────────────────────────
     // 조회

@@ -145,6 +145,24 @@ public class PostController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * 플레이리스트 공유 게시글 삭제 API (비공개 전환 전용).
+     *
+     * <p>postId 대신 playlistId로 게시글을 찾아 삭제합니다.
+     * 프론트엔드 세션에서 postId가 소실되어도 안전하게 삭제할 수 있습니다.</p>
+     */
+    @Operation(summary = "플레이리스트 공유 게시글 삭제", description = "playlistId로 공유 게시글 삭제 (비공개 전환 전용)")
+    @SecurityRequirement(name = "BearerAuth")
+    @DeleteMapping("/playlist/{playlistId}")
+    public ResponseEntity<Void> deletePostByPlaylistId(
+            @PathVariable Long playlistId,
+            @AuthenticationPrincipal String userId) {
+
+        log.info("플레이리스트 공유 게시글 삭제 요청 — playlistId: {}, userId: {}", playlistId, userId);
+        postService.deletePostByPlaylistId(playlistId, userId);
+        return ResponseEntity.noContent().build();
+    }
+
     // ──────────────────────────────────────────────
     // 임시저장 기능 (Downloads POST 파일 적용)
     // ──────────────────────────────────────────────
