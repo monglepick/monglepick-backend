@@ -12,7 +12,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
-import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -43,9 +42,6 @@ import lombok.Setter;
 @Entity
 @Table(
         name = "reviews",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uk_review_user_movie", columnNames = {"user_id", "movie_id"}
-        ),
         indexes = {
                 @Index(name = "idx_reviews_movie", columnList = "movie_id"),
                 @Index(name = "idx_reviews_user", columnList = "user_id")

@@ -1,8 +1,8 @@
 package com.monglepick.monglepickbackend.admin.dto;
 
+import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
@@ -105,6 +105,32 @@ public class AdminRoadmapCourseDto {
     // ─────────────────────────────────────────────
     // 응답 DTO
     // ─────────────────────────────────────────────
+
+    /**
+     * 영화 검색 결과 단건 DTO.
+     *
+     * <p>관리자가 도장깨기 템플릿 생성·수정 시 영화 제목으로 검색할 때
+     * 드롭다운에 표시되는 최소 정보. 선택한 movieId를 movieIds 목록에 추가한다.</p>
+     */
+    public record MovieSearchResult(
+            String movieId,
+            String title,
+            String titleEn,
+            Integer releaseYear,
+            String director,
+            String posterPath
+    ) {
+        public static MovieSearchResult from(Movie movie) {
+            return new MovieSearchResult(
+                    movie.getMovieId(),
+                    movie.getTitle(),
+                    movie.getTitleEn(),
+                    movie.getReleaseYear(),
+                    movie.getDirector(),
+                    movie.getPosterPath()
+            );
+        }
+    }
 
     /**
      * 코스 단일 항목 응답 DTO.

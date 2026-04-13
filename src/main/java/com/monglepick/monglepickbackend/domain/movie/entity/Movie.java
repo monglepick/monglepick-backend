@@ -197,7 +197,7 @@ public class Movie extends BaseAuditEntity {
      * 실제 영화 촬영이 이루어진 주요 장소를 기록한다. (최대 500자)
      * 예: "서울 종로구, 부산 해운대구"
      */
-    @Column(name = "filming_location", length = 500)
+    @Column(name = "filming_location", columnDefinition = "TEXT")
     private String filmingLocation;
 
     @Builder

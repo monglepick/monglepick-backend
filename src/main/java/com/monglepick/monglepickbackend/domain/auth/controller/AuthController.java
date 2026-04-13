@@ -100,10 +100,11 @@ public class AuthController {
          */
         cookieUtil.addRefreshTokenCookie(response, authResponse.refreshToken());
 
-        /* HTTP 응답 body: accessToken + user 정보만 반환 (refreshToken 제외) */
+        /* HTTP 응답 body: accessToken + user + signupBonusPoints 반환 (refreshToken 제외) */
         AuthResponseBody responseBody = new AuthResponseBody(
                 authResponse.accessToken(),
-                authResponse.user()
+                authResponse.user(),
+                authResponse.signupBonusPoints()
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).body(responseBody);

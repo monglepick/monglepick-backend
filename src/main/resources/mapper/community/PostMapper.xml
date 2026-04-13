@@ -233,6 +233,17 @@
         WHERE post_id = #{postId}
     </update>
 
+    <select id="findByPlaylistId" resultMap="postResultMap">
+        SELECT p.post_id, p.user_id, p.title, p.content, p.category, p.view_count, p.status,
+               p.like_count, p.comment_count, p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
+               p.created_at, p.updated_at, p.created_by, p.updated_by
+        FROM posts p
+        WHERE p.playlist_id = #{playlistId}
+          AND p.category = 'PLAYLIST_SHARE'
+          AND p.is_deleted = false
+        LIMIT 1
+    </select>
+
     <delete id="deleteById">
         DELETE FROM posts
         WHERE post_id = #{postId}

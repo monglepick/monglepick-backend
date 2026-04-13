@@ -646,6 +646,13 @@ public class RewardService {
      * <p>bonus 타입 정책(마일스톤 등)은 상한 검사를 생략한다 (고정 포인트이므로
      * daily_earn_cap에 포함시키지 않음). earn 타입만 상한 적용.</p>
      *
+     * <h4>2026-04-13 버그 수정</h4>
+     * <p>기존 코드는 UserPoint를 조회만 하고 resetDailyIfNeeded()를 호출하지 않아,
+     * 날짜가 바뀐 후 어제의 dailyCapUsed 값(예: 100)이 그대로 남아
+     * capUsed >= cap 조건에 걸려 하루 종일 모든 earn 리워드가 차단되는 치명적 버그가 있었다.
+     * earnPoint()에서 resetDailyIfNeeded()가 호출되지만, 이 메서드가 false를 반환하면
+     * earnPoint()에 도달하지 못하므로 리셋이 영영 일어나지 않았다.</p>
+     *
      * @param userId 사용자 ID
      * @param policy 적용할 리워드 정책 (point_type으로 earn/bonus 구분)
      * @return 지급 가능하면 {@code true}, 상한 초과이면 {@code false}
@@ -670,8 +677,12 @@ public class RewardService {
                 return true;
             }
 
-            /* lazy reset이 이미 UserPoint.addPoints()에서 수행되므로
-             * dailyCapUsed는 오늘 기준값이 보장됨 */
+            /* ★ 2026-04-13 수정: 날짜 변경 시 dailyCapUsed를 0으로 리셋한 뒤 비교.
+             *    기존에는 resetDailyIfNeeded()를 호출하지 않아 어제 값으로 비교했다.
+             *    이 메서드는 읽기 전용 검사이므로 리셋한 엔티티 상태는 JPA dirty check에 의해
+             *    트랜잭션 종료 시 자동으로 반영된다 (REQUIRES_NEW 범위 내). */
+            userPoint.resetDailyIfNeeded(LocalDate.now());
+
             int capUsed = userPoint.getDailyCapUsed();
             int cap = grade.getDailyEarnCap();
 
