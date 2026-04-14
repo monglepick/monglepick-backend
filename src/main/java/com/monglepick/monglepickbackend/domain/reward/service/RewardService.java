@@ -10,10 +10,10 @@ import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRe
 import com.monglepick.monglepickbackend.domain.reward.repository.RewardPolicyRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserActivityProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserPointRepository;
+import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -34,18 +34,25 @@ import java.util.Optional;
  *   <li>콘텐츠 삭제 등 리워드 회수 시 points_history 이력 기반 정확한 금액 차감</li>
  * </ul>
  *
- * <h3>트랜잭션 전략 (REQUIRES_NEW)</h3>
- * <p>{@code grantReward()} / {@code grantRewardWithAmount()}는
- * {@code Propagation.REQUIRES_NEW}로 선언되어 호출자(ReviewService 등)의 트랜잭션과
- * 완전히 분리된다. 리워드 지급 실패가 본 기능(리뷰 저장 등)의 롤백을 유발하지 않는다.</p>
+ * <h3>트랜잭션 전략 (REQUIRED — 2026-04-14 변경)</h3>
+ * <p>기존에는 {@code Propagation.REQUIRES_NEW}로 호출자 트랜잭션과 완전히 분리했으나,
+ * 회원가입 시 {@code AuthService.signup()}의 {@code userMapper.insert(user)} +
+ * {@code pointService.initializePoint(userId, 0)}이 아직 커밋되지 않은 상태에서
+ * {@code REQUIRES_NEW}로 새 트랜잭션을 열면 방금 INSERT한 user_points row가 보이지 않아
+ * {@code POINT_NOT_FOUND}로 실패하고 catch 가 삼키는 버그가 있었다.</p>
+ * <p>따라서 {@code Propagation.REQUIRED}(Spring 기본값)로 변경하여 호출자 트랜잭션에
+ * 참여하도록 한다. 리워드 지급 실패 시 본 기능도 함께 롤백되는 편이 데이터 정합성 측면에서
+ * 안전하다 (가입 보너스/리뷰 작성 리워드 등은 본 기능과 원자적으로 처리돼야 함).</p>
  *
  * <h3>동시성 처리</h3>
  * <p>{@code UserActivityProgress}를 SELECT FOR UPDATE로 잠금하여
  * 동일 사용자의 동시 활동 요청(예: 리뷰 빠른 연속 제출)에서 한도 초과 지급을 방지한다.</p>
  *
- * <h3>예외 처리 전략</h3>
- * <p>모든 public 메서드는 내부적으로 try-catch로 전체 예외를 포착하여
- * warn 로그만 남기고 정상 반환한다. 리워드 서비스의 예외가 본 기능에 전파되지 않는다.</p>
+ * <h3>예외 처리 전략 (2026-04-14 좁힘)</h3>
+ * <p>기존에는 {@code catch (Exception e)}로 모든 예외를 삼켜 리워드 지급 실패를
+ * 본 기능에 숨겼으나, 이 때문에 포인트가 안 들어오는 버그가 조용히 발생했다.
+ * 이제 {@link BusinessException}(정책 미스/포인트 레코드 없음 등 도메인 예외)은 rethrow 하여
+ * 호출자가 인지·롤백하도록 하고, 그 외 기술적 예외(DB 일시 장애 등)만 warn 로그 후 EMPTY 반환한다.</p>
  *
  * <h3>등급 배율 적용</h3>
  * <ul>
@@ -116,7 +123,7 @@ public class RewardService {
      * @param referenceId   참조 ID — 중복 지급 방지 키 (예: "movie_123", "post_456")
      * @param contentLength 콘텐츠 길이 — min_content_length 검사에 사용 (없으면 0 전달)
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public RewardResult grantReward(String userId, String actionType, String referenceId, int contentLength) {
         try {
             log.debug("리워드 지급 시작: userId={}, actionType={}, referenceId={}, contentLength={}",
@@ -125,8 +132,10 @@ public class RewardService {
             // ① reward_policy 조회 — is_active=true인 정책만 반환
             Optional<RewardPolicy> policyOpt = rewardPolicyRepository.findByActionTypeAndIsActiveTrue(actionType);
             if (policyOpt.isEmpty()) {
-                /* 정책 없음 또는 비활성 → 지급 없이 종료 */
-                log.debug("리워드 정책 없음 또는 비활성: actionType={}", actionType);
+                /* 정책 없음 또는 비활성 → 지급 없이 종료
+                 * warn 레벨로 승격 — 운영 로그에서 actionType 오타/시드 누락을 즉시 감지하기 위함.
+                 * (기존 debug 레벨 때문에 SIGNUP_BONUS 등 정책 미스가 조용히 묻혔다) */
+                log.warn("리워드 정책 없음 또는 비활성: actionType={}", actionType);
                 return RewardResult.EMPTY;
             }
             RewardPolicy policy = policyOpt.get();
@@ -221,9 +230,15 @@ public class RewardService {
             /* ⑪ 지급 결과 반환 — 호출자가 API 응답에 포함할 수 있도록 */
             return RewardResult.of(amount, policy.getActivityName());
 
+        } catch (BusinessException be) {
+            /* 도메인 예외(POINT_NOT_FOUND 등)는 rethrow — 본 기능과 함께 롤백시켜 데이터 정합성 보존.
+             * REQUIRED 전파로 변경되었으므로 호출자 트랜잭션에 롤백 마킹이 전파된다. */
+            log.warn("리워드 지급 도메인 예외 — 본 트랜잭션과 함께 롤백: userId={}, actionType={}, code={}",
+                    userId, actionType, be.getErrorCode(), be);
+            throw be;
         } catch (Exception e) {
-            /* 리워드 서비스 예외는 본 기능에 전파하지 않는다 — warn 로그만 남김 */
-            log.warn("리워드 지급 중 예외 발생 (본 기능에 영향 없음): userId={}, actionType={}, error={}",
+            /* 기술적 예외(DB 일시 장애 등)는 본 기능에 전파하지 않는다 — warn 로그 후 EMPTY 반환 */
+            log.warn("리워드 지급 중 기술 예외 발생 (본 기능에 영향 없음): userId={}, actionType={}, error={}",
                     userId, actionType, e.getMessage(), e);
             return RewardResult.EMPTY;
         }
@@ -249,7 +264,7 @@ public class RewardService {
      * @param referenceId 참조 ID
      * @param amount     지급할 포인트 (외부 지정, policy.pointsAmount 무시)
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public RewardResult grantRewardWithAmount(String userId, String actionType, String referenceId, int amount) {
         try {
             log.debug("가변 금액 리워드 지급 시작: userId={}, actionType={}, referenceId={}, amount={}",
@@ -258,7 +273,7 @@ public class RewardService {
             /* ① reward_policy 조회 — 활성 정책 없으면 종료 */
             Optional<RewardPolicy> policyOpt = rewardPolicyRepository.findByActionTypeAndIsActiveTrue(actionType);
             if (policyOpt.isEmpty()) {
-                log.debug("리워드 정책 없음 또는 비활성: actionType={}", actionType);
+                log.warn("리워드 정책 없음 또는 비활성: actionType={}", actionType);
                 return RewardResult.EMPTY;
             }
             RewardPolicy policy = policyOpt.get();
@@ -324,8 +339,13 @@ public class RewardService {
             /* ⑨ 지급 결과 반환 */
             return RewardResult.of(amount, policy.getActivityName());
 
+        } catch (BusinessException be) {
+            /* 도메인 예외는 rethrow — 본 기능과 함께 롤백 (REQUIRED 전파) */
+            log.warn("가변 금액 리워드 지급 도메인 예외 — 본 트랜잭션과 함께 롤백: userId={}, actionType={}, code={}",
+                    userId, actionType, be.getErrorCode(), be);
+            throw be;
         } catch (Exception e) {
-            log.warn("가변 금액 리워드 지급 중 예외 발생: userId={}, actionType={}, error={}",
+            log.warn("가변 금액 리워드 지급 중 기술 예외 발생: userId={}, actionType={}, error={}",
                     userId, actionType, e.getMessage(), e);
             return RewardResult.EMPTY;
         }
