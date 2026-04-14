@@ -2,8 +2,11 @@ package com.monglepick.monglepickbackend.domain.support.repository;
 
 import com.monglepick.monglepickbackend.domain.support.entity.SupportCategory;
 import com.monglepick.monglepickbackend.domain.support.entity.SupportFaq;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 
@@ -43,4 +46,26 @@ public interface SupportFaqRepository extends JpaRepository<SupportFaq, Long> {
      * @return 전체 FAQ 목록 (최신 등록순)
      */
     List<SupportFaq> findAllByOrderByCreatedAtDesc();
+
+    /**
+     * 챗봇이 사용자 메시지와 매칭되는 FAQ 를 찾기 위한 키워드 검색 쿼리.
+     *
+     * <p>질문 또는 답변 본문에 키워드가 부분 일치(LIKE '%kw%')하는 FAQ 를
+     * helpful_count 내림차순으로 반환한다. Pageable 상한(예: Top 3)을 함께 전달하여
+     * 최상위 매칭만 챗봇 답변에 포함한다.</p>
+     *
+     * <p>소문자 LOWER() 비교를 통해 영문 대소문자를 구분하지 않는다.
+     * 한글은 원문 그대로 매칭된다(MySQL utf8mb4 collation에 따라 동작).</p>
+     *
+     * @param keyword  LIKE 패턴에 삽입할 키워드 (호출측에서 소문자화 + trim 수행)
+     * @param pageable 결과 크기 제한용 Pageable (예: PageRequest.of(0, 3))
+     * @return 매칭 FAQ 목록 (helpful_count 내림차순)
+     */
+    @Query(
+            "SELECT f FROM SupportFaq f " +
+                    "WHERE LOWER(f.question) LIKE CONCAT('%', :keyword, '%') " +
+                    "   OR LOWER(f.answer)   LIKE CONCAT('%', :keyword, '%') " +
+                    "ORDER BY f.helpfulCount DESC, f.createdAt DESC"
+    )
+    List<SupportFaq> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
 }

@@ -328,6 +328,8 @@ public class SecurityConfig {
                 /* 고객센터 FAQ/도움말 조회 — 비로그인 허용 */
                 .requestMatchers(HttpMethod.GET, "/api/v1/support/faq").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/support/help").permitAll()
+                /* 고객센터 AI 챗봇 — 비로그인 허용 (플로팅 위젯/SupportPage 공용) */
+                .requestMatchers(HttpMethod.POST, "/api/v1/support/chatbot").permitAll()
 
                 /* 영화 조회 — 비로그인 허용 (상세, TMDB, 인기) */
                 .requestMatchers(HttpMethod.GET, "/api/v1/movies/**").permitAll()

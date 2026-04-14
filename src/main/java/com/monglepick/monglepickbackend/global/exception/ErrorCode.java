@@ -272,6 +272,9 @@ public enum ErrorCode {
     /** ticketId에 해당하는 상담 티켓을 찾을 수 없음. */
     TICKET_NOT_FOUND(HttpStatus.NOT_FOUND, "SUPPORT003", "상담 티켓을 찾을 수 없습니다"),
 
+    /** 본인 소유가 아닌 티켓에 접근하려 한 경우 (사용자용 상세 조회 API 보안). */
+    TICKET_ACCESS_DENIED(HttpStatus.FORBIDDEN, "SUPPORT004", "해당 상담 티켓에 접근할 권한이 없습니다"),
+
     /** 동일 사용자가 같은 FAQ에 피드백을 이미 제출한 경우 (faq_id + user_id UK 위반). */
     FAQ_FEEDBACK_DUPLICATE(HttpStatus.CONFLICT, "SUPPORT005", "이미 피드백을 제출했습니다"),
 

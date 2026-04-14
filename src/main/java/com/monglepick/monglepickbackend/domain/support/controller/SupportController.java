@@ -1,9 +1,12 @@
 package com.monglepick.monglepickbackend.domain.support.controller;
 
+import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.ChatbotRequest;
+import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.ChatbotResponse;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.FaqFeedbackRequest;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.FaqResponse;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.HelpArticleResponse;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.TicketCreateRequest;
+import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.TicketDetailResponse;
 import com.monglepick.monglepickbackend.domain.support.dto.SupportDto.TicketResponse;
 import com.monglepick.monglepickbackend.domain.support.service.SupportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,6 +41,8 @@ import java.util.List;
  *   <li>{@code GET  /api/v1/support/help}             — 도움말 목록 (비인증)</li>
  *   <li>{@code POST /api/v1/support/tickets}          — 티켓 생성 (인증)</li>
  *   <li>{@code GET  /api/v1/support/tickets}          — 내 티켓 목록 (인증)</li>
+ *   <li>{@code GET  /api/v1/support/tickets/{id}}     — 내 티켓 상세 + 답변 이력 (인증, 본인만)</li>
+ *   <li>{@code POST /api/v1/support/chatbot}          — AI 챗봇 자동응답 (비인증)</li>
  * </ul>
  */
 @Tag(name = "고객센터", description = "FAQ, 도움말, 상담 티켓 API")
@@ -151,5 +156,50 @@ public class SupportController {
             @RequestParam(defaultValue = "10") int size
     ) {
         return ResponseEntity.ok(supportService.getMyTickets(userId, page, size));
+    }
+
+    /**
+     * 내 상담 티켓 상세를 조회한다 (답변 이력 포함).
+     *
+     * <p>본인 소유의 티켓만 조회 가능하며, 타인 티켓에 접근하려 하면
+     * 403 Forbidden(SUPPORT004: TICKET_ACCESS_DENIED)을 반환한다.
+     * 티켓이 존재하지 않으면 404 Not Found(SUPPORT003: TICKET_NOT_FOUND)를 반환한다.</p>
+     *
+     * @param ticketId 조회 대상 티켓 PK
+     * @param userId   JWT 에서 추출한 사용자 ID
+     * @return 티켓 상세 + 답변 목록 (200 OK)
+     */
+    @Operation(summary = "내 문의 상세 조회", description = "본인 소유 티켓의 상세와 답변 이력을 조회한다 (인증 필수)")
+    @GetMapping("/tickets/{ticketId}")
+    public ResponseEntity<TicketDetailResponse> getTicketDetail(
+            @PathVariable Long ticketId,
+            @AuthenticationPrincipal String userId
+    ) {
+        return ResponseEntity.ok(supportService.getTicketDetail(ticketId, userId));
+    }
+
+    // ─────────────────────────────────────────────
+    // AI 챗봇
+    // ─────────────────────────────────────────────
+
+    /**
+     * AI 고객센터 챗봇에 메시지를 전송한다.
+     *
+     * <p>FAQ 키워드 매칭을 수행하여 자동 답변과 최대 3건의 관련 FAQ 카드를 반환한다.
+     * 매칭 FAQ가 없으면 상담원 이관 배너를 노출하기 위해 {@code needsHumanAgent=true}
+     * 로 응답한다.</p>
+     *
+     * <p>비로그인 사용자도 사용할 수 있으며, 맥락 유지용 {@code sessionId}를
+     * 클라이언트가 보관해 재전송한다(최초 호출 시 서버가 UUID 발급).</p>
+     *
+     * @param request 챗봇 요청 (message, sessionId)
+     * @return 챗봇 응답 (answer, matchedFaqs, needsHumanAgent, sessionId)
+     */
+    @Operation(summary = "AI 챗봇 응답", description = "FAQ 키워드 매칭 기반 자동응답을 반환한다 (비인증)")
+    @PostMapping("/chatbot")
+    public ResponseEntity<ChatbotResponse> chatbot(
+            @Valid @RequestBody ChatbotRequest request
+    ) {
+        return ResponseEntity.ok(supportService.processChatbotMessage(request));
     }
 }
