@@ -1,5 +1,7 @@
 package com.monglepick.monglepickbackend.domain.reward.config;
 
+import com.monglepick.monglepickbackend.domain.reward.constants.PointItemCategory;
+import com.monglepick.monglepickbackend.domain.reward.constants.PointItemType;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointItem;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointItemRepository;
 import lombok.RequiredArgsConstructor;
@@ -11,216 +13,432 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 
 /**
- * 포인트 상점 아이템 초기 데이터 적재기 — point_items 테이블 시드 데이터 삽입.
+ * 포인트 상점 아이템 초기 데이터 적재기 — point_items 테이블 시드 데이터 삽입 및 정규화.
  *
- * <p>애플리케이션 시작 시 {@code point_items} 테이블에 시드 아이템이 없으면 INSERT한다.
- * 이미 존재하는 아이템(itemName 기준)은 건너뛰어 멱등(idempotent) 동작을 보장한다.</p>
+ * <p>애플리케이션 시작 시 {@code point_items} 테이블을 3단계로 정리한다:</p>
+ * <ol>
+ *   <li><b>정규화</b> — 카테고리 대소문자 통일 (예: "COUPON" → "coupon"), 신규 {@link PointItemType}
+ *       필드를 이름 매핑으로 채움. ddl-auto=update로는 자동 이관되지 않는 기존 행 보정.</li>
+ *   <li><b>구버전 시드 비활성화</b> — data.sql에서 주입되던 5종({@code "ai_feature"},
+ *       {@code "profile"}, {@code "roadmap"} 카테고리)을 {@code is_active=false}로 전환하여
+ *       사용자 노출을 차단한다. 포인트 이력 보존을 위해 DELETE는 하지 않는다.</li>
+ *   <li><b>시드 적재</b> — 설계서 v3.2 7종을 itemName 기준 멱등 INSERT.</li>
+ * </ol>
  *
  * <h3>v3.2 AI 3-소스 모델 — 아이템 설계 원칙</h3>
  * <p>포인트 상점에서 "AI 이용권"을 판매하여 grade 일일 한도와 구독 보너스 풀이
  * 모두 소진된 사용자에게 추가 AI 사용 경로를 제공한다 (source="PURCHASED").</p>
  *
- * <h3>v3.2 AI 이용권 가격 설계 (1P=10원 통일, 구독 유도)</h3>
- * <p>포인트팩 기준 1P = 10원으로 환산하면:</p>
- * <ul>
- *   <li>AI 이용권 1회 (10P = 100원) — 단발성, 긴급 사용</li>
- *   <li>AI 이용권 5회 (50P = 500원) → 100원/회</li>
- *   <li>AI 이용권 20회 (200P = 2,000원) → 100원/회 (볼륨 동일)</li>
- *   <li>AI 이용권 50회 (500P = 5,000원) → 100원/회 (볼륨 동일)</li>
- *   <li>monthly_basic 구독 (2,900원/30회) → 96.7원/회 (이용권 대비 3% 저렴 + 포인트 지급)</li>
- *   <li>→ 이용권과 구독 단가가 유사하나 구독은 포인트까지 지급 → 구독 강력 유도 ✓</li>
- * </ul>
- *
- * <h3>시드 데이터 (7개 아이템)</h3>
+ * <h3>시드 데이터 (8개 아이템, 모두 소문자 카테고리)</h3>
  * <table border="1">
- *   <tr><th>아이템명</th><th>카테고리</th><th>가격</th><th>설명</th></tr>
- *   <tr><td>AI 이용권 1회</td><td>COUPON</td><td>10P</td><td>grade 한도 초과 AI 1회 (30일 유효)</td></tr>
- *   <tr><td>AI 이용권 5회</td><td>COUPON</td><td>50P</td><td>grade 한도 초과 AI 5회 (30일 유효)</td></tr>
- *   <tr><td>AI 이용권 20회</td><td>COUPON</td><td>200P</td><td>grade 한도 초과 AI 20회 (30일 유효)</td></tr>
- *   <tr><td>AI 이용권 50회</td><td>COUPON</td><td>500P</td><td>grade 한도 초과 AI 50회 (60일 유효)</td></tr>
- *   <tr><td>영화 티켓 응모권</td><td>APPLY</td><td>150P</td><td>CGV/롯데시네마 영화 티켓 응모 1회</td></tr>
- *   <tr><td>프로필 아바타 - 몽글이</td><td>avatar</td><td>150P</td><td>몽글이 캐릭터 프로필 이미지</td></tr>
- *   <tr><td>프리미엄 배지 (1개월)</td><td>coupon</td><td>100P</td><td>1개월간 프로필 프리미엄 배지</td></tr>
+ *   <tr><th>아이템명</th><th>카테고리</th><th>itemType</th><th>가격</th><th>유효기간</th></tr>
+ *   <tr><td>AI 이용권 1회</td><td>coupon</td><td>AI_TOKEN_1</td><td>10P</td><td>30일</td></tr>
+ *   <tr><td>AI 이용권 5회</td><td>coupon</td><td>AI_TOKEN_5</td><td>50P</td><td>30일</td></tr>
+ *   <tr><td>AI 이용권 20회</td><td>coupon</td><td>AI_TOKEN_20</td><td>200P</td><td>30일</td></tr>
+ *   <tr><td>AI 이용권 50회</td><td>coupon</td><td>AI_TOKEN_50</td><td>500P</td><td>60일</td></tr>
+ *   <tr><td>영화 티켓 응모권</td><td>apply</td><td>APPLY_MOVIE_TICKET</td><td>150P</td><td>월말</td></tr>
+ *   <tr><td>프로필 아바타 - 몽글이</td><td>avatar</td><td>AVATAR_MONGLE</td><td>150P</td><td>영구</td></tr>
+ *   <tr><td>프리미엄 배지 (1개월)</td><td>badge</td><td>BADGE_PREMIUM</td><td>100P</td><td>30일</td></tr>
+ *   <tr><td>퀴즈 힌트</td><td>hint</td><td>QUIZ_HINT</td><td>50P</td><td>영구</td></tr>
  * </table>
  *
- * <h3>AI 이용권 구매 시 처리 흐름</h3>
- * <ol>
- *   <li>사용자가 포인트 상점에서 AI 이용권 구매 → PointItemService에서 처리</li>
- *   <li>포인트 차감 (deductPoints) + {@code UserPoint.addPurchasedTokens(count)} 호출</li>
- *   <li>AI 요청 시 grade 한도/구독 보너스 소진 후 → {@code UserPoint.consumePurchasedToken()} 호출</li>
- *   <li>v3.2: consumePurchasedToken()에서 monthly_coupon_used도 자동 증가</li>
- * </ol>
+ * <p>도장깨기(roadmap)는 영화 코스 시청·인증 챌린지 시스템으로 "힌트" 메커니즘이 적용되지 않는다.
+ * 따라서 위 시드의 "퀴즈 힌트"는 퀴즈(객관식 영화 지식 게임) 도메인 전용이다.</p>
  *
  * <h3>실행 순서</h3>
- * <p>{@code @Order(4)} 지정 — GradeInitializer, RewardPolicyInitializer(@Order(2)),
- * SubscriptionPlanInitializer(@Order(3)) 이후 실행.</p>
- *
- * <h3>멱등 전략</h3>
- * <p>itemName 기준으로 존재 여부를 확인한 후 없는 경우에만 INSERT한다.
- * 전체 카운트 방식이 아닌 개별 아이템 확인으로 부분 실패 시에도 안전하게 복구된다.</p>
+ * <p>{@code @Order(4)} — GradeInitializer, RewardPolicyInitializer, SubscriptionPlanInitializer 이후 실행.</p>
  *
  * @see PointItem 포인트 아이템 엔티티
- * @see PointItemRepository
+ * @see PointItemCategory 카테고리 상수
+ * @see PointItemType 타입 ENUM
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-@Order(4) // GradeInitializer, RewardPolicyInitializer, SubscriptionPlanInitializer 이후 실행
+@Order(4)
 public class PointItemInitializer implements ApplicationRunner {
 
     /** 포인트 아이템 리포지토리 — point_items 테이블 접근 */
     private final PointItemRepository pointItemRepository;
 
     /**
-     * 애플리케이션 시작 시 포인트 상점 아이템 시드 데이터를 적재한다.
+     * 구버전 카테고리(대문자/레거시) → 정규 소문자 카테고리 매핑.
      *
-     * <p>7개 아이템을 itemName 기준으로 확인하여 없는 경우에만 INSERT한다.
-     * 이미 존재하는 아이템은 건너뛰어 멱등성을 보장한다.</p>
+     * <p>ddl-auto=update로는 데이터 이관이 자동으로 일어나지 않으므로,
+     * 기동 시 이 매핑 기준으로 UPDATE를 수행한다.</p>
+     */
+    private static final Map<String, String> CATEGORY_NORMALIZATION = Map.of(
+            "COUPON", PointItemCategory.COUPON,
+            "APPLY", PointItemCategory.APPLY,
+            "AI", PointItemCategory.COUPON,       // 구버전 data.sql "ai" / Initializer "AI"
+            "ai", PointItemCategory.COUPON
+    );
+
+    /**
+     * data.sql 기반 구버전 시드 이름 → is_active=false 대상 (카테고리 전환 불가능한 legacy).
+     *
+     * <p>v3.2 시드와 이름이 완전히 다르므로 카테고리 정규화로는 복구할 수 없다.
+     * 포인트 이력 보존을 위해 삭제 대신 비활성화.</p>
+     */
+    /*
+     * "도장깨기 힌트" 가 여기에 포함된 이유:
+     * - 도장깨기(roadmap)는 코스 영화를 시청·인증하는 챌린지 시스템으로 "힌트" 개념이 적용되지 않는다.
+     * - 레거시 시드의 "도장깨기 힌트" 는 잘못된 명명이었으며, v2(C 방향)에서 비활성화 처리된 게 결과적으로 옳다.
+     * - 힌트 메커니즘은 퀴즈(객관식 영화 지식 게임) 도메인 전용이며, "퀴즈 힌트" 라는 새 시드로 별도 등록된다(아래 buildCanonicalItems()).
+     */
+    private static final List<String> LEGACY_ITEM_NAMES_TO_DEACTIVATE = List.of(
+            "AI 추천 1회",
+            "AI 추천 5회 팩",
+            "프로필 테마",
+            "칭호 변경",
+            "도장깨기 힌트"
+    );
+
+    /**
+     * v3.2 시드 아이템 이름 → PointItemType 매핑 (신규 필드 채우기용).
+     *
+     * <p>ddl-auto=update로 item_type 컬럼이 추가되면 기존 v3.2 시드 행의 값은 NULL이 된다.
+     * 기동 시 이 맵을 순회하며 itemName으로 조회 후 itemType/amount/durationDays/imageUrl을 채운다.</p>
+     */
+    private static final Map<String, PointItemType> ITEM_NAME_TO_TYPE = Map.of(
+            "AI 이용권 1회", PointItemType.AI_TOKEN_1,
+            "AI 이용권 5회", PointItemType.AI_TOKEN_5,
+            "AI 이용권 20회", PointItemType.AI_TOKEN_20,
+            "AI 이용권 50회", PointItemType.AI_TOKEN_50,
+            "영화 티켓 응모권", PointItemType.APPLY_MOVIE_TICKET,
+            "프로필 아바타 - 몽글이", PointItemType.AVATAR_MONGLE,
+            "프리미엄 배지 (1개월)", PointItemType.BADGE_PREMIUM,
+            /* 2026-04-14 B' 후속: 퀴즈 힌트 신규 시드. 도장깨기 힌트(레거시)와 무관, 퀴즈 도메인 전용. */
+            "퀴즈 힌트", PointItemType.QUIZ_HINT
+    );
+
+    /**
+     * 애플리케이션 시작 시 3단계로 point_items 테이블을 정리한다.
      *
      * @param args 애플리케이션 인자 (미사용)
      */
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        log.info("포인트 상점 아이템 초기화 시작 — point_items 테이블 시드 데이터 확인 (v3.2)");
+        log.info("포인트 상점 아이템 초기화 시작 (v3.2 + C 방향 확장, 2026-04-14)");
 
-        List<PointItem> items = buildDefaultItems();
+        // 1) 카테고리 대소문자 정규화 + itemType/amount/durationDays/imageUrl 보정
+        normalizeLegacyRows();
 
-        int insertedCount = 0;
-        int skippedCount = 0;
+        // 2) data.sql 레거시 시드 5종 비활성화 (삭제 대신)
+        deactivateLegacySeeds();
 
-        for (PointItem item : items) {
-            // itemName 기준으로 이미 존재하는 아이템은 건너뜀 (멱등)
-            boolean exists = pointItemRepository
-                    .findByIsActiveTrueOrderByItemPriceAsc()
-                    .stream()
-                    .anyMatch(existing -> existing.getItemName().equals(item.getItemName()));
+        // 3) v3.2 7종 시드 멱등 INSERT
+        seedCanonicalItems();
 
-            if (exists) {
-                log.debug("포인트 아이템 이미 존재 (건너뜀): itemName={}", item.getItemName());
-                skippedCount++;
+        log.info("포인트 상점 아이템 초기화 완료");
+    }
+
+    /**
+     * 1단계: 기존 행을 정규 카테고리/신규 컬럼으로 업데이트.
+     *
+     * <p>ddl-auto=update는 컬럼 추가만 하고 데이터는 건드리지 않으므로,
+     * 기동 시점에 기존 시드 행들을 다음과 같이 보정한다:</p>
+     * <ul>
+     *   <li>itemCategory 대문자/"ai" → 소문자 정규값으로 교체</li>
+     *   <li>ITEM_NAME_TO_TYPE에 매칭되는 행은 itemType/amount/durationDays/imageUrl을 채움</li>
+     * </ul>
+     */
+    private void normalizeLegacyRows() {
+        List<PointItem> all = pointItemRepository.findAll();
+        int updated = 0;
+
+        for (PointItem row : all) {
+            boolean dirty = false;
+
+            /* 카테고리 정규화 — "COUPON" → "coupon" 등 */
+            String normalizedCategory = CATEGORY_NORMALIZATION.get(row.getItemCategory());
+            if (normalizedCategory != null && !normalizedCategory.equals(row.getItemCategory())) {
+                /* @Setter 없는 엔티티이므로 Builder-기반 재구성 대신 JPQL UPDATE 또는 Reflection 회피하고,
+                   PointItem 엔티티에 setter 없이 업데이트하려면 새 엔티티로 교체 저장이 필요.
+                   여기서는 간단히 id·created_*를 유지한 채 빌더로 재구성 후 save() 수행. */
+                PointItem replaced = rebuildFrom(row, normalizedCategory, null);
+                pointItemRepository.save(replaced);
+                updated++;
+                dirty = true;
+                log.info("카테고리 정규화: id={}, name={}, {} → {}",
+                        row.getPointItemId(), row.getItemName(),
+                        row.getItemCategory(), normalizedCategory);
+                continue; // 아래의 itemType 보정은 다음 기동 때 처리 (save 후 1차 캐시 혼선 방지)
+            }
+
+            /* itemType 보정 — v3.2 시드인데 NULL이면 이름 매핑으로 채움 */
+            PointItemType mappedType = ITEM_NAME_TO_TYPE.get(row.getItemName());
+            if (mappedType != null && row.getItemType() == null) {
+                PointItem replaced = rebuildFrom(row, null, mappedType);
+                pointItemRepository.save(replaced);
+                updated++;
+                dirty = true;
+                log.info("itemType 보정: id={}, name={} → type={}",
+                        row.getPointItemId(), row.getItemName(), mappedType.name());
                 continue;
             }
 
-            pointItemRepository.save(item);
-            insertedCount++;
-            log.info("포인트 아이템 INSERT: itemName={}, itemCategory={}, itemPrice={}P",
-                    item.getItemName(), item.getItemCategory(), item.getItemPrice());
+            /* imageUrl 마이그레이션 — 과거 시드의 .png 를 .svg 로 일회성 교체.
+               itemType 이 이미 채워져 있고 카테고리도 정상이지만 이미지 경로만 옛날인 경우. */
+            String currentImage = row.getImageUrl();
+            if (currentImage != null && currentImage.endsWith(".png")) {
+                /* rebuildFrom 의 마이그레이션 분기를 그대로 활용 — newType=null 이지만
+                   imageUrl 변환 로직은 항상 실행됨 */
+                PointItem replaced = rebuildFrom(row, null, null);
+                pointItemRepository.save(replaced);
+                updated++;
+                dirty = true;
+                log.info("imageUrl 마이그레이션: id={}, name={}, {} → {}",
+                        row.getPointItemId(), row.getItemName(),
+                        currentImage, replaced.getImageUrl());
+            }
         }
 
-        if (insertedCount == 0) {
-            log.info("포인트 상점 아이템 초기화 완료 — 모든 아이템이 이미 존재함 (INSERT 없음, 건너뜀={}개)", skippedCount);
+        if (updated == 0) {
+            log.debug("정규화 대상 없음 — 모든 행이 최신 스키마와 일치");
         } else {
-            log.info("포인트 상점 아이템 초기화 완료 — {}개 아이템 INSERT 완료, {}개 건너뜀", insertedCount, skippedCount);
+            log.info("정규화 완료: {}개 행 업데이트", updated);
         }
     }
 
     /**
-     * v3.2 기본 포인트 상점 아이템 7개를 PointItem 엔티티 리스트로 생성한다.
+     * 2단계: data.sql 시절 구버전 이름으로 남아있는 5종을 비활성화.
      *
-     * <p>설계서 v3.2 §4.6 시드 데이터 기준.
-     * AI 이용권 4종(category=COUPON) + 영화티켓응모권 1종(APPLY) + 아바타 1종(avatar) + 배지 1종(coupon).</p>
-     *
-     * <h4>v3.2 AI 이용권 가격 (1P=10원 통일)</h4>
-     * <ul>
-     *   <li>1회: 10P (100원) — 볼륨 할인 없음, 모두 100원/회</li>
-     *   <li>5회: 50P (500원)</li>
-     *   <li>20회: 200P (2,000원)</li>
-     *   <li>50회: 500P (5,000원)</li>
-     * </ul>
-     *
-     * @return 초기화할 PointItem 엔티티 목록 (가격 오름차순)
+     * <p>이름이 정확히 일치하는 레거시 시드만 대상이며, 이미 비활성화되어 있으면 건너뛴다.
+     * DELETE하지 않는 이유: points_history에 "item-{id}" referenceId가 남아있어
+     * 무결성 및 감사 추적을 유지해야 함.</p>
      */
-    private List<PointItem> buildDefaultItems() {
+    private void deactivateLegacySeeds() {
+        int deactivated = 0;
+        for (String legacyName : LEGACY_ITEM_NAMES_TO_DEACTIVATE) {
+            List<PointItem> matches = pointItemRepository.findAll().stream()
+                    .filter(p -> legacyName.equals(p.getItemName()) && Boolean.TRUE.equals(p.getIsActive()))
+                    .toList();
+
+            for (PointItem legacy : matches) {
+                PointItem deactivatedCopy = PointItem.builder()
+                        .pointItemId(legacy.getPointItemId())
+                        .itemName(legacy.getItemName())
+                        .itemDescription(legacy.getItemDescription())
+                        .itemPrice(legacy.getItemPrice())
+                        .itemCategory(legacy.getItemCategory())
+                        .itemType(legacy.getItemType())
+                        .amount(legacy.getAmount())
+                        .durationDays(legacy.getDurationDays())
+                        .imageUrl(legacy.getImageUrl())
+                        .isActive(false) // ← 비활성화
+                        .build();
+                pointItemRepository.save(deactivatedCopy);
+                deactivated++;
+                log.info("레거시 시드 비활성화: id={}, name={}", legacy.getPointItemId(), legacy.getItemName());
+            }
+        }
+
+        if (deactivated == 0) {
+            log.debug("비활성화 대상 레거시 시드 없음");
+        } else {
+            log.info("레거시 시드 비활성화 완료: {}개", deactivated);
+        }
+    }
+
+    /**
+     * 3단계: v3.2 표준 7종을 itemName 기준으로 멱등 INSERT.
+     */
+    private void seedCanonicalItems() {
+        List<PointItem> items = buildCanonicalItems();
+        int inserted = 0;
+        int skipped = 0;
+
+        for (PointItem item : items) {
+            boolean exists = pointItemRepository.findAll().stream()
+                    .anyMatch(existing -> existing.getItemName().equals(item.getItemName()));
+            if (exists) {
+                skipped++;
+                continue;
+            }
+            pointItemRepository.save(item);
+            inserted++;
+            log.info("v3.2 시드 INSERT: name={}, category={}, type={}, price={}P",
+                    item.getItemName(), item.getItemCategory(),
+                    item.getItemType() != null ? item.getItemType().name() : "null",
+                    item.getItemPrice());
+        }
+
+        log.info("v3.2 시드 적재 완료: INSERT={}개, 건너뜀={}개", inserted, skipped);
+    }
+
+    /**
+     * 기존 엔티티를 새 카테고리·타입으로 재구성한다 — @Setter 없는 불변 엔티티 대응.
+     *
+     * @param src            기존 엔티티
+     * @param newCategory    새 카테고리 (null이면 기존 값 유지)
+     * @param newType        새 itemType (null이면 기존 값 유지)
+     * @return id/가격/설명 등은 유지한 새 PointItem 인스턴스 (save 시 UPDATE 수행됨)
+     */
+    private PointItem rebuildFrom(PointItem src, String newCategory, PointItemType newType) {
+        PointItemType typeToSet = newType != null ? newType : src.getItemType();
+        Integer amount = src.getAmount();
+        Integer durationDays = src.getDurationDays();
+        String imageUrl = src.getImageUrl();
+
+        /* itemType을 새로 매핑하는 경우 — 기본값도 함께 채운다 */
+        if (newType != null) {
+            if (amount == null) amount = newType.getAmount();
+            if (durationDays == null) durationDays = newType.getDurationDays();
+            if (imageUrl == null) imageUrl = defaultImageUrlFor(newType);
+        }
+
+        /* 2026-04-14: 과거 .png 경로로 시드된 행을 .svg 로 마이그레이션 (일회성).
+           imageUrl 이 .png 로 끝나면 동일 이름의 .svg 로 교체. 디자인 정적 리소스가 SVG 로 통일됨. */
+        if (imageUrl != null && imageUrl.endsWith(".png")) {
+            imageUrl = imageUrl.substring(0, imageUrl.length() - 4) + ".svg";
+        }
+
+        return PointItem.builder()
+                .pointItemId(src.getPointItemId())
+                .itemName(src.getItemName())
+                .itemDescription(src.getItemDescription())
+                .itemPrice(src.getItemPrice())
+                .itemCategory(newCategory != null ? newCategory : src.getItemCategory())
+                .itemType(typeToSet)
+                .amount(amount)
+                .durationDays(durationDays)
+                .imageUrl(imageUrl)
+                .isActive(src.getIsActive())
+                .build();
+    }
+
+    /**
+     * itemType별 기본 이미지 경로 반환.
+     *
+     * <p>아바타·배지는 프론트엔드 정적 리소스를 참조한다. NULL이어도 무방 (프론트가 fallback 처리).</p>
+     */
+    private String defaultImageUrlFor(PointItemType type) {
+        /* 2026-04-14: 정적 리소스를 SVG 로 제공 (monglepick-client/public/avatars,/badges).
+           PNG 대신 SVG 사용 — 크기 작고 해상도 무관, 디자이너 교체 시 파일 덮어쓰기만으로 적용. */
+        return switch (type) {
+            case AVATAR_MONGLE -> "/avatars/mongle.svg";
+            case BADGE_PREMIUM -> "/badges/premium.svg";
+            default -> null;
+        };
+    }
+
+    /**
+     * v3.2 표준 7종 시드 정의.
+     *
+     * <p>설계서 §4.6 + §16 "포인트 소비처" 기준.
+     * AI 이용권 4종(coupon) + 응모권 1종(apply) + 아바타 1종(avatar) + 배지 1종(badge).</p>
+     *
+     * @return 시드 엔티티 리스트
+     */
+    private List<PointItem> buildCanonicalItems() {
         return List.of(
-
-                // ── AI 이용권 (category="COUPON") ────────────────────────────
-                // v3.2: 카테고리명 "ai" → "COUPON" (이용권 역할 명확화)
-                // grade 일일 한도 + 구독 보너스 풀 소진 후 사용 (source="PURCHASED")
-                // UserPoint.addPurchasedTokens(count) 로 횟수 적립
-                // UserPoint.consumePurchasedToken() 으로 1회씩 차감 (monthly_coupon_used++ 포함)
-
-                // AI 이용권 1회 — 10P (100원, 100원/회)
-                // 단발성, 긴급 사용. 포인트가 충분치 않은 경우 선택지
+                // ── AI 이용권 (category="coupon", itemType=AI_TOKEN_*) ──
                 PointItem.builder()
                         .itemName("AI 이용권 1회")
                         .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 1회. 구매 후 30일 이내 사용. "
                                 + "단발성·긴급 사용 시 적합. 구독 가입 시 월 30~67회 기본 포함.")
-                        .itemPrice(10)                  // v3.2: 10P = 100원 (1P=10원 통일)
-                        .itemCategory("COUPON")         // v3.2: ai → COUPON
+                        .itemPrice(10)
+                        .itemCategory(PointItemCategory.COUPON)
+                        .itemType(PointItemType.AI_TOKEN_1)
+                        .amount(1)
+                        .durationDays(30)
                         .isActive(true)
                         .build(),
 
-                // AI 이용권 5회 — 50P (500원, 100원/회)
-                // 소량 패키지. 1회권(10P) × 5 = 50P로 볼륨 할인 없음 (1P=10원 통일)
                 PointItem.builder()
                         .itemName("AI 이용권 5회")
                         .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 5회. 구매 후 30일 이내 사용. "
                                 + "월간 Basic 구독(2,900원/30회=96.7원/회) 대비 약 3% 비싸나 포인트 지급 없음 — 구독 권장.")
-                        .itemPrice(50)                  // v3.2: 50P = 500원 (1P=10원 통일)
-                        .itemCategory("COUPON")         // v3.2: ai → COUPON
+                        .itemPrice(50)
+                        .itemCategory(PointItemCategory.COUPON)
+                        .itemType(PointItemType.AI_TOKEN_5)
+                        .amount(5)
+                        .durationDays(30)
                         .isActive(true)
                         .build(),
 
-                // AI 이용권 20회 — 200P (2,000원, 100원/회)
-                // 중간 패키지. 볼륨 할인 없음 (1P=10원 통일)
                 PointItem.builder()
                         .itemName("AI 이용권 20회")
                         .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 20회. 구매 후 30일 이내 사용. "
                                 + "월간 Premium 구독(5,900원/60회=98.3원/회)보다 단가 약간 저렴하나 포인트 지급 없음 — 구독 권장.")
-                        .itemPrice(200)                 // v3.2: 200P = 2,000원 (1P=10원 통일)
-                        .itemCategory("COUPON")         // v3.2: ai → COUPON
+                        .itemPrice(200)
+                        .itemCategory(PointItemCategory.COUPON)
+                        .itemType(PointItemType.AI_TOKEN_20)
+                        .amount(20)
+                        .durationDays(30)
                         .isActive(true)
                         .build(),
 
-                // AI 이용권 50회 — 500P (5,000원, 100원/회)
-                // 대량 패키지. 볼륨 할인 없음 (1P=10원 통일)
                 PointItem.builder()
                         .itemName("AI 이용권 50회")
                         .itemDescription("일일 AI 추천 한도 초과 시 사용할 수 있는 추가 이용권 50회. 구매 후 60일 이내 사용. "
                                 + "구독 대비 포인트 지급 없음 — 구독 전환 권장.")
-                        .itemPrice(500)                 // v3.2: 500P = 5,000원 (1P=10원 통일)
-                        .itemCategory("COUPON")         // v3.2: ai → COUPON
+                        .itemPrice(500)
+                        .itemCategory(PointItemCategory.COUPON)
+                        .itemType(PointItemType.AI_TOKEN_50)
+                        .amount(50)
+                        .durationDays(60)
                         .isActive(true)
                         .build(),
 
-                // ── 응모권 (category="APPLY") ─────────────────────────────────
-                // v3.2 신규: 영화 티켓 응모권 — 소비처 다양화
-                // CGV/롯데시네마 등 제휴 영화 티켓 추첨 참여 1회권
-
-                // 영화 티켓 응모권 — 150P (1,500원 환산)
+                // ── 응모권 (category="apply") ──
                 PointItem.builder()
                         .itemName("영화 티켓 응모권")
                         .itemDescription("CGV, 롯데시네마 등 제휴 영화관 무료 티켓 추첨에 참여할 수 있는 응모권 1회. "
                                 + "매월 말 추첨 진행. 당첨 시 문자 발송.")
-                        .itemPrice(150)                 // v3.2: 150P = 1,500원 환산
-                        .itemCategory("APPLY")          // v3.2 신규 카테고리
+                        .itemPrice(150)
+                        .itemCategory(PointItemCategory.APPLY)
+                        .itemType(PointItemType.APPLY_MOVIE_TICKET)
+                        .amount(1)
+                        .durationDays(null)
                         .isActive(true)
                         .build(),
 
-                // ── 아바타 (category="avatar") ───────────────────────────
-                // 프로필 꾸미기 아이템 — AI 쿼터와 무관한 순수 아이템 소비
-
-                // 몽글이 프로필 아바타 — 150P
+                // ── 아바타 (category="avatar") ──
                 PointItem.builder()
                         .itemName("프로필 아바타 - 몽글이")
                         .itemDescription("몽글픽 마스코트 '몽글이' 캐릭터 프로필 이미지. 적용 후 프로필 사진으로 영구 사용 가능.")
-                        .itemPrice(150)                 // 150P = 1,500원 환산
-                        .itemCategory("avatar")
+                        .itemPrice(150)
+                        .itemCategory(PointItemCategory.AVATAR)
+                        .itemType(PointItemType.AVATAR_MONGLE)
+                        .amount(1)
+                        .durationDays(null)
+                        .imageUrl("/avatars/mongle.svg")
                         .isActive(true)
                         .build(),
 
-                // ── 쿠폰 (category="coupon") ──────────────────────────────
-                // 기간 한정 배지/쿠폰 — 소비 후 만료
-
-                // 프리미엄 배지 (1개월) — 100P
+                // ── 배지 (category="badge") ──
                 PointItem.builder()
                         .itemName("프리미엄 배지 (1개월)")
                         .itemDescription("1개월간 프로필에 프리미엄 배지가 표시되어 다른 사용자와 차별화. 만료 후 자동 제거.")
-                        .itemPrice(100)                 // 100P = 1,000원 환산
-                        .itemCategory("coupon")
+                        .itemPrice(100)
+                        .itemCategory(PointItemCategory.BADGE)
+                        .itemType(PointItemType.BADGE_PREMIUM)
+                        .amount(1)
+                        .durationDays(30)
+                        .imageUrl("/badges/premium.svg")
+                        .isActive(true)
+                        .build(),
+
+                // ── 힌트 (category="hint") — 2026-04-14 B' 후속 신규 ──
+                // 퀴즈 도메인 전용. 도장깨기는 힌트 메커니즘이 적용되지 않으므로 별도 시드 없음.
+                // 현재는 인프라(보유·소비) 만 정비되어 있으며, QuizCard 의 힌트 사용 UX(50:50 룰 등)는
+                // 별도 작업으로 분리되어 있다 — Backend 에 hint 사용 EP(POST /api/v1/quizzes/{id}/hint)와
+                // 정답 유도 정책(오답 인덱스 반환 / 점수 차감 등) 정의 후 클라이언트 연동 예정.
+                PointItem.builder()
+                        .itemName("퀴즈 힌트")
+                        .itemDescription("퀴즈 풀이 시 사용할 수 있는 힌트 1회. 사용 시 잔여 수량이 1 차감되고 0이 되면 자동 소진. "
+                                + "도장깨기(영화 코스 챌린지)에는 적용되지 않습니다 — 퀴즈 전용.")
+                        .itemPrice(50)
+                        .itemCategory(PointItemCategory.HINT)
+                        .itemType(PointItemType.QUIZ_HINT)
+                        .amount(1)
+                        .durationDays(null)  // 무기한 보유 (만료 배치 대상 아님)
                         .isActive(true)
                         .build()
         );

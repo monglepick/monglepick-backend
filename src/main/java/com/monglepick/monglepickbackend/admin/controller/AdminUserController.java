@@ -13,6 +13,8 @@ import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.SuspensionHi
 import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.UserDetailResponse;
 import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.UserListResponse;
 import com.monglepick.monglepickbackend.admin.service.AdminUserService;
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardCatalogDto.UserRewardStatusResponse;
+import com.monglepick.monglepickbackend.domain.reward.service.RewardQueryService;
 import com.monglepick.monglepickbackend.global.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -67,6 +69,15 @@ import java.util.List;
 public class AdminUserController {
 
     private final AdminUserService adminUserService;
+
+    /**
+     * 리워드 진행 현황 조회 서비스 (2026-04-14 추가).
+     *
+     * <p>특정 사용자의 활동별 카운터 + 마일스톤 진행률을 관리자 시점에서 조회한다.
+     * 사용자 본인이 {@code GET /api/v1/point/progress} 로 보는 것과 동일한 응답 구조를
+     * 관리자가 임의의 userId 로 조회할 수 있게 한다.</p>
+     */
+    private final RewardQueryService rewardQueryService;
 
     // ──────────────────────────────────────────────
     // 목록 / 상세 조회
@@ -464,6 +475,48 @@ public class AdminUserController {
         Pageable pageable = PageRequest.of(page, size);
 
         Page<PaymentHistoryResponse> result = adminUserService.getUserPaymentHistory(userId, pageable);
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    // ──────────────────────────────────────────────
+    // 리워드 진행 현황 (2026-04-14 신설)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 특정 사용자의 리워드 진행 현황을 조회한다 (관리자 시점).
+     *
+     * <p>사용자 본인이 {@code GET /api/v1/point/progress} 로 보는 것과 동일한 구조를
+     * 관리자가 임의의 userId 로 조회할 수 있다.</p>
+     *
+     * <p>응답은 {@link UserRewardStatusResponse} 구조로:</p>
+     * <ul>
+     *   <li>{@code activities} — 일반 활동별 카운터 (리뷰/출석/댓글 등 + 일일 한도 게이지)</li>
+     *   <li>{@code milestones} — threshold 기반 마일스톤 진행률 (현재값/임계치/달성여부)</li>
+     *   <li>{@code totalEarned / earnedByActivity / currentBalance / gradeCode} — 요약</li>
+     * </ul>
+     *
+     * <p>관리자가 특정 유저의 리워드 어뷰징 의심(예: 마일스톤 근처 머무름), 서포트
+     * 문의 대응(예: "리뷰 5회 보너스 못 받았어요") 등에 활용된다.</p>
+     *
+     * @param userId 조회 대상 사용자 ID
+     * @return 리워드 진행 현황 (ApiResponse 래퍼)
+     */
+    @Operation(
+            summary = "사용자 리워드 진행 현황 조회",
+            description = "활동별 카운터 + 마일스톤 진행률 + 포인트 요약을 반환한다. " +
+                    "사용자 본인 조회(/api/v1/point/progress)와 동일한 구조의 관리자 버전."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "사용자를 찾을 수 없음")
+    })
+    @GetMapping("/{userId}/rewards")
+    public ResponseEntity<ApiResponse<UserRewardStatusResponse>> getUserRewards(
+            @Parameter(description = "조회할 사용자 ID", example = "user_abc123")
+            @PathVariable String userId
+    ) {
+        log.debug("[AdminUserController] 리워드 진행 현황 조회 — userId={}", userId);
+        UserRewardStatusResponse result = rewardQueryService.getUserRewardStatus(userId);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 }

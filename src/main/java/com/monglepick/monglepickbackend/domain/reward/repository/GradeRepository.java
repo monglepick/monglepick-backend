@@ -63,4 +63,26 @@ public interface GradeRepository extends JpaRepository<Grade, Long> {
      * @return 활성 등급 목록 (sort_order 오름차순)
      */
     List<Grade> findAllByIsActiveTrueOrderBySortOrderAsc();
+
+    /**
+     * {@code subscription_plan_type} 컬럼 값으로 활성 등급을 단건 조회한다.
+     *
+     * <p>2026-04-14 신설 — 구독 결제 완료 시 {@code SubscriptionService.applyGuaranteedGradeForSubscription()}
+     * 에서 사용한다. 기존에는 {@code findAll().stream().filter(...)} 로 전 등급을 fetch 한 뒤 stream 으로
+     * 필터링했는데, DB 쿼리 한 번으로 단건 조회가 가능하므로 의도와 성능 측면에서 모두 개선된다.</p>
+     *
+     * <h4>매핑 규칙</h4>
+     * <ul>
+     *   <li>'basic'   → SILVER (팝콘)</li>
+     *   <li>'premium' → PLATINUM (몽글팝콘)</li>
+     *   <li>그 외      → 빈 결과</li>
+     * </ul>
+     *
+     * <p>설계상 {@code subscription_plan_type} 컬럼은 등급당 최대 1행이지만, 운영 상 정합성이
+     * 깨질 수 있으므로 호출 측에서 단건 처리(첫 결과 사용 등)를 보장해야 한다.</p>
+     *
+     * @param subscriptionPlanType 구독 플랜 타입 ("basic" / "premium")
+     * @return 매칭되는 활성 등급 (없으면 Optional.empty())
+     */
+    Optional<Grade> findFirstBySubscriptionPlanTypeAndIsActiveTrue(String subscriptionPlanType);
 }

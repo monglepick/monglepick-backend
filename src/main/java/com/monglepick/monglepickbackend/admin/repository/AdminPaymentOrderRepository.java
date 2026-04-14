@@ -4,6 +4,8 @@ import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * 관리자 전용 결제 주문 리포지토리.
@@ -51,4 +53,34 @@ public interface AdminPaymentOrderRepository extends JpaRepository<PaymentOrder,
      * @return 전체 주문 페이지
      */
     Page<PaymentOrder> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    /**
+     * 관리자 결제 내역 탭의 복합 필터 검색 (2026-04-14 추가).
+     *
+     * <p>상태(status) / 주문 유형(orderType) / 사용자 ID 를 선택적으로 조합해 검색한다.
+     * null 인 파라미터는 WHERE 조건에서 자동 제외된다.</p>
+     *
+     * @param status     주문 상태 enum (nullable)
+     * @param orderType  주문 유형 enum (nullable)
+     * @param userId     사용자 ID (nullable)
+     * @param pageable   페이지 정보
+     * @return 조건에 매칭되는 결제 주문 페이지 (생성일시 내림차순)
+     */
+    @Query(
+            value = "SELECT p FROM PaymentOrder p " +
+                    "WHERE (:status IS NULL OR p.status = :status) " +
+                    "  AND (:orderType IS NULL OR p.orderType = :orderType) " +
+                    "  AND (:userId IS NULL OR p.userId = :userId) " +
+                    "ORDER BY p.createdAt DESC",
+            countQuery = "SELECT COUNT(p) FROM PaymentOrder p " +
+                    "WHERE (:status IS NULL OR p.status = :status) " +
+                    "  AND (:orderType IS NULL OR p.orderType = :orderType) " +
+                    "  AND (:userId IS NULL OR p.userId = :userId)"
+    )
+    Page<PaymentOrder> searchByFilters(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("orderType") PaymentOrder.OrderType orderType,
+            @Param("userId") String userId,
+            Pageable pageable
+    );
 }

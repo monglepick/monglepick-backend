@@ -561,6 +561,61 @@ public class PointService {
     }
 
     // ──────────────────────────────────────────────
+    // 활동 포인트 기반 등급 재계산 (구독 만료 시 등 외부 트리거용)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 사용자의 활동 포인트({@code earned_by_activity})에 기반하여 등급을 재계산하고 적용한다.
+     *
+     * <p>2026-04-14 신설 — {@link com.monglepick.monglepickbackend.domain.payment.service.SubscriptionService}
+     * 가 구독 만료(EXPIRED 전환) 시점에 호출하여 "구독 보장으로 끌어올린 등급"을 활동 기반
+     * 자연 등급으로 되돌릴 때 사용한다.</p>
+     *
+     * <h4>왜 별도 메서드인가?</h4>
+     * <p>{@link #earnPoint} 의 등급 재계산 로직은 포인트 변동(amount &gt; 0)이 동반될 때만
+     * 트리거되며, 이미 트랜잭션·락·이력 INSERT 와 강결합되어 있어 외부에서 단독 호출이
+     * 불가능하다. 만료 시 강등은 포인트 변동이 없는 순수 등급 sync 작업이므로 별도 헬퍼가 필요하다.</p>
+     *
+     * <h4>설계상 강등 전제</h4>
+     * <p>등급 보장은 활동 포인트가 NORMAL/BRONZE 수준이어도 구독 결제로 SILVER/PLATINUM 을
+     * 영구 박는 구조라, 만료 시점에 활동 기반 등급으로 되돌리지 않으면 한 달짜리 구독으로
+     * 영구 PLATINUM 우회가 가능해진다. 이 메서드가 그 정합성을 회복한다.</p>
+     *
+     * <h4>예외 안전성</h4>
+     * <p>{@code REQUIRES_NEW} 등의 격리 전략을 사용하지 않고 호출 측 트랜잭션에 합류한다.
+     * 만료 스케줄러는 사용자별로 try/catch 로 감싸 한 건 실패가 전체 배치를 막지 않는다.</p>
+     *
+     * @param userId 등급을 재계산할 사용자 ID
+     */
+    @Transactional
+    public void recalculateActivityGrade(String userId) {
+        validateUserId(userId);
+        log.debug("활동 기반 등급 재계산 시작: userId={}", userId);
+
+        UserPoint userPoint = userPointRepository.findByUserIdForUpdate(userId).orElse(null);
+        if (userPoint == null) {
+            log.warn("UserPoint 없음 — 등급 재계산 스킵: userId={}", userId);
+            return;
+        }
+
+        String oldGradeCode = userPoint.getGradeCode();
+        Grade newGrade = gradeRepository
+                .findTopByMinPointsLessThanEqualAndIsActiveTrueOrderByMinPointsDesc(
+                        userPoint.getEarnedByActivity())
+                .orElse(null);
+        String newGradeCode = (newGrade != null) ? newGrade.getGradeCode() : "NORMAL";
+
+        if (newGradeCode.equals(oldGradeCode)) {
+            log.debug("등급 변동 없음 (재계산 스킵): userId={}, grade={}", userId, oldGradeCode);
+            return;
+        }
+
+        userPoint.updateGrade(newGrade);
+        log.info("활동 기반 등급 재계산 완료: userId={}, {} → {} (earnedByActivity={})",
+                userId, oldGradeCode, newGradeCode, userPoint.getEarnedByActivity());
+    }
+
+    // ──────────────────────────────────────────────
     // 변동 이력 조회 (클라이언트 전용)
     // ──────────────────────────────────────────────
 

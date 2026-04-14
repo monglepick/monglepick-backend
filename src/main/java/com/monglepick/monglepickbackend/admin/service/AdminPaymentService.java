@@ -29,8 +29,14 @@ import com.monglepick.monglepickbackend.domain.reward.entity.PointItem;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointItemRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
+import com.monglepick.monglepickbackend.domain.user.entity.User;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -100,6 +106,13 @@ public class AdminPaymentService {
      */
     private final AdminAuditService adminAuditService;
 
+    /**
+     * 사용자 기본 정보 조회용 MyBatis Mapper.
+     * 2026-04-14 추가 — 결제 주문/구독/포인트 이력 DTO 에 nickname/email 를 채워주기 위해 사용한다.
+     * admin 도메인이 JPA 기반이지만 User 는 MyBatis 로 R/W 하므로 도메인 Mapper 를 재사용한다.
+     */
+    private final UserMapper userMapper;
+
     // ======================== 결제 주문 ========================
 
     /**
@@ -114,26 +127,70 @@ public class AdminPaymentService {
      * @param pageable 페이지 정보
      * @return 결제 주문 요약 페이지
      */
-    public Page<PaymentOrderSummary> getOrders(String status, Pageable pageable) {
-        log.debug("[AdminPayment] 결제 내역 조회 — status={}, page={}", status, pageable.getPageNumber());
+    /**
+     * 결제 주문 목록을 필터 조합으로 조회한다 (2026-04-14 확장).
+     *
+     * @param status     주문 상태 문자열 (nullable — 생략 시 전체)
+     * @param orderType  주문 유형 문자열 (SUBSCRIPTION/POINT_PACK, nullable)
+     * @param userId     사용자 ID (nullable — 이메일/닉네임 검색으로 얻은 UUID)
+     * @param pageable   페이지 정보
+     * @return 결제 주문 요약 페이지 (nickname/email enrich 포함)
+     */
+    public Page<PaymentOrderSummary> getOrders(
+            String status, String orderType, String userId, Pageable pageable
+    ) {
+        log.debug("[AdminPayment] 결제 내역 조회 — status={}, orderType={}, userId={}, page={}",
+                status, orderType, userId, pageable.getPageNumber());
 
-        // 상태 필터 분기 — 공백/null 이면 전체, 그 외에는 enum 변환
-        if (status != null && !status.isBlank()) {
-            PaymentOrder.OrderStatus statusEnum;
-            try {
-                statusEnum = PaymentOrder.OrderStatus.valueOf(status.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                log.warn("[AdminPayment] 잘못된 주문 상태 필터: {}", status);
-                throw new BusinessException(ErrorCode.INVALID_INPUT,
-                        "허용되지 않은 주문 상태: " + status);
-            }
-            return adminPaymentOrderRepository
-                    .findByStatusOrderByCreatedAtDesc(statusEnum, pageable)
-                    .map(this::toOrderSummary);
+        PaymentOrder.OrderStatus statusEnum = parseOrderStatus(status);
+        PaymentOrder.OrderType   typeEnum   = parseOrderType(orderType);
+        String                   userIdOrNull = (userId != null && !userId.isBlank()) ? userId : null;
+
+        Page<PaymentOrder> page = adminPaymentOrderRepository.searchByFilters(
+                statusEnum, typeEnum, userIdOrNull, pageable
+        );
+
+        Map<String, User> userMap = fetchUserMap(page.getContent().stream()
+                .map(PaymentOrder::getUserId).toList());
+
+        return page.map((order) -> toOrderSummary(order, userMap.get(order.getUserId())));
+    }
+
+    /** 주문 상태 문자열을 enum 으로 안전 변환 (nullable) */
+    private PaymentOrder.OrderStatus parseOrderStatus(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return PaymentOrder.OrderStatus.valueOf(raw.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("[AdminPayment] 잘못된 주문 상태 필터: {}", raw);
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "허용되지 않은 주문 상태: " + raw);
         }
+    }
 
-        return adminPaymentOrderRepository.findAllByOrderByCreatedAtDesc(pageable)
-                .map(this::toOrderSummary);
+    /** 주문 유형 문자열을 enum 으로 안전 변환 (nullable) */
+    private PaymentOrder.OrderType parseOrderType(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return PaymentOrder.OrderType.valueOf(raw.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("[AdminPayment] 잘못된 주문 유형 필터: {}", raw);
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "허용되지 않은 주문 유형: " + raw);
+        }
+    }
+
+    /**
+     * 결제 주문 목록을 최신순으로 페이징 조회한다 (구버전, 시그니처 호환용).
+     * 신규 코드는 {@link #getOrders(String, String, String, Pageable)} 를 사용한다.
+     *
+     * @param status   주문 상태 문자열 (null/blank 이면 전체)
+     * @param pageable 페이지 정보
+     * @return 결제 주문 요약 페이지
+     */
+    @Deprecated
+    public Page<PaymentOrderSummary> getOrders(String status, Pageable pageable) {
+        return getOrders(status, null, null, pageable);
     }
 
     /**
@@ -224,24 +281,54 @@ public class AdminPaymentService {
      * @param pageable 페이지 정보
      * @return 구독 요약 페이지
      */
-    public Page<SubscriptionSummary> getSubscriptions(String status, Pageable pageable) {
-        log.debug("[AdminPayment] 구독 목록 조회 — status={}, page={}", status, pageable.getPageNumber());
+    /**
+     * 구독 목록을 필터 조합으로 조회한다 (2026-04-14 확장).
+     *
+     * @param status    구독 상태 문자열 (nullable)
+     * @param planCode  구독 플랜 코드 (예: monthly_basic, nullable)
+     * @param userId    사용자 ID (nullable)
+     * @param pageable  페이지 정보
+     * @return 구독 요약 페이지 (nickname/email enrich 포함)
+     */
+    public Page<SubscriptionSummary> getSubscriptions(
+            String status, String planCode, String userId, Pageable pageable
+    ) {
+        log.debug("[AdminPayment] 구독 목록 조회 — status={}, planCode={}, userId={}, page={}",
+                status, planCode, userId, pageable.getPageNumber());
 
-        if (status != null && !status.isBlank()) {
-            UserSubscription.Status statusEnum;
-            try {
-                statusEnum = UserSubscription.Status.valueOf(status.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                log.warn("[AdminPayment] 잘못된 구독 상태 필터: {}", status);
-                throw new BusinessException(ErrorCode.INVALID_INPUT,
-                        "허용되지 않은 구독 상태: " + status);
-            }
-            return adminSubscriptionRepository.findByStatusWithPlan(statusEnum, pageable)
-                    .map(this::toSubscriptionSummary);
+        UserSubscription.Status statusEnum = parseSubStatus(status);
+        String planCodeOrNull = (planCode != null && !planCode.isBlank()) ? planCode : null;
+        String userIdOrNull   = (userId != null && !userId.isBlank()) ? userId : null;
+
+        Page<UserSubscription> page = adminSubscriptionRepository.searchByFilters(
+                statusEnum, planCodeOrNull, userIdOrNull, pageable
+        );
+
+        Map<String, User> userMap = fetchUserMap(page.getContent().stream()
+                .map(UserSubscription::getUserId).toList());
+
+        return page.map((sub) -> toSubscriptionSummary(sub, userMap.get(sub.getUserId())));
+    }
+
+    /** 구독 상태 문자열을 enum 으로 안전 변환 (nullable) */
+    private UserSubscription.Status parseSubStatus(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return UserSubscription.Status.valueOf(raw.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("[AdminPayment] 잘못된 구독 상태 필터: {}", raw);
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "허용되지 않은 구독 상태: " + raw);
         }
+    }
 
-        return adminSubscriptionRepository.findAllWithPlan(pageable)
-                .map(this::toSubscriptionSummary);
+    /**
+     * 구독 목록 조회 (시그니처 호환용).
+     * 신규 코드는 {@link #getSubscriptions(String, String, String, Pageable)} 를 사용한다.
+     */
+    @Deprecated
+    public Page<SubscriptionSummary> getSubscriptions(String status, Pageable pageable) {
+        return getSubscriptions(status, null, null, pageable);
     }
 
     /**
@@ -409,7 +496,12 @@ public class AdminPaymentService {
             pageResult = adminPointsHistoryRepository.findAllByOrderByCreatedAtDesc(pageable);
         }
 
-        return pageResult.map(this::toPointHistoryItem);
+        /* 닉네임/이메일 enrich — 특정 사용자 이력 조회 시에는 단일 사용자만 조회되므로
+         * 전체 조회 시에도 맵 크기는 page.size 이내로 제한된다. */
+        Map<String, User> userMap = fetchUserMap(pageResult.getContent().stream()
+                .map(PointsHistory::getUserId).toList());
+
+        return pageResult.map((h) -> toPointHistoryItem(h, userMap.get(h.getUserId())));
     }
 
     /**
@@ -583,17 +675,31 @@ public class AdminPaymentService {
     // ======================== DTO 변환 ========================
 
     /**
-     * {@link PaymentOrder} 엔티티 → {@link PaymentOrderSummary} 응답 DTO.
+     * {@link PaymentOrder} 엔티티 → {@link PaymentOrderSummary} 응답 DTO (nickname/email 미포함).
+     *
+     * @deprecated enrich 버전 {@link #toOrderSummary(PaymentOrder, User)} 를 사용하라.
      */
+    @Deprecated
     private PaymentOrderSummary toOrderSummary(PaymentOrder order) {
+        return toOrderSummary(order, null);
+    }
+
+    /**
+     * {@link PaymentOrder} → {@link PaymentOrderSummary} (user 정보로 enrich).
+     * 2026-04-14 추가 — 관리자 화면에서 UUID 대신 닉네임/이메일을 함께 보여주기 위함.
+     */
+    private PaymentOrderSummary toOrderSummary(PaymentOrder order, User user) {
         return new PaymentOrderSummary(
                 order.getPaymentOrderId(),
                 order.getUserId(),
+                user != null ? user.getEmail() : null,
+                user != null ? user.getNickname() : null,
                 order.getOrderType().name(),
                 order.getAmount(),
                 order.getPointsAmount(),
                 order.getStatus().name(),
                 order.getPgProvider(),
+                order.getFailedReason(),
                 order.getCreatedAt(),
                 order.getCompletedAt()
         );
@@ -624,15 +730,27 @@ public class AdminPaymentService {
     }
 
     /**
-     * {@link UserSubscription} 엔티티 → {@link SubscriptionSummary} 응답 DTO.
+     * {@link UserSubscription} → {@link SubscriptionSummary} (user 정보 미포함, 시그니처 호환).
+     *
+     * @deprecated enrich 버전 {@link #toSubscriptionSummary(UserSubscription, User)} 를 사용하라.
+     */
+    @Deprecated
+    private SubscriptionSummary toSubscriptionSummary(UserSubscription sub) {
+        return toSubscriptionSummary(sub, null);
+    }
+
+    /**
+     * {@link UserSubscription} → {@link SubscriptionSummary} (user 정보로 enrich).
      *
      * <p>plan 은 반드시 JOIN FETCH 로 로딩된 상태여야 한다 (LazyInitializationException 방지).</p>
      */
-    private SubscriptionSummary toSubscriptionSummary(UserSubscription sub) {
+    private SubscriptionSummary toSubscriptionSummary(UserSubscription sub, User user) {
         SubscriptionPlan plan = sub.getPlan();
         return new SubscriptionSummary(
                 sub.getUserSubscriptionId(),
                 sub.getUserId(),
+                user != null ? user.getEmail() : null,
+                user != null ? user.getNickname() : null,
                 plan.getPlanCode(),
                 plan.getName(),
                 plan.getPeriodType().name(),
@@ -647,12 +765,45 @@ public class AdminPaymentService {
     }
 
     /**
-     * {@link PointsHistory} 엔티티 → {@link PointHistoryItem} 응답 DTO.
+     * userId 리스트를 받아 userId → User Map 을 반환한다 (nullable 값 허용).
+     *
+     * <p>N+1 방지를 위해 중복을 제거하고 존재하는 사용자만 맵에 담는다.
+     * UserMapper 가 배치 조회 메서드를 제공하지 않으므로 단건 호출을 반복한다 —
+     * 관리자 페이지의 최대 페이지 크기 (20~100) 이내에서 충분히 수용 가능.</p>
      */
+    private Map<String, User> fetchUserMap(List<String> userIds) {
+        Map<String, User> map = new HashMap<>();
+        if (userIds == null || userIds.isEmpty()) return map;
+        for (String uid : userIds) {
+            if (uid == null || map.containsKey(uid)) continue;
+            try {
+                User u = userMapper.findById(uid);
+                if (u != null) map.put(uid, u);
+            } catch (Exception e) {
+                /* 개별 조회 실패는 enrichment 만 비워둔다 — 메인 응답에 영향 없음 */
+                log.warn("[AdminPayment] 사용자 조회 실패 — userId={}, err={}", uid, e.getMessage());
+            }
+        }
+        return map;
+    }
+
+    /**
+     * {@link PointsHistory} → {@link PointHistoryItem} (user 정보 미포함, 시그니처 호환).
+     *
+     * @deprecated enrich 버전 {@link #toPointHistoryItem(PointsHistory, User)} 를 사용하라.
+     */
+    @Deprecated
     private PointHistoryItem toPointHistoryItem(PointsHistory history) {
+        return toPointHistoryItem(history, null);
+    }
+
+    /** {@link PointsHistory} → {@link PointHistoryItem} (user 정보로 enrich, 2026-04-14 추가) */
+    private PointHistoryItem toPointHistoryItem(PointsHistory history, User user) {
         return new PointHistoryItem(
                 history.getPointsHistoryId(),
                 history.getUserId(),
+                user != null ? user.getEmail() : null,
+                user != null ? user.getNickname() : null,
                 history.getPointChange(),
                 history.getPointAfter(),
                 history.getPointType(),

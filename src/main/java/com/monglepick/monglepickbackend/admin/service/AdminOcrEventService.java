@@ -92,14 +92,16 @@ public class AdminOcrEventService {
 
         OcrEvent entity = OcrEvent.builder()
                 .movieId(request.movieId())
+                .title(request.title())
+                .memo(request.memo())
                 .startDate(request.startDate())
                 .endDate(request.endDate())
                 .adminId(adminId)
                 .build();
 
         OcrEvent saved = adminOcrEventRepository.save(entity);
-        log.info("[관리자] OCR 이벤트 등록 — eventId={}, movieId={}, adminId={}, period={}~{}",
-                saved.getEventId(), saved.getMovieId(), adminId,
+        log.info("[관리자] OCR 이벤트 등록 — eventId={}, movieId={}, title='{}', adminId={}, period={}~{}",
+                saved.getEventId(), saved.getMovieId(), saved.getTitle(), adminId,
                 saved.getStartDate(), saved.getEndDate());
 
         return toResponse(saved);
@@ -113,10 +115,17 @@ public class AdminOcrEventService {
         validatePeriod(request.startDate(), request.endDate());
 
         OcrEvent entity = findEventByIdOrThrow(eventId);
-        entity.updateInfo(request.movieId(), request.startDate(), request.endDate());
+        entity.updateInfo(
+                request.movieId(),
+                request.title(),
+                request.memo(),
+                request.startDate(),
+                request.endDate()
+        );
 
-        log.info("[관리자] OCR 이벤트 수정 — eventId={}, movieId={}, period={}~{}",
-                eventId, entity.getMovieId(), entity.getStartDate(), entity.getEndDate());
+        log.info("[관리자] OCR 이벤트 수정 — eventId={}, movieId={}, title='{}', period={}~{}",
+                eventId, entity.getMovieId(), entity.getTitle(),
+                entity.getStartDate(), entity.getEndDate());
         return toResponse(entity);
     }
 
@@ -184,11 +193,17 @@ public class AdminOcrEventService {
         return auth.getName();
     }
 
-    /** 엔티티 → 응답 DTO */
+    /**
+     * 엔티티 → 응답 DTO.
+     *
+     * <p>2026-04-14: title/memo 필드 매핑 추가.</p>
+     */
     private OcrEventResponse toResponse(OcrEvent entity) {
         return new OcrEventResponse(
                 entity.getEventId(),
                 entity.getMovieId(),
+                entity.getTitle(),
+                entity.getMemo(),
                 entity.getStartDate(),
                 entity.getEndDate(),
                 entity.getAdminId(),

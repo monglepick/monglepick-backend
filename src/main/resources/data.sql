@@ -6,13 +6,10 @@
 -- ============================================================
 
 -- ── 포인트 교환 아이템 ──
-INSERT IGNORE INTO point_items (item_name, item_description, item_price, item_category)
-VALUES
-    ('AI 추천 1회',     'AI 영화 추천 1회 이용',        100, 'ai_feature'),
-    ('AI 추천 5회 팩',  'AI 영화 추천 5회 이용 (10% 할인)', 450, 'ai_feature'),
-    ('프로필 테마',     '프로필 커스텀 테마 적용',       200, 'profile'),
-    ('칭호 변경',       '커뮤니티 닉네임 칭호 변경',     150, 'profile'),
-    ('도장깨기 힌트',   '퀴즈 힌트 1회 사용',            50, 'roadmap');
+-- 2026-04-14: 시드 적재를 PointItemInitializer(@Order(4))로 단일화.
+-- data.sql은 카테고리/itemType 신규 컬럼을 모르고, 구버전 5종이 v3.2 시드와 이름이 완전히 달라
+-- DB 혼재 상태의 원인이 되었음. 여기서는 INSERT 제거하고 Initializer가 3단계(정규화/비활성화/시드)를
+-- 모두 수행한다. 상세: PointItemInitializer.java javadoc 참조.
 
 -- ── 구독 상품 ──
 -- v3.2 기준 (2026-04-03): 6등급 체계, 가격 인하, AI 보너스 현실화, daily/monthly 한도 분리.

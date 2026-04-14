@@ -239,16 +239,28 @@ public class SettingsDto {
     /**
      * 관리자 계정 단건 응답 DTO.
      *
+     * <p>2026-04-14 확장: {@code email}, {@code nickname} 필드 추가.
+     * 기존에는 admin 테이블 컬럼만 매핑하여 운영자가 관리자 계정 탭에서
+     * "누가 관리자인지" 사람이 읽을 수 있는 정보를 볼 수 없었다. 프론트엔드가
+     * 기대하는 필드(admin.email, admin.nickname)와도 일치시킨다.</p>
+     *
+     * <p>{@code email}/{@code nickname}은 {@code users} 테이블에서 조회하여 채운다.
+     * users 레코드가 없거나 탈퇴한 경우 null 이 들어올 수 있다.</p>
+     *
      * @param adminId     관리자 레코드 고유 ID
      * @param userId      사용자 ID (users 테이블 FK)
+     * @param email       사용자 이메일 — users.email 조인 (nullable)
+     * @param nickname    사용자 닉네임 — users.nickname 조인 (nullable)
      * @param adminRole   관리자 역할 (ADMIN, SUPER_ADMIN 등)
      * @param isActive    관리자 권한 활성 여부
-     * @param lastLoginAt 마지막 로그인 일시 (nullable)
+     * @param lastLoginAt 관리자 테이블 기준 마지막 로그인 일시 (nullable)
      * @param createdAt   관리자 계정 등록 일시
      */
     public record AdminAccountResponse(
             Long adminId,
             String userId,
+            String email,
+            String nickname,
             String adminRole,
             Boolean isActive,
             LocalDateTime lastLoginAt,
@@ -261,6 +273,36 @@ public class SettingsDto {
      * @param adminRole 새 관리자 역할 (필수, 최대 50자). 예: "ADMIN", "SUPER_ADMIN"
      */
     public record AdminRoleUpdateRequest(
+            @NotBlank(message = "관리자 역할은 필수입니다.")
+            @Size(max = 50, message = "관리자 역할 코드는 최대 50자입니다.")
+            String adminRole
+    ) {}
+
+    /**
+     * 관리자 계정 신규 등록 요청 DTO — 2026-04-14 신규.
+     *
+     * <p>SUPER_ADMIN 이 기존 일반 사용자를 관리자로 승격시킬 때 사용한다.
+     * email 또는 userId 중 하나는 반드시 전달해야 한다. 둘 다 제공되면 userId 가 우선한다.</p>
+     *
+     * <h3>처리 흐름</h3>
+     * <ol>
+     *   <li>userId 또는 email 로 대상 User 엔티티 조회 (없으면 G002).</li>
+     *   <li>이미 admin 레코드가 있는지 확인 (중복이면 G001).</li>
+     *   <li>users.user_role 을 ADMIN 으로 승격 + admin 테이블에 신규 레코드 INSERT.</li>
+     *   <li>admin_audit_logs 에 ADMIN_ACCOUNT_CREATE 이벤트 기록.</li>
+     * </ol>
+     *
+     * @param userId    사용자 ID (VARCHAR 50, nullable — email 과 상호 배타)
+     * @param email     사용자 이메일 (nullable — userId 와 상호 배타)
+     * @param adminRole 부여할 관리자 역할 코드 (필수, {@link com.monglepick.monglepickbackend.global.constants.AdminRole} 허용값)
+     */
+    public record AdminAccountCreateRequest(
+            @Size(max = 50, message = "userId 는 최대 50자입니다.")
+            String userId,
+
+            @Size(max = 200, message = "email 은 최대 200자입니다.")
+            String email,
+
             @NotBlank(message = "관리자 역할은 필수입니다.")
             @Size(max = 50, message = "관리자 역할 코드는 최대 50자입니다.")
             String adminRole

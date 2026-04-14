@@ -40,7 +40,13 @@ public interface MovieRepository extends JpaRepository<Movie, String> {
      * @param keyword 검색 키워드
      * @param pageable 페이징 정보
      * @return 페이지 단위의 영화 검색 결과
+     *
+     * @deprecated 2026-04-14: 단순 LIKE 검색은 "어벤저스↔어벤져스" 같은 한글 자모 변형 매칭이
+     * 불가능하여 검색 품질 이슈가 발생. 프런트엔드는 Recommend `/api/v1/search/movies`
+     * (ES 우선 + MySQL LIKE fallback)로 전환됨. 이 메서드는 서비스 레이어 호환을 위해 잔존하나,
+     * 새로운 호출을 추가하지 말 것. 전수 감사 후 제거 예정.
      */
+    @Deprecated
     @Query("SELECT m FROM Movie m WHERE m.title LIKE %:keyword% OR m.titleEn LIKE %:keyword%")
     Page<Movie> searchByTitle(@Param("keyword") String keyword, Pageable pageable);
 

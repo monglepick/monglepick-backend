@@ -97,11 +97,15 @@ public class AdminPaymentController {
     public ResponseEntity<ApiResponse<Page<PaymentOrderSummary>>> getOrders(
             @Parameter(description = "주문 상태 필터 (생략 시 전체)")
             @RequestParam(required = false) String status,
+            @Parameter(description = "주문 유형 필터 (SUBSCRIPTION/POINT_PACK, 생략 시 전체)")
+            @RequestParam(required = false) String orderType,
+            @Parameter(description = "특정 사용자 ID 필터 (생략 시 전체)")
+            @RequestParam(required = false) String userId,
             @PageableDefault(size = 20) Pageable pageable
     ) {
-        log.debug("[AdminPayment] 결제 내역 조회 요청 — status={}, page={}",
-                status, pageable.getPageNumber());
-        Page<PaymentOrderSummary> result = adminPaymentService.getOrders(status, pageable);
+        log.debug("[AdminPayment] 결제 내역 조회 요청 — status={}, orderType={}, userId={}, page={}",
+                status, orderType, userId, pageable.getPageNumber());
+        Page<PaymentOrderSummary> result = adminPaymentService.getOrders(status, orderType, userId, pageable);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 
@@ -165,11 +169,16 @@ public class AdminPaymentController {
     public ResponseEntity<ApiResponse<Page<SubscriptionSummary>>> getSubscriptions(
             @Parameter(description = "구독 상태 필터 (생략 시 전체)")
             @RequestParam(required = false) String status,
+            @Parameter(description = "구독 플랜 코드 필터 (예: monthly_basic, 생략 시 전체)")
+            @RequestParam(required = false) String planCode,
+            @Parameter(description = "특정 사용자 ID 필터 (생략 시 전체)")
+            @RequestParam(required = false) String userId,
             @PageableDefault(size = 20) Pageable pageable
     ) {
-        log.debug("[AdminPayment] 구독 목록 조회 요청 — status={}, page={}",
-                status, pageable.getPageNumber());
-        Page<SubscriptionSummary> result = adminPaymentService.getSubscriptions(status, pageable);
+        log.debug("[AdminPayment] 구독 목록 조회 요청 — status={}, planCode={}, userId={}, page={}",
+                status, planCode, userId, pageable.getPageNumber());
+        Page<SubscriptionSummary> result =
+                adminPaymentService.getSubscriptions(status, planCode, userId, pageable);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 

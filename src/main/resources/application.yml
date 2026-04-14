@@ -233,6 +233,12 @@ app:
   point:
     free-on-signup: ${FREE_POINTS_ON_SIGNUP:500}
     cost-per-recommendation: ${POINT_COST_PER_RECOMMENDATION:100}
+  ## AI 리뷰 검증 에이전트 (도장깨기 리뷰 → 시청 인증) 파라미터 — 2026-04-14 신규
+  ## - threshold: 에이전트 aiConfidence 가 이 값 이상이면 AUTO_VERIFIED 로 자동 승인 (그 외 NEEDS_REVIEW)
+  ## - 관리자 화면 상단 KPI 카드에 현재 임계값을 표시해 운영자가 언제든 확인 가능
+  ai:
+    review-verification:
+      threshold: ${AI_REVIEW_VERIFICATION_THRESHOLD:0.7}
   ## 등급별 쿼터 (v3.2 6등급 체계, 팝콘 테마)
   ## - daily-limit  : 일일 무료 AI 한도 (-1=무제한)
   ## - monthly-limit: AI 이용권(쿠폰) 월간 한도 (-1=무제한). v3.2 역할 분리

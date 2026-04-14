@@ -54,11 +54,17 @@ public final class AdminPaymentDto {
     public record PaymentOrderSummary(
             String orderId,
             String userId,
+            /** 주문자 이메일 (관리자 표시용, 2026-04-14 추가) */
+            String email,
+            /** 주문자 닉네임 (관리자 표시용, 2026-04-14 추가) */
+            String nickname,
             String orderType,
             Integer amount,
             Integer pointsAmount,
             String status,
             String pgProvider,
+            /** 실패/보상 실패 사유 (관리자 실패 대응용, 2026-04-14 추가) */
+            String failedReason,
             LocalDateTime createdAt,
             LocalDateTime completedAt
     ) {}
@@ -158,6 +164,10 @@ public final class AdminPaymentDto {
     public record SubscriptionSummary(
             Long subscriptionId,
             String userId,
+            /** 구독자 이메일 (관리자 표시용, 2026-04-14 추가) */
+            String email,
+            /** 구독자 닉네임 (관리자 표시용, 2026-04-14 추가) */
+            String nickname,
             String planCode,
             String planName,
             String periodType,
@@ -261,6 +271,10 @@ public final class AdminPaymentDto {
     public record PointHistoryItem(
             Long historyId,
             String userId,
+            /** 사용자 이메일 (관리자 표시용, 2026-04-14 추가) */
+            String email,
+            /** 사용자 닉네임 (관리자 표시용, 2026-04-14 추가) */
+            String nickname,
             Integer pointChange,
             Integer pointAfter,
             String pointType,

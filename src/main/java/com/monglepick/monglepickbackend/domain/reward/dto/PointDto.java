@@ -299,18 +299,66 @@ public final class PointDto {
     }
 
     /**
-     * 아이템 교환 응답.
+     * 아이템 교환 응답 (v2, 2026-04-14 — C 방향 카테고리별 지급 로직 대응).
      *
-     * <p>포인트 아이템 교환(구매) 성공 시 결과를 반환한다.</p>
+     * <p>포인트 아이템 교환(구매) 성공 시 결과를 반환한다.
+     * v2에서 카테고리별 지급 결과 필드 5종(userItemId, itemType, category, addedAiTokens,
+     * totalAiTokens)을 추가하여 클라이언트가 "무엇이 지급되었는지"를 즉시 표시할 수 있게 한다.</p>
      *
-     * @param success      교환 성공 여부
-     * @param balanceAfter 교환 후 잔여 포인트
-     * @param itemName     교환한 아이템명
+     * <h3>카테고리별 응답 예시</h3>
+     * <ul>
+     *   <li>AI 이용권(coupon + AI_TOKEN_*) — userItemId=null, addedAiTokens=5, totalAiTokens=12</li>
+     *   <li>아바타/배지/응모권/힌트(inventory) — userItemId=123, addedAiTokens=null, totalAiTokens=null</li>
+     * </ul>
+     *
+     * @param success        교환 성공 여부
+     * @param balanceAfter   교환 후 잔여 포인트
+     * @param itemName       교환한 아이템명
+     * @param userItemId     발급된 user_items 레코드 ID (AI 이용권이면 null)
+     * @param itemType       지급된 아이템 타입 코드 (PointItemType.name(), null 허용)
+     * @param category       아이템 카테고리 ("coupon"/"avatar"/"badge"/"apply"/"hint")
+     * @param addedAiTokens  추가된 AI 이용권 수량 (AI 이용권 교환 시, 아니면 null)
+     * @param totalAiTokens  교환 후 총 AI 이용권 잔여 (AI 이용권 교환 시, 아니면 null)
      */
     public record ExchangeResponse(
             boolean success,
             int balanceAfter,
-            String itemName
+            String itemName,
+            Long userItemId,
+            String itemType,
+            String category,
+            Integer addedAiTokens,
+            Integer totalAiTokens
     ) {
+        /**
+         * AI 이용권 교환 결과 빌더.
+         *
+         * @param balanceAfter  차감 후 잔액
+         * @param itemName      상품명
+         * @param itemType      지급 타입 (AI_TOKEN_5 등)
+         * @param category      카테고리 (항상 "coupon")
+         * @param addedAiTokens 추가된 수량
+         * @param totalAiTokens 총 잔여 수량
+         */
+        public static ExchangeResponse aiToken(int balanceAfter, String itemName, String itemType,
+                                                String category, int addedAiTokens, int totalAiTokens) {
+            return new ExchangeResponse(true, balanceAfter, itemName,
+                    null, itemType, category, addedAiTokens, totalAiTokens);
+        }
+
+        /**
+         * 인벤토리 아이템 교환 결과 빌더 (아바타/배지/응모권/힌트).
+         *
+         * @param balanceAfter 차감 후 잔액
+         * @param itemName     상품명
+         * @param userItemId   발급된 user_items PK
+         * @param itemType     지급 타입 (AVATAR_MONGLE 등)
+         * @param category     카테고리
+         */
+        public static ExchangeResponse inventory(int balanceAfter, String itemName, Long userItemId,
+                                                  String itemType, String category) {
+            return new ExchangeResponse(true, balanceAfter, itemName,
+                    userItemId, itemType, category, null, null);
+        }
     }
 }

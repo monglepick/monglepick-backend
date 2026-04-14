@@ -252,4 +252,20 @@ public class Grade extends BaseAuditEntity {
     public void setActive(boolean active) {
         this.isActive = active;
     }
+
+    /**
+     * 구독 보장 플랜 타입({@code subscription_plan_type})을 보정한다.
+     *
+     * <p>2026-04-14 신설 — {@link com.monglepick.monglepickbackend.domain.reward.config.GradeInitializer}
+     * 가 v3.2 이전 환경에서 NULL 로 남은 SILVER/PLATINUM 의 컬럼 값을 정합성 보정할 때 사용한다.</p>
+     *
+     * <p>이 메서드는 {@code GradeInitializer} 의 부팅 시 1회 보정 외 일반 비즈니스 흐름에서
+     * 호출되어선 안 된다. 등급의 구독 매핑은 시드 데이터 차원에서 결정되는 값이며,
+     * 운영 중 임의 변경은 결제·등급 보장 정책 전체에 파급된다.</p>
+     *
+     * @param type 새 subscription_plan_type 값 ('basic' / 'premium' / null)
+     */
+    public void assignSubscriptionPlanType(String type) {
+        this.subscriptionPlanType = type;
+    }
 }

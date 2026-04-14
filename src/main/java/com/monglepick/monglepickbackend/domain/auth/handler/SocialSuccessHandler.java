@@ -1,8 +1,11 @@
 package com.monglepick.monglepickbackend.domain.auth.handler;
 
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
+import com.monglepick.monglepickbackend.domain.auth.service.LoginPostProcessor;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRepository;
+import com.monglepick.monglepickbackend.domain.user.entity.User;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.security.CookieUtil;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
 import jakarta.servlet.http.HttpServletRequest;
@@ -51,6 +54,16 @@ public class SocialSuccessHandler implements AuthenticationSuccessHandler {
      */
     private final PointsHistoryRepository pointsHistoryRepository;
 
+    /**
+     * 로그인 성공 후처리(2026-04-14) — users/admin 최종 로그인 시각 갱신 및
+     * 관리자 접속 감사 로그 기록. OAuth 로그인도 동일 후처리를 수행하여 DAU/MAU 집계에
+     * 누락이 생기지 않도록 한다.
+     */
+    private final LoginPostProcessor loginPostProcessor;
+
+    /** 소셜 로그인 후 User 엔티티를 조회하여 LoginPostProcessor 에 전달하기 위함. */
+    private final UserMapper userMapper;
+
     /** 프론트엔드 리다이렉트 URL (환경변수로 오버라이드 가능) */
     @Value("${app.oauth.redirect-url:http://localhost:5173/cookie}")
     private String redirectUrl;
@@ -74,6 +87,28 @@ public class SocialSuccessHandler implements AuthenticationSuccessHandler {
 
         /* Refresh Token을 DB 화이트리스트에 저장 */
         jwtService.addRefresh(userId, refreshToken);
+
+        /*
+         * 로그인 성공 후처리 (2026-04-14 추가):
+         *   - users.last_login_at 갱신 (DAU/MAU 집계용)
+         *   - 해당 사용자가 ROLE_ADMIN 이면 admin.last_login_at 갱신 +
+         *     admin_audit_logs ADMIN_LOGIN 기록.
+         *
+         * 소셜 로그인은 일반 사용자가 대부분이지만 관리자가 OAuth 로 로그인하는 경우도
+         * 누락 없이 감사 로그를 남기기 위해 공통 후처리에 포함시킨다. User 조회 실패
+         * 시에는 조용히 스킵한다.
+         */
+        try {
+            User user = userMapper.findById(userId);
+            if (user != null) {
+                loginPostProcessor.processLogin(user);
+            } else {
+                log.warn("소셜 로그인 후처리: User 조회 실패 — userId={} (last_login_at 갱신 생략)", userId);
+            }
+        } catch (Exception e) {
+            // 후처리 실패는 로그인 자체에 영향 주지 않도록 삼킨다.
+            log.warn("소셜 로그인 후처리 중 예외 — userId={}, err={}", userId, e.getMessage());
+        }
 
         /*
          * CookieUtil로 HttpOnly 쿠키 설정.

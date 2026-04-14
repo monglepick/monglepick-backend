@@ -85,7 +85,11 @@ public class AdminRoadmapCourseService {
      * @param keyword 검색 키워드 (한국어 또는 영어 제목)
      * @param size    반환 건수 제한 (기본 10, 최대 30)
      * @return 영화 검색 결과 목록
+     *
+     * @deprecated 2026-04-14: 현재 Admin UI 미사용. 신규 UI 구현 시 Recommend
+     * `/api/v1/search/movies` (ES 우선 + MySQL LIKE fallback) 호출로 일원화할 것.
      */
+    @Deprecated
     public List<MovieSearchResult> searchMovies(String keyword, int size) {
         // size <= 0 방어: 최소 1, 최대 30으로 클램핑
         int limit = Math.max(1, Math.min(size, 30));

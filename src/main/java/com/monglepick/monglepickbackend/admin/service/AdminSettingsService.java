@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.admin.service;
 
+import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminAccountCreateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminAccountResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminRoleUpdateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AuditLogResponse;
@@ -18,6 +19,9 @@ import com.monglepick.monglepickbackend.domain.content.entity.Terms;
 import com.monglepick.monglepickbackend.global.constants.AdminRole;
 import com.monglepick.monglepickbackend.domain.content.mapper.ContentMapper;
 import com.monglepick.monglepickbackend.domain.user.entity.Admin;
+import com.monglepick.monglepickbackend.domain.user.entity.User;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.global.constants.UserRole;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -67,6 +71,19 @@ public class AdminSettingsService {
 
     /** 관리자 계정 Repository */
     private final AdminAccountRepository adminAccountRepository;
+
+    /**
+     * 사용자 Mapper — 관리자 계정 응답 DTO 에 email/nickname 을 채우기 위해 주입한다.
+     * (2026-04-14) 기존에는 admin 테이블 컬럼만 노출되어 운영자가 "누가 관리자인지"
+     * 한 눈에 파악할 수 없었다.
+     */
+    private final UserMapper userMapper;
+
+    /**
+     * 관리자 감사 로그 서비스 — 관리자 신규 등록/역할 변경 시 admin_audit_logs 에
+     * 이벤트를 남기기 위해 주입한다. (2026-04-14)
+     */
+    private final AdminAuditService adminAuditService;
 
     // ======================== 약관/정책 ========================
 
@@ -170,6 +187,28 @@ public class AdminSettingsService {
                 .toList();
 
         return new PageImpl<>(content, pageable, total);
+    }
+
+    /**
+     * 현재 노출 중인 활성 배너 목록을 조회한다 — 사용자 홈 슬라이드 배너용 (2026-04-14 신규).
+     *
+     * <p>ContentMapper 의 기존 {@code findActiveBannersByPosition} 쿼리를 그대로 사용하며,
+     * {@code is_active=true} + 현재 시각이 {@code start_date~end_date} 범위 내인 레코드만 반환한다.
+     * 정렬은 {@code sort_order ASC} (낮을수록 먼저 노출). 비로그인 접근을 허용하기 위해
+     * 별도 공개 엔드포인트({@code GET /api/v1/banners})에서 호출한다.</p>
+     *
+     * @param position 위치 필터 (예: "MAIN"). null/빈 값이면 "MAIN" 기본값.
+     * @return 노출 중 배너 응답 DTO 목록 (정렬순서 ASC)
+     */
+    public List<BannerResponse> getActiveBanners(String position) {
+        // position 생략 시 기본값 "MAIN" — 홈 메인 영역 배너만 반환
+        String effectivePosition = (position == null || position.isBlank()) ? "MAIN" : position;
+        log.debug("[settings] 활성 배너 조회(공개) — position={}", effectivePosition);
+
+        List<Banner> banners = contentMapper.findActiveBannersByPosition(effectivePosition);
+        return banners.stream()
+                .map(this::toBannerResponse)
+                .toList();
     }
 
     /**
@@ -375,8 +414,137 @@ public class AdminSettingsService {
                 .lastLoginAt(admin.getLastLoginAt())
                 .build();
 
+        String previousRole = admin.getAdminRole();
         Admin saved = adminAccountRepository.save(updated);
         log.info("[settings] 관리자 역할 수정 완료 — adminId={}, role={}", id, saved.getAdminRole());
+
+        /*
+         * 2026-04-14 추가: 역할 변경 감사 로그.
+         * SUPER_ADMIN ↔ STATS_ADMIN 같은 민감한 권한 조정은 반드시 추적 가능해야 한다.
+         * REQUIRES_NEW 로 격리되어 있어 로그 기록 실패가 역할 수정 자체를 막지 않는다.
+         */
+        String description = String.format(
+                "관리자 역할 변경 — adminId=%d, userId=%s, %s → %s",
+                saved.getAdminId(), saved.getUserId(), previousRole, saved.getAdminRole()
+        );
+        String beforeData = String.format("{\"adminRole\":\"%s\"}", previousRole);
+        String afterData  = String.format("{\"adminRole\":\"%s\"}", saved.getAdminRole());
+        adminAuditService.log(
+                AdminAuditService.ACTION_ADMIN_ROLE_UPDATE,
+                AdminAuditService.TARGET_ADMIN,
+                String.valueOf(saved.getAdminId()),
+                description,
+                beforeData,
+                afterData
+        );
+
+        return toAdminAccountResponse(saved);
+    }
+
+    /**
+     * 신규 관리자 계정을 생성한다 — 2026-04-14 신규.
+     *
+     * <p>SUPER_ADMIN 이 기존 일반 사용자를 관리자로 승격시키는 용도. 비밀번호는 기존
+     * 사용자 계정의 것을 그대로 사용하므로 별도 설정이 필요 없다. 관리자 페이지 로그인은
+     * {@code POST /api/v1/admin/auth/login} 에서 users.user_role 이 ADMIN 이면 통과된다.</p>
+     *
+     * <h3>처리 단계</h3>
+     * <ol>
+     *   <li>요청 DTO 의 adminRole 허용값 검증 (AdminRole enum).</li>
+     *   <li>userId 또는 email 로 User 엔티티 조회 (둘 다 없으면 INVALID_INPUT).</li>
+     *   <li>해당 user 가 이미 관리자인지 확인 (중복 방지).</li>
+     *   <li>users.user_role 을 ADMIN 으로 승격 (MyBatis UPDATE).</li>
+     *   <li>admin 테이블에 신규 레코드 INSERT.</li>
+     *   <li>admin_audit_logs 에 ADMIN_ACCOUNT_CREATE 기록 (REQUIRES_NEW).</li>
+     * </ol>
+     *
+     * @param request 신규 관리자 등록 요청 DTO
+     * @return 생성된 관리자 계정 응답 DTO
+     */
+    @Transactional
+    public AdminAccountResponse createAdminAccount(AdminAccountCreateRequest request) {
+        log.info("[settings] 관리자 계정 신규 등록 요청 — userId={}, email={}, role={}",
+                request.userId(), request.email(), request.adminRole());
+
+        // ── 1. adminRole 허용값 검증 ──
+        if (!AdminRole.isAllowed(request.adminRole())) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_INPUT,
+                    "허용되지 않은 역할 코드입니다: " + request.adminRole() +
+                    " (허용값: " + AdminRole.allowedCodesAsString() + ")"
+            );
+        }
+
+        // ── 2. userId 또는 email 로 User 조회 ──
+        // userId 가 우선하며, 없으면 email 로 fallback. 둘 다 없으면 검증 실패.
+        if (!StringUtils.hasText(request.userId()) && !StringUtils.hasText(request.email())) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_INPUT,
+                    "userId 또는 email 중 하나는 필수입니다."
+            );
+        }
+
+        User user;
+        if (StringUtils.hasText(request.userId())) {
+            user = userMapper.findById(request.userId());
+            if (user == null) {
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "userId 에 해당하는 사용자를 찾을 수 없습니다: " + request.userId());
+            }
+        } else {
+            user = userMapper.findByEmail(request.email());
+            if (user == null) {
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "email 에 해당하는 사용자를 찾을 수 없습니다: " + request.email());
+            }
+        }
+
+        // ── 3. 중복 검사 — 이미 admin 레코드가 있는지 확인 ──
+        if (adminAccountRepository.findByUserId(user.getUserId()).isPresent()) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_INPUT,
+                    "이미 관리자로 등록된 사용자입니다: userId=" + user.getUserId()
+            );
+        }
+
+        // ── 4. users.user_role 을 ADMIN 으로 승격 ──
+        // user.updateUserRole() 은 엔티티 도메인 메서드지만 본 서비스는 MyBatis 경로이므로
+        // 도메인 메서드 호출 + userMapper.update() 패턴 대신, UserRole 이 이미 ADMIN 이면
+        // UPDATE 스킵하고, 아니면 엔티티를 직접 UPDATE 한다.
+        if (user.getUserRole() != UserRole.ADMIN) {
+            user.updateUserRole(UserRole.ADMIN);
+            userMapper.update(user);
+            log.info("[settings] users.user_role → ADMIN 승격 — userId={}", user.getUserId());
+        }
+
+        // ── 5. admin 테이블 신규 레코드 INSERT ──
+        Admin newAdmin = Admin.builder()
+                .userId(user.getUserId())
+                .adminRole(request.adminRole())
+                .isActive(true)
+                .build();
+        Admin saved = adminAccountRepository.save(newAdmin);
+        log.info("[settings] admin 테이블 INSERT 완료 — adminId={}, userId={}, role={}",
+                saved.getAdminId(), saved.getUserId(), saved.getAdminRole());
+
+        // ── 6. 감사 로그 ──
+        String description = String.format(
+                "관리자 계정 신규 등록 — adminId=%d, userId=%s, email=%s, role=%s",
+                saved.getAdminId(), saved.getUserId(), user.getEmail(), saved.getAdminRole()
+        );
+        String afterData = String.format(
+                "{\"userId\":\"%s\",\"email\":\"%s\",\"adminRole\":\"%s\"}",
+                saved.getUserId(), user.getEmail(), saved.getAdminRole()
+        );
+        adminAuditService.log(
+                AdminAuditService.ACTION_ADMIN_ACCOUNT_CREATE,
+                AdminAuditService.TARGET_ADMIN,
+                String.valueOf(saved.getAdminId()),
+                description,
+                null,
+                afterData
+        );
+
         return toAdminAccountResponse(saved);
     }
 
@@ -448,13 +616,36 @@ public class AdminSettingsService {
     /**
      * Admin 엔티티를 AdminAccountResponse DTO로 변환한다.
      *
+     * <p>2026-04-14 확장: {@code users} 테이블에서 email/nickname 을 조회하여 응답에
+     * 포함시킨다. 관리자 계정은 통상 페이지당 20건 이하이므로 N+1 오버헤드보다 코드
+     * 단순성을 우선한다 (루프 내 {@code UserMapper.findById()}).</p>
+     *
+     * <p>users 레코드가 없는 경우(탈퇴·동기화 오류 등)에는 email/nickname 을 null 로
+     * 채우고 계속 진행한다 — 관리자 목록 화면이 500 에러로 중단되지 않도록 방어.</p>
+     *
      * @param admin 관리자 엔티티
      * @return 관리자 계정 응답 DTO
      */
     private AdminAccountResponse toAdminAccountResponse(Admin admin) {
+        String email = null;
+        String nickname = null;
+        try {
+            User user = userMapper.findById(admin.getUserId());
+            if (user != null) {
+                email = user.getEmail();
+                nickname = user.getNickname();
+            }
+        } catch (Exception e) {
+            // 조회 실패 시 null 유지하고 경고만 남긴다 — 화면 전체가 죽지 않도록 함
+            log.warn("[settings] 관리자 계정 email/nickname 조회 실패 — userId={}, err={}",
+                    admin.getUserId(), e.getMessage());
+        }
+
         return new AdminAccountResponse(
                 admin.getAdminId(),
                 admin.getUserId(),
+                email,
+                nickname,
                 admin.getAdminRole(),
                 admin.getIsActive(),
                 admin.getLastLoginAt(),

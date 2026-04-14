@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.auth.handler;
 // Jackson 3.x: com.fasterxml.jackson → tools.jackson 패키지 경로 변경 (Spring Boot 4.x)
 import tools.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
+import com.monglepick.monglepickbackend.domain.auth.service.LoginPostProcessor;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.security.CookieUtil;
@@ -51,6 +52,13 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final CookieUtil cookieUtil;
 
     /**
+     * 로그인 성공 후처리(2026-04-14) — users/admin 최종 로그인 시각 갱신 및
+     * 관리자 접속 감사 로그 기록을 단일 트랜잭션으로 처리한다.
+     * 쿠키/JSON 응답 I/O 구간을 트랜잭션 밖으로 분리하기 위해 별도 서비스로 위임한다.
+     */
+    private final LoginPostProcessor loginPostProcessor;
+
+    /**
      * 로그인 성공 응답 DTO.
      *
      * <p>보안 정책: Refresh Token은 JSON body에 포함하지 않고
@@ -95,6 +103,17 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         /* Refresh Token을 DB 화이트리스트에 저장 */
         jwtService.addRefresh(user.getUserId(), refreshToken);
+
+        /*
+         * 로그인 성공 후처리 (2026-04-14 추가):
+         *   - users.last_login_at 갱신 (DAU/MAU 집계용)
+         *   - ADMIN 사용자라면 admin.last_login_at 갱신 + admin_audit_logs 에
+         *     ADMIN_LOGIN 이벤트 기록
+         *
+         * 트랜잭션 경계는 LoginPostProcessor 내부로 국한되며, HTTP 응답 I/O 구간은 그 밖에
+         * 둔다. 예외는 내부에서 try/catch 로 삼키므로 로그인 자체는 실패하지 않는다.
+         */
+        loginPostProcessor.processLogin(user);
 
         /*
          * [중요] Set-Cookie 헤더는 반드시 objectMapper.writeValue() 이전에 추가해야 한다.

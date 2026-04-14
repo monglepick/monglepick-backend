@@ -74,4 +74,34 @@ public interface AdminSubscriptionRepository extends JpaRepository<UserSubscript
      */
     @Query("SELECT s FROM UserSubscription s JOIN FETCH s.plan WHERE s.userSubscriptionId = :id")
     Optional<UserSubscription> findByIdWithPlan(@Param("id") Long id);
+
+    /**
+     * 관리자 구독 관리 탭의 복합 필터 검색 (2026-04-14 추가).
+     *
+     * <p>상태 / 플랜 코드 / 사용자 ID 를 선택적으로 조합해 검색한다.
+     * null 파라미터는 조건에서 자동 제외되며, plan 은 JOIN FETCH 로 즉시 로딩된다.</p>
+     *
+     * @param status    구독 상태 (nullable)
+     * @param planCode  구독 플랜 코드 (예: monthly_basic, nullable)
+     * @param userId    사용자 ID (nullable)
+     * @param pageable  페이지 정보
+     * @return plan 이 즉시 로딩된 구독 페이지 (생성일시 내림차순)
+     */
+    @Query(
+            value = "SELECT s FROM UserSubscription s JOIN FETCH s.plan p " +
+                    "WHERE (:status IS NULL OR s.status = :status) " +
+                    "  AND (:planCode IS NULL OR p.planCode = :planCode) " +
+                    "  AND (:userId IS NULL OR s.userId = :userId) " +
+                    "ORDER BY s.createdAt DESC",
+            countQuery = "SELECT COUNT(s) FROM UserSubscription s " +
+                    "WHERE (:status IS NULL OR s.status = :status) " +
+                    "  AND (:planCode IS NULL OR s.plan.planCode = :planCode) " +
+                    "  AND (:userId IS NULL OR s.userId = :userId)"
+    )
+    Page<UserSubscription> searchByFilters(
+            @Param("status") UserSubscription.Status status,
+            @Param("planCode") String planCode,
+            @Param("userId") String userId,
+            Pageable pageable
+    );
 }

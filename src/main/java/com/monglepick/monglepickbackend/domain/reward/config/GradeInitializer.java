@@ -148,10 +148,33 @@ public class GradeInitializer implements ApplicationRunner {
         int skippedCount = 0;
 
         for (Grade grade : defaultGrades) {
-            // gradeCode 기준 멱등 확인: 이미 존재하면 건너뜀
-            if (gradeRepository.findByGradeCode(grade.getGradeCode()).isPresent()) {
-                log.debug("등급 이미 존재 (건너뜀): gradeCode={}, gradeName={}",
-                        grade.getGradeCode(), grade.getGradeName());
+            // gradeCode 기준 멱등 확인: 이미 존재하면 신규 INSERT 는 건너뜀
+            var existingOpt = gradeRepository.findByGradeCode(grade.getGradeCode());
+            if (existingOpt.isPresent()) {
+                // ── 2026-04-14 보강: subscription_plan_type 누락 NULL 보정 ──
+                //
+                // v3.2 이전(2026-04-03 이전)에 등급 마스터가 INSERT 된 환경에서는
+                // 이후 추가된 subscription_plan_type 컬럼 값이 NULL 인 채로 남는다.
+                // ddl-auto=update 는 컬럼 추가만 하고 데이터를 채우지 않으며,
+                // 기존 멱등 로직은 "존재하면 SKIP" 하므로 영원히 NULL 이 유지되었다.
+                //
+                // 이 누락이 있으면 SubscriptionService.applyGuaranteedGradeForSubscription()
+                // 의 "basic"/"premium" → SILVER/PLATINUM 매핑이 실패하여 구독 결제를
+                // 완료해도 등급 보장이 동작하지 않는다 (실제 운영 버그 보고됨).
+                //
+                // 운영 데이터 보존을 위해 다른 컬럼(min_points, daily_ai_limit 등)은
+                // 일절 건드리지 않고, subscription_plan_type 컬럼만 정합성 보정한다.
+                Grade existing = existingOpt.get();
+                if (existing.getSubscriptionPlanType() == null
+                        && grade.getSubscriptionPlanType() != null) {
+                    existing.assignSubscriptionPlanType(grade.getSubscriptionPlanType());
+                    gradeRepository.save(existing);
+                    log.warn("등급 subscription_plan_type 누락 보정: gradeCode={}, type={} → 적용 완료",
+                            existing.getGradeCode(), grade.getSubscriptionPlanType());
+                } else {
+                    log.debug("등급 이미 존재 (건너뜀): gradeCode={}, gradeName={}",
+                            grade.getGradeCode(), grade.getGradeName());
+                }
                 skippedCount++;
                 continue;
             }

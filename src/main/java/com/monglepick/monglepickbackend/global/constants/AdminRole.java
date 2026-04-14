@@ -35,6 +35,9 @@ import java.util.stream.Collectors;
  *   <li>{@link #SUPPORT_ADMIN}: 고객센터(공지/FAQ/티켓/도움말) 전담.</li>
  *   <li>{@link #DATA_ADMIN}: 영화 데이터 마스터·장르·파이프라인 전담.</li>
  *   <li>{@link #AI_OPS_ADMIN}: AI 운영(퀴즈 생성/채팅 로그/모델 버전) 전담.</li>
+ *   <li>{@link #STATS_ADMIN}: 통계/분석 전담 (대시보드/통계 탭 조회 전용).
+ *       2026-04-14 추가 — 운영팀에서 쓰기 권한 없이 데이터만 확인해야 하는
+ *       분석가/기획자 롤을 분리하기 위함.</li>
  * </ul>
  *
  * <h3>Spring Security 강제 적용은 별도 이슈</h3>
@@ -65,7 +68,17 @@ public enum AdminRole {
     DATA_ADMIN("DATA_ADMIN", "데이터 관리자", "영화 마스터·장르·데이터 파이프라인"),
 
     /** AI 운영 관리자 — 퀴즈 생성/채팅 로그/모델 버전 */
-    AI_OPS_ADMIN("AI_OPS_ADMIN", "AI 운영 관리자", "AI 퀴즈 생성·채팅 로그·모델 버전 관리");
+    AI_OPS_ADMIN("AI_OPS_ADMIN", "AI 운영 관리자", "AI 퀴즈 생성·채팅 로그·모델 버전 관리"),
+
+    /**
+     * 통계/분석 관리자 — 대시보드/통계 탭 조회 전용 (2026-04-14 추가).
+     *
+     * <p>쓰기 권한이 필요 없는 분석가/기획자 롤. 통계 12탭(개요·추이·추천·검색·행동·
+     * 리텐션·매출·구독·포인트 경제·AI 서비스·커뮤니티·참여도·콘텐츠 성과·전환 퍼널·
+     * 이탈 위험) 에 대한 접근만 허가하는 것이 권고 범위다. 실제 엔드포인트 레벨
+     * 권한 차단은 {@code SecurityConfig @PreAuthorize} 적용 이후부터 강제된다.</p>
+     */
+    STATS_ADMIN("STATS_ADMIN", "통계/분석 관리자", "대시보드·통계·분석 탭 조회 전용");
 
     /** DB 에 저장되는 문자열 값 (정규화된 대문자 코드) */
     private final String code;
