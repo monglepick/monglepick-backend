@@ -461,21 +461,40 @@ public class PaymentService {
     // ──────────────────────────────────────────────
 
     /**
+     * 사용자용 "결제 내역" 화면에 노출할 상태 집합.
+     *
+     * <p>PG 표준 플로우에 따라 {@code createOrder} 호출 시점에 PENDING 레코드가 즉시
+     * DB 에 저장되고, 결제 창에서 이탈/실패한 주문은 스케줄러가 FAILED 로 전환한다.
+     * 하지만 사용자 관점에서는 "결제 시도/이탈/실패"는 노이즈이므로
+     * 실제 금전 이동이 발생한 COMPLETED / REFUNDED 만 노출한다.</p>
+     *
+     * <p>PENDING / FAILED / COMPENSATION_FAILED 는 관리자 화면 전용이며, 관리자
+     * 리포지토리 경로({@link PaymentOrderRepository#findByUserIdOrderByCreatedAtDesc})
+     * 를 통해 모든 상태가 그대로 보인다.</p>
+     */
+    private static final List<PaymentOrder.OrderStatus> USER_VISIBLE_ORDER_STATUSES =
+            List.of(PaymentOrder.OrderStatus.COMPLETED, PaymentOrder.OrderStatus.REFUNDED);
+
+    /**
      * 사용자의 결제 주문 내역을 페이징으로 조회한다.
      *
-     * <p>모든 상태(PENDING, COMPLETED, FAILED, REFUNDED)의 주문이 포함되며,
-     * 생성 시각 기준 최신순으로 정렬된다.
-     * 클라이언트의 "결제 내역" 화면에서 사용된다.</p>
+     * <p>사용자용 마이페이지 "결제 내역" 전용 — 실제 결제가 완료된 건(COMPLETED)과
+     * 환불된 건(REFUNDED) 만 반환한다. 결제 시도 후 이탈해 PENDING/FAILED 상태로
+     * 남은 주문은 DB 에는 유지되지만 이 API 결과에서는 제외된다.</p>
+     *
+     * <p>관리자 화면에서는 별도의 관리자 전용 리포지토리 경로를 사용해 모든 상태를
+     * 조회한다(감사/전환율 분석 목적). 본 메서드는 사용자 화면만 담당한다.</p>
      *
      * @param userId   사용자 ID
      * @param pageable 페이징 정보 (page, size)
-     * @return 결제 주문 내역 페이지
+     * @return 결제 주문 내역 페이지 (COMPLETED/REFUNDED 만)
      */
     public Page<OrderHistoryResponse> getOrderHistory(String userId, Pageable pageable) {
-        log.debug("결제 내역 조회: userId={}, page={}, size={}",
+        log.debug("결제 내역 조회(사용자용, COMPLETED/REFUNDED): userId={}, page={}, size={}",
                 userId, pageable.getPageNumber(), pageable.getPageSize());
 
-        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
+        return orderRepository
+                .findByUserIdAndStatusInOrderByCreatedAtDesc(userId, USER_VISIBLE_ORDER_STATUSES, pageable)
                 .map(this::toHistoryResponse);
     }
 

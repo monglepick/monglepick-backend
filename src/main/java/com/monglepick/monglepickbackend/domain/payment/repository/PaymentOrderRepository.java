@@ -71,6 +71,29 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, Stri
     Page<PaymentOrder> findByUserIdOrderByCreatedAtDesc(String userId, Pageable pageable);
 
     /**
+     * 사용자의 결제 이력을 특정 상태 집합만 포함하여 최신순으로 페이징 조회한다.
+     *
+     * <p>사용자용 마이페이지 "결제 내역" 화면 전용 쿼리다.
+     * PG 표준 플로우에 따라 {@code createOrder}가 호출되는 즉시 PENDING 레코드가 DB에
+     * 저장되지만, 사용자가 결제창에서 이탈하거나 결제가 실패한 경우 FAILED 레코드까지
+     * 사용자에게 노출되면 "결제 내역에 실패가 잔뜩 쌓여있다"는 혼란이 발생한다.</p>
+     *
+     * <p>따라서 사용자용 조회에서는 보통 {@code [COMPLETED, REFUNDED]} 만 허용하고,
+     * PENDING/FAILED/COMPENSATION_FAILED 는 관리자 화면 전용으로 격리한다.
+     * 관리자 조회는 기존 {@link #findByUserIdOrderByCreatedAtDesc} 를 그대로 사용하여
+     * 모든 상태가 보이도록 유지한다.</p>
+     *
+     * @param userId   사용자 ID
+     * @param statuses 포함할 상태 집합 (예: [COMPLETED, REFUNDED])
+     * @param pageable 페이징 정보
+     * @return 해당 상태만 포함된 결제 주문 페이지 (최신순)
+     */
+    Page<PaymentOrder> findByUserIdAndStatusInOrderByCreatedAtDesc(
+            String userId,
+            List<PaymentOrder.OrderStatus> statuses,
+            Pageable pageable);
+
+    /**
      * 멱등키로 기존 주문을 조회한다.
      *
      * <p>클라이언트가 동일한 Idempotency-Key로 재요청한 경우
