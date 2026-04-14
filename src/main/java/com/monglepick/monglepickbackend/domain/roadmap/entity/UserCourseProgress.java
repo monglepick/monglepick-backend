@@ -150,6 +150,16 @@ public class UserCourseProgress extends BaseAuditEntity {
     @Builder.Default
     private boolean rewardGranted = false;
 
+    /**
+     * 코스 완주 데드라인 시각 (nullable).
+     *
+     * <p>코스 시작 시 {@link RoadmapCourse#getDeadlineDays()}가 설정된 경우
+     * {@code startedAt + deadlineDays 일}로 계산되어 저장된다.
+     * null이면 데드라인 없음 (무기한 진행 가능).</p>
+     */
+    @Column(name = "deadline_at")
+    private LocalDateTime deadlineAt;
+
     // ─────────────────────────────────────────────
     // 도메인 메서드
     // ─────────────────────────────────────────────

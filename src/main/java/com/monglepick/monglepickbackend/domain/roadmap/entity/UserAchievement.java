@@ -88,6 +88,15 @@ public class UserAchievement extends BaseAuditEntity {
     private String userId;
 
     /**
+     * 업적 유형 코드 — 레거시 VARCHAR 컬럼 호환용 (DB NOT NULL 제약 유지).
+     *
+     * <p>achievement_type_id FK 전환 이전에 존재하던 컬럼이 DB에 NOT NULL로 남아 있어
+     * INSERT 시 값을 채워줘야 한다. {@link AchievementType#getAchievementCode()}와 동일한 값을 넣는다.</p>
+     */
+    @Column(name = "achievement_type", length = 50, nullable = false)
+    private String achievementTypeCode;
+
+    /**
      * 업적 유형 참조 (LAZY) — achievement_types 마스터 테이블 FK.
      *
      * <p>기존 VARCHAR(50) 문자열 컬럼에서 @ManyToOne FK 참조로 변경.

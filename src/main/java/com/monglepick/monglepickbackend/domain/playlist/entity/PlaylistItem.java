@@ -15,6 +15,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 
@@ -98,13 +99,16 @@ public class PlaylistItem extends BaseAuditEntity {
 
     /** 영화 제목 — DB 컬럼 아님, JOIN movies 조회 시 MyBatis가 주입 */
     @Transient
+    @Setter
     private String title;
 
     /** 포스터 이미지 경로 — DB 컬럼 아님, JOIN movies 조회 시 MyBatis가 주입 */
     @Transient
+    @Setter
     private String posterPath;
 
     /** 평균 평점 — DB 컬럼 아님, JOIN movies 조회 시 MyBatis가 주입 */
     @Transient
+    @Setter
     private Double rating;
 }

@@ -157,6 +157,7 @@ public class AdminRoadmapCourseService {
                 .movieCount(request.movieIds().size())
                 .difficulty(difficulty)
                 .quizEnabled(Boolean.TRUE.equals(request.quizEnabled()))
+                .deadlineDays(request.deadlineDays())
                 .isActive(true)
                 .build();
 
@@ -189,7 +190,8 @@ public class AdminRoadmapCourseService {
                 movieIdsJson,
                 request.movieIds().size(),
                 difficulty,
-                Boolean.TRUE.equals(request.quizEnabled())
+                Boolean.TRUE.equals(request.quizEnabled()),
+                request.deadlineDays()
         );
 
         log.info("[관리자] 도장깨기 코스 수정 — id={}, title={}, movieCount={}",
@@ -297,6 +299,7 @@ public class AdminRoadmapCourseService {
                 entity.getDifficulty() != null ? entity.getDifficulty().name() : "beginner",
                 Boolean.TRUE.equals(entity.getQuizEnabled()),
                 Boolean.TRUE.equals(entity.getIsActive()),
+                entity.getDeadlineDays(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt()
         );

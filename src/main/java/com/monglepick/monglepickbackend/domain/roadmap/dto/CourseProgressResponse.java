@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
  * @param status          진행 상태 ({@link CourseProgressStatus})
  * @param completed       완주 여부 (status=COMPLETED과 동일하나 편의상 제공)
  * @param completedAt     완주 시각 (completed=false이면 null)
+ * @param deadlineAt      완주 데드라인 시각 (null이면 데드라인 없음)
  */
 public record CourseProgressResponse(
         String courseId,
@@ -28,7 +29,8 @@ public record CourseProgressResponse(
         BigDecimal progressPercent,
         CourseProgressStatus status,
         boolean completed,
-        LocalDateTime completedAt
+        LocalDateTime completedAt,
+        LocalDateTime deadlineAt
 ) {
     /**
      * UserCourseProgress 엔티티로부터 DTO를 생성한다.
@@ -44,7 +46,8 @@ public record CourseProgressResponse(
                 progress.getProgressPercent(),
                 progress.getStatus(),
                 progress.getStatus() == CourseProgressStatus.COMPLETED,
-                progress.getCompletedAt()
+                progress.getCompletedAt(),
+                progress.getDeadlineAt()
         );
     }
 }

@@ -119,6 +119,7 @@ public class AchievementService {
         // ③ UserAchievement INSERT — 달성 기록 저장
         UserAchievement achievement = UserAchievement.builder()
                 .userId(userId)
+                .achievementTypeCode(type.getAchievementCode()) // 레거시 NOT NULL 컬럼 호환
                 .achievementType(type)
                 .achievementKey(achievementKey)
                 .achievedAt(LocalDateTime.now())

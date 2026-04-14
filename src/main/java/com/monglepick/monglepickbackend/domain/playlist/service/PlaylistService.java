@@ -429,7 +429,7 @@ public class PlaylistService {
                     "이미 가져온 플레이리스트입니다");
         }
 
-        // 5) 새 플레이리스트 생성 (비공개, 이름에 "(가져옴)" 접미사)
+        // 5) 새 플레이리스트 생성 (비공개, 이름에 "(가져옴)" 접미사, isImported=true)
         Playlist newPlaylist = Playlist.builder()
                 .userId(userId)
                 .playlistName(source.getPlaylistName() + " (가져옴)")
@@ -437,6 +437,7 @@ public class PlaylistService {
                 .isPublic(false)
                 .coverImageUrl(source.getCoverImageUrl())
                 .likeCount(0)
+                .isImported(true)
                 .build();
         playlistMapper.insertPlaylist(newPlaylist);
 

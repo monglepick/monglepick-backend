@@ -66,7 +66,13 @@ public class AdminRoadmapCourseDto {
              */
             String difficulty,
 
-            Boolean quizEnabled
+            Boolean quizEnabled,
+
+            /**
+             * 완주 데드라인 (일 수, nullable).
+             * null이면 데드라인 없음. 양수이면 코스 시작 후 N일 이내 완주 필요.
+             */
+            Integer deadlineDays
     ) {}
 
     /**
@@ -89,7 +95,13 @@ public class AdminRoadmapCourseDto {
 
             String difficulty,
 
-            Boolean quizEnabled
+            Boolean quizEnabled,
+
+            /**
+             * 완주 데드라인 (일 수, nullable).
+             * null이면 데드라인 없음. 양수이면 코스 시작 후 N일 이내 완주 필요.
+             */
+            Integer deadlineDays
     ) {}
 
     /**
@@ -149,6 +161,7 @@ public class AdminRoadmapCourseDto {
             String difficulty,
             Boolean quizEnabled,
             Boolean isActive,
+            Integer deadlineDays,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {}

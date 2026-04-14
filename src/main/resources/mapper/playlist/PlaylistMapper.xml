@@ -25,6 +25,7 @@
         <result property="isPublic" column="is_public"/>
         <result property="coverImageUrl" column="cover_image_url"/>
         <result property="likeCount" column="like_count"/>
+        <result property="isImported" column="is_imported"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
         <result property="createdBy" column="created_by"/>
@@ -64,7 +65,7 @@
 
     <sql id="playlistColumns">
         playlist_id, user_id, playlist_name, description, is_public,
-        cover_image_url, like_count,
+        cover_image_url, like_count, is_imported,
         created_at, updated_at, created_by, updated_by
     </sql>
 
@@ -109,11 +110,11 @@
     <insert id="insertPlaylist" useGeneratedKeys="true" keyProperty="playlistId">
         INSERT INTO playlist (
             user_id, playlist_name, description, is_public,
-            cover_image_url, like_count,
+            cover_image_url, like_count, is_imported,
             created_at, updated_at, created_by, updated_by
         ) VALUES (
             #{userId}, #{playlistName}, #{description}, #{isPublic},
-            #{coverImageUrl}, #{likeCount},
+            #{coverImageUrl}, #{likeCount}, #{isImported},
             NOW(), NOW(), #{createdBy}, #{updatedBy}
         )
     </insert>
@@ -157,7 +158,7 @@
                pi.created_at, pi.updated_at,
                m.title AS movie_title, m.poster_path, m.rating
         FROM playlist_item pi
-        LEFT JOIN movies m ON pi.movie_id = m.movie_id
+        LEFT JOIN movies m ON pi.movie_id = m.movie_id COLLATE utf8mb4_unicode_ci
         WHERE pi.playlist_id = #{playlistId}
         ORDER BY pi.sort_order ASC, pi.added_at ASC
     </select>

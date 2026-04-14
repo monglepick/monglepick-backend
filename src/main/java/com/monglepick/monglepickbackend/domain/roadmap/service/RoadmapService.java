@@ -3,13 +3,18 @@ package com.monglepick.monglepickbackend.domain.roadmap.service;
 // Jackson 3.x: com.fasterxml.jackson → tools.jackson 패키지 경로 변경 (Spring Boot 4.x)
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
+import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
+import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseProgressResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseDetailResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseListResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseStartResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.MovieInfo;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
+import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.RoadmapCourse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
+import com.monglepick.monglepickbackend.domain.roadmap.repository.CourseReviewRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.RoadmapCourseRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
@@ -62,6 +67,12 @@ public class RoadmapService {
     /** 코스 레포지토리 — roadmap_courses 테이블 접근 */
     private final RoadmapCourseRepository courseRepo;
 
+    /** 영화 레포지토리 — 코스 상세 조회 시 영화 제목/포스터 조회에 사용 */
+    private final MovieRepository movieRepository;
+
+    /** 도장깨기 리뷰 레포지토리 — course_review 테이블 저장/조회 */
+    private final CourseReviewRepository courseReviewRepository;
+
     /** 리워드 서비스 — 완주 포인트 지급 위임 */
     private final RewardService rewardService;
 
@@ -109,15 +120,23 @@ public class RoadmapService {
         UserCourseProgress progress = progressRepo
                 .findByUserIdAndCourseId(userId, courseId)
                 .orElseGet(() -> {
-                    // 첫 번째 인증 — 진행 레코드 신규 생성
+                    // 첫 번째 인증 — 코스 조회하여 deadlineDays 계산 후 진행 레코드 신규 생성
+                    Integer deadlineDays = courseRepo.findByCourseId(courseId)
+                            .map(c -> c.getDeadlineDays())
+                            .orElse(null);
+                    LocalDateTime startedAt = LocalDateTime.now();
+                    LocalDateTime deadlineAt = (deadlineDays != null && deadlineDays > 0)
+                            ? startedAt.plusDays(deadlineDays)
+                            : null;
                     UserCourseProgress newProgress = UserCourseProgress.builder()
                             .userId(userId)
                             .courseId(courseId)
                             .totalMovies(totalMovies)
-                            .startedAt(LocalDateTime.now())
+                            .startedAt(startedAt)
+                            .deadlineAt(deadlineAt)
                             .build();
-                    log.info("코스 진행 시작: userId={}, courseId={}, totalMovies={}",
-                            userId, courseId, totalMovies);
+                    log.info("코스 진행 시작: userId={}, courseId={}, totalMovies={}, deadlineAt={}",
+                            userId, courseId, totalMovies, deadlineAt);
                     return progressRepo.save(newProgress);
                 });
 
@@ -182,8 +201,12 @@ public class RoadmapService {
         return courses.stream()
                 .filter(course -> Boolean.TRUE.equals(course.getIsActive()))
                 .map(course -> {
-                    double progress = resolveProgressPercent(userId, course.getCourseId());
-                    return CourseListResponse.from(course, progress);
+                    int movieCount = course.getMovieCount() != null ? course.getMovieCount() : 0;
+                    double progress = resolveProgressPercent(userId, course.getCourseId(), movieCount);
+                    boolean started = userId != null && progressRepo
+                            .findByUserIdAndCourseId(userId, course.getCourseId())
+                            .isPresent();
+                    return CourseListResponse.from(course, progress, started);
                 })
                 .toList();
     }
@@ -209,6 +232,19 @@ public class RoadmapService {
         // movieIds JSON 컬럼 파싱 (파싱 실패 시 빈 목록으로 fallback)
         List<String> movieIdList = parseMovieIds(course.getMovieIds());
 
+        // 영화 상세 조회 — movieId 목록으로 Movie 엔티티를 일괄 조회하여 순서 보존
+        List<Movie> movieEntities = movieIdList.isEmpty()
+                ? Collections.emptyList()
+                : movieRepository.findAllByMovieIdIn(movieIdList);
+
+        // movieId 기준 Map으로 변환 후 원본 순서대로 MovieInfo 목록 구성
+        java.util.Map<String, Movie> movieMap = new java.util.LinkedHashMap<>();
+        movieEntities.forEach(m -> movieMap.put(m.getMovieId(), m));
+        List<MovieInfo> movies = movieIdList.stream()
+                .filter(movieMap::containsKey)
+                .map(id -> MovieInfo.from(movieMap.get(id)))
+                .toList();
+
         // 사용자 진행 레코드 조회
         Optional<UserCourseProgress> progressOpt = (userId != null)
                 ? progressRepo.findByUserIdAndCourseId(userId, courseId)
@@ -218,8 +254,18 @@ public class RoadmapService {
         double progressPercent = progressOpt
                 .map(p -> p.getProgressPercent().doubleValue())
                 .orElse(0.0);
+        LocalDateTime deadlineAt = progressOpt
+                .map(UserCourseProgress::getDeadlineAt)
+                .orElse(null);
 
-        return CourseDetailResponse.from(course, movieIdList, started, progressPercent);
+        // 완료된 영화 ID 목록 — course_review 테이블에서 userId/courseId 기준 조회
+        List<String> completedMovieIds = (userId != null)
+                ? courseReviewRepository.findAllByCourseIdAndUserId(courseId, userId).stream()
+                        .map(com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview::getMovieId)
+                        .toList()
+                : Collections.emptyList();
+
+        return CourseDetailResponse.from(course, movies, started, progressPercent, completedMovieIds, deadlineAt);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -245,28 +291,33 @@ public class RoadmapService {
                         "존재하지 않는 코스입니다: courseId=" + courseId));
 
         // 이미 진행 레코드가 있으면 멱등 응답 반환 (INSERT 생략)
-        boolean alreadyStarted = progressRepo
-                .findByUserIdAndCourseId(userId, courseId)
-                .isPresent();
-
-        if (alreadyStarted) {
+        Optional<UserCourseProgress> existing = progressRepo.findByUserIdAndCourseId(userId, courseId);
+        if (existing.isPresent()) {
             log.debug("코스 이미 시작됨 (멱등 응답): userId={}, courseId={}", userId, courseId);
-            return new CourseStartResponse(courseId, CourseProgressStatus.IN_PROGRESS.name());
+            return new CourseStartResponse(courseId, CourseProgressStatus.IN_PROGRESS.name(),
+                    existing.get().getDeadlineAt());
         }
 
-        // 진행 레코드 신규 생성 — verifiedMovies=0, status=IN_PROGRESS
+        // 진행 레코드 신규 생성 — deadlineAt = startedAt + deadlineDays
+        LocalDateTime startedAt = LocalDateTime.now();
+        Integer deadlineDays = course.getDeadlineDays();
+        LocalDateTime deadlineAt = (deadlineDays != null && deadlineDays > 0)
+                ? startedAt.plusDays(deadlineDays)
+                : null;
+
         UserCourseProgress progress = UserCourseProgress.builder()
                 .userId(userId)
                 .courseId(courseId)
                 .totalMovies(course.getMovieCount() != null ? course.getMovieCount() : 0)
-                .startedAt(LocalDateTime.now())
+                .startedAt(startedAt)
+                .deadlineAt(deadlineAt)
                 .build();
         progressRepo.save(progress);
 
-        log.info("코스 시작: userId={}, courseId={}, totalMovies={}",
-                userId, courseId, progress.getTotalMovies());
+        log.info("코스 시작: userId={}, courseId={}, totalMovies={}, deadlineAt={}",
+                userId, courseId, progress.getTotalMovies(), deadlineAt);
 
-        return new CourseStartResponse(courseId, CourseProgressStatus.IN_PROGRESS.name());
+        return new CourseStartResponse(courseId, CourseProgressStatus.IN_PROGRESS.name(), deadlineAt);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -292,7 +343,8 @@ public class RoadmapService {
      * @throws BusinessException {@link ErrorCode#NOT_FOUND} 코스가 존재하지 않을 때
      */
     @Transactional
-    public CourseProgressResponse completeMovie(String courseId, String movieId, String userId) {
+    public CourseProgressResponse completeMovie(String courseId, String movieId,
+                                                String userId, String reviewText) {
         // 코스 존재 확인 (totalMovies, defaultRewardPoints 조회 목적)
         RoadmapCourse course = courseRepo.findByCourseId(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
@@ -303,6 +355,35 @@ public class RoadmapService {
         int rewardPoints = 100;
 
         log.info("영화 완료 처리: userId={}, courseId={}, movieId={}", userId, courseId, movieId);
+
+        // 이미 인증된 영화이면 verifyMovie 호출 생략 (중복 카운트 방지)
+        boolean alreadyReviewed = courseReviewRepository
+                .findByCourseIdAndMovieIdAndUserId(courseId, movieId, userId)
+                .isPresent();
+
+        if (alreadyReviewed) {
+            log.debug("이미 인증된 영화 — verifyMovie 생략: courseId={}, movieId={}, userId={}",
+                    courseId, movieId, userId);
+            // 현재 진행 현황만 반환 (변경 없음)
+            return progressRepo.findByUserIdAndCourseId(userId, courseId)
+                    .map(CourseProgressResponse::from)
+                    .orElseGet(() -> new CourseProgressResponse(
+                            courseId, totalMovies, 0,
+                            java.math.BigDecimal.ZERO,
+                            com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus.IN_PROGRESS,
+                            false, null, null));
+        }
+
+        // 신규 리뷰 저장
+        CourseReview newReview = CourseReview.builder()
+                .courseId(courseId)
+                .movieId(movieId)
+                .userId(userId)
+                .reviewText((reviewText != null && !reviewText.isBlank()) ? reviewText : null)
+                .build();
+        courseReviewRepository.save(newReview);
+        log.info("도장깨기 리뷰 저장 완료 — courseId={}, movieId={}, userId={}, hasText={}",
+                courseId, movieId, userId, reviewText != null && !reviewText.isBlank());
 
         // verifyMovie에 위임 — 진행 레코드 생성/업데이트 + 완주 판정 + 리워드 지급
         return verifyMovie(userId, courseId, totalMovies, rewardPoints);
@@ -315,19 +396,20 @@ public class RoadmapService {
     /**
      * 특정 사용자의 특정 코스 진행률(%)을 반환한다.
      *
-     * <p>userId가 null이거나 진행 레코드가 없으면 0.0을 반환한다.</p>
+     * <p>course_review 테이블의 실제 인증 완료 영화 수를 기준으로 계산하여
+     * 코스 상세 페이지의 진행률과 동일한 값을 반환한다.</p>
      *
-     * @param userId   사용자 ID (null 허용)
-     * @param courseId 코스 슬러그
+     * @param userId     사용자 ID (null 허용)
+     * @param courseId   코스 슬러그
+     * @param movieCount 코스 내 총 영화 수
      * @return 진행률 % (0.0 ~ 100.0)
      */
-    private double resolveProgressPercent(@Nullable String userId, String courseId) {
-        if (userId == null) {
+    private double resolveProgressPercent(@Nullable String userId, String courseId, int movieCount) {
+        if (userId == null || movieCount == 0) {
             return 0.0;
         }
-        return progressRepo.findByUserIdAndCourseId(userId, courseId)
-                .map(p -> p.getProgressPercent().doubleValue())
-                .orElse(0.0);
+        long completedCount = courseReviewRepository.countByCourseIdAndUserId(courseId, userId);
+        return completedCount == 0 ? 0.0 : (double) completedCount / movieCount * 100.0;
     }
 
     /**

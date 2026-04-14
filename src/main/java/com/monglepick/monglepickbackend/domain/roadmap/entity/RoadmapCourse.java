@@ -123,6 +123,17 @@ public class RoadmapCourse extends BaseAuditEntity {
     @Builder.Default
     private Boolean isActive = true;
 
+    /**
+     * 코스 완주 데드라인 (일 수, nullable).
+     *
+     * <p>null이면 데드라인 없음 (무기한 진행 가능).
+     * 양수이면 코스 시작 후 N일 이내에 완주해야 한다.
+     * 예: 30 → 시작 후 30일 이내 완주.
+     * 사용자별 실제 마감 시각은 {@code UserCourseProgress.deadlineAt}에 저장된다.</p>
+     */
+    @Column(name = "deadline_days")
+    private Integer deadlineDays;
+
     /* createdBy 수동 필드 제거 — BaseAuditEntity에서 @CreatedBy로 자동 관리 */
     /* created_at, updated_at → BaseTimeEntity에서 상속 */
     /* created_by, updated_by → BaseAuditEntity에서 상속 */
@@ -147,7 +158,8 @@ public class RoadmapCourse extends BaseAuditEntity {
      */
     public void updateInfo(String title, String description, String theme,
                            String movieIds, Integer movieCount,
-                           Difficulty difficulty, Boolean quizEnabled) {
+                           Difficulty difficulty, Boolean quizEnabled,
+                           Integer deadlineDays) {
         this.title = title;
         this.description = description;
         this.theme = theme;
@@ -155,6 +167,7 @@ public class RoadmapCourse extends BaseAuditEntity {
         this.movieCount = movieCount;
         this.difficulty = difficulty;
         this.quizEnabled = quizEnabled;
+        this.deadlineDays = deadlineDays;
     }
 
     /**

@@ -92,6 +92,15 @@ public class Playlist extends BaseAuditEntity {
     @Builder.Default
     private Integer likeCount = 0;
 
+    /**
+     * 다른 사용자 플레이리스트를 가져온(복사한) 경우 true.
+     * 기본값: false (직접 생성).
+     * true이면 공개/비공개 토글을 노출하지 않는다.
+     */
+    @Column(name = "is_imported")
+    @Builder.Default
+    private Boolean isImported = false;
+
     // ─────────────────────────────────────────────
     // 도메인 메서드 (setter 대신 의미 있는 메서드명 사용)
     // ─────────────────────────────────────────────

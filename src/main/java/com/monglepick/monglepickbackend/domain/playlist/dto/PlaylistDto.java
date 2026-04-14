@@ -168,6 +168,9 @@ public class PlaylistDto {
             /** 커버 이미지 URL (없으면 null) */
             String coverImageUrl,
 
+            /** 다른 사용자 플레이리스트를 가져온(복사한) 경우 true */
+            Boolean isImported,
+
             /** 생성 시각 */
             LocalDateTime createdAt
 
@@ -186,6 +189,7 @@ public class PlaylistDto {
                     entity.getIsPublic(),
                     entity.getLikeCount(),
                     entity.getCoverImageUrl(),
+                    Boolean.TRUE.equals(entity.getIsImported()),
                     entity.getCreatedAt()
             );
         }
@@ -229,6 +233,9 @@ public class PlaylistDto {
             /** 포함된 영화 아이템 목록 (sort_order 오름차순) */
             List<PlaylistItemResponse> items,
 
+            /** 다른 사용자 플레이리스트를 가져온(복사한) 경우 true */
+            Boolean isImported,
+
             /** 생성 시각 */
             LocalDateTime createdAt
 
@@ -249,6 +256,7 @@ public class PlaylistDto {
                     entity.getLikeCount(),
                     entity.getCoverImageUrl(),
                     itemDtos,
+                    Boolean.TRUE.equals(entity.getIsImported()),
                     entity.getCreatedAt()
             );
         }

@@ -20,9 +20,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
 
 import java.security.Principal;
 import java.util.List;
@@ -204,12 +207,15 @@ public class RoadmapController extends BaseController {
             @Parameter(description = "완료 처리할 영화 ID", required = true, example = "12345")
             @PathVariable String movieId,
 
+            @RequestBody(required = false) Map<String, String> body,
+
             Principal principal
     ) {
         String userId = resolveUserId(principal);
-        log.info("영화 완료 요청: userId={}, courseId={}, movieId={}", userId, courseId, movieId);
+        String reviewText = (body != null) ? body.get("review") : null;
+        log.info("영화 완료 요청: userId={}, courseId={}, movieId={}, hasReview={}", userId, courseId, movieId, reviewText != null);
 
-        CourseProgressResponse response = roadmapService.completeMovie(courseId, movieId, userId);
+        CourseProgressResponse response = roadmapService.completeMovie(courseId, movieId, userId, reviewText);
         return ResponseEntity.ok(response);
     }
 
