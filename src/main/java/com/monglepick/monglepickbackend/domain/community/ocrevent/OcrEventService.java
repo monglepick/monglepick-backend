@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -77,6 +78,52 @@ public class OcrEventService {
         return events.stream()
                 .map(e -> toPublicResponse(e, movieMap.get(e.getMovieId())))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 특정 영화의 진행 중 OCR 인증 이벤트 1건 조회 (2026-04-14 신규).
+     *
+     * <p>영화 상세 페이지 상단에 "실관람 인증 진행중" 배너를 띄우기 위해 호출한다.
+     * 추천·검색·찜 등 어디서든 영화 상세로 진입했을 때 배너 노출 여부를 결정한다.</p>
+     *
+     * <p>반환 조건은 {@link #getPublicEvents()}와 동일하다:
+     * {@code status IN (ACTIVE, READY)} AND {@code endDate > now()}.
+     * 한 영화에 동시에 여러 이벤트가 있다면 {@link OcrEventRepository#findActiveByMovieId}
+     * 의 정렬 규칙(ACTIVE 우선 → 종료 임박) 상위 1건만 반환한다.</p>
+     *
+     * @param movieId 영화 ID (movies.movie_id)
+     * @return 활성 이벤트가 있으면 DTO, 없으면 {@link Optional#empty()}
+     */
+    public Optional<OcrEventPublicResponse> getActiveEventByMovie(String movieId) {
+        if (movieId == null || movieId.isBlank()) {
+            return Optional.empty();
+        }
+        LocalDateTime now = LocalDateTime.now();
+
+        // 정렬된 리스트에서 상위 1건만 필요 — LIMIT 1 대신 stream().findFirst() 로 구현
+        List<OcrEvent> events = ocrEventRepository.findActiveByMovieId(movieId, PUBLIC_STATUSES, now);
+        if (events.isEmpty()) {
+            return Optional.empty();
+        }
+        OcrEvent event = events.get(0);
+
+        // 영화 메타(title/posterPath) 단건 조회 — 배너 표시에는 필요하지 않지만 일관성을 위해 포함
+        Movie movie = movieRepository.findById(event.getMovieId()).orElse(null);
+        return Optional.of(toPublicResponse(event, movie));
+    }
+
+    /**
+     * 관리자 서비스와 공용되는 엔티티 조회 헬퍼.
+     *
+     * <p>유저 인증 제출 서비스({@code UserVerificationService})가 이벤트 존재성과
+     * 라이프사이클(ACTIVE/기간 내)을 검증할 때 사용한다. readOnly 가 아닌 작업
+     * 컨텍스트에서 호출될 수 있으므로 propagation 기본값을 따른다.</p>
+     *
+     * @param eventId 이벤트 PK
+     * @return 이벤트 엔티티 (없으면 {@link Optional#empty()})
+     */
+    public Optional<OcrEvent> findEntityById(Long eventId) {
+        return ocrEventRepository.findById(eventId);
     }
 
     /**

@@ -223,6 +223,12 @@ public enum ErrorCode {
     /** 관리자 — OCR 이벤트 시작/종료일이 잘못된 경우 (end &lt; start). */
     INVALID_OCR_EVENT_PERIOD(HttpStatus.BAD_REQUEST, "OCR002", "이벤트 종료일은 시작일 이후여야 합니다"),
 
+    /** 유저 인증 — 해당 이벤트가 현재 진행 중이 아니거나 기간이 종료됨. */
+    OCR_EVENT_NOT_ACTIVE(HttpStatus.BAD_REQUEST, "OCR003", "현재 진행 중인 이벤트가 아닙니다"),
+
+    /** 유저 인증 — 같은 이벤트에 중복 인증 제출 시도. */
+    DUPLICATE_OCR_VERIFICATION(HttpStatus.CONFLICT, "OCR004", "이미 해당 이벤트에 인증을 제출했습니다"),
+
     /** 관리자 — 인기 검색어 키워드를 찾을 수 없음. */
     POPULAR_SEARCH_NOT_FOUND(HttpStatus.NOT_FOUND, "PSK001", "인기 검색어 항목을 찾을 수 없습니다"),
 

@@ -117,26 +117,34 @@ public class RoadmapService {
     public CourseProgressResponse verifyMovie(String userId, String courseId,
                                               int totalMovies, int rewardPoints) {
         // ① 기존 진행 레코드 조회 or 신규 생성
+        //    신규 생성 시 totalMovies는 반드시 RoadmapCourse.movieCount에서 가져온다.
+        //    파라미터로 넘어온 totalMovies는 레거시 /verify 엔드포인트 호환용이며,
+        //    0이거나 신뢰할 수 없으므로 코스 DB 조회 값을 우선 사용한다.
         UserCourseProgress progress = progressRepo
                 .findByUserIdAndCourseId(userId, courseId)
                 .orElseGet(() -> {
-                    // 첫 번째 인증 — 코스 조회하여 deadlineDays 계산 후 진행 레코드 신규 생성
-                    Integer deadlineDays = courseRepo.findByCourseId(courseId)
-                            .map(c -> c.getDeadlineDays())
-                            .orElse(null);
+                    // 코스 조회 — movieCount(정확한 totalMovies)와 deadlineDays 확보
+                    RoadmapCourse course = courseRepo.findByCourseId(courseId)
+                            .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
+                                    "존재하지 않는 코스입니다: courseId=" + courseId));
+                    // DB의 movieCount를 사용; 파라미터 totalMovies는 0이거나 틀릴 수 있음
+                    int actualTotalMovies = (course.getMovieCount() != null && course.getMovieCount() > 0)
+                            ? course.getMovieCount()
+                            : totalMovies;
                     LocalDateTime startedAt = LocalDateTime.now();
+                    Integer deadlineDays = course.getDeadlineDays();
                     LocalDateTime deadlineAt = (deadlineDays != null && deadlineDays > 0)
                             ? startedAt.plusDays(deadlineDays)
                             : null;
                     UserCourseProgress newProgress = UserCourseProgress.builder()
                             .userId(userId)
                             .courseId(courseId)
-                            .totalMovies(totalMovies)
+                            .totalMovies(actualTotalMovies)
                             .startedAt(startedAt)
                             .deadlineAt(deadlineAt)
                             .build();
                     log.info("코스 진행 시작: userId={}, courseId={}, totalMovies={}, deadlineAt={}",
-                            userId, courseId, totalMovies, deadlineAt);
+                            userId, courseId, actualTotalMovies, deadlineAt);
                     return progressRepo.save(newProgress);
                 });
 
@@ -151,8 +159,8 @@ public class RoadmapService {
         log.debug("영화 인증: userId={}, courseId={}, verifiedMovies={}/{}",
                 userId, courseId, progress.getVerifiedMovies(), progress.getTotalMovies());
 
-        // ④ 완주 판정
-        if (progress.getVerifiedMovies() >= progress.getTotalMovies()) {
+        // ④ 완주 판정 — totalMovies > 0 보장 후 비교 (0이면 완주 조건 미충족으로 처리)
+        if (progress.getTotalMovies() > 0 && progress.getVerifiedMovies() >= progress.getTotalMovies()) {
             handleCourseComplete(userId, courseId, rewardPoints, progress);
         }
 

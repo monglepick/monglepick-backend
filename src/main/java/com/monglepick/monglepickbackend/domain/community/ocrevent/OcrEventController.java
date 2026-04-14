@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -48,5 +49,29 @@ public class OcrEventController {
         List<OcrEventPublicResponse> events = ocrEventService.getPublicEvents();
         log.debug("[OCR 이벤트] 공개 목록 조회 — count={}", events.size());
         return ResponseEntity.ok(ApiResponse.ok(events));
+    }
+
+    /**
+     * 특정 영화의 진행 중 OCR 인증 이벤트 조회 (2026-04-14 신규).
+     *
+     * <p>영화 상세 페이지 상단 "실관람 인증 진행중" 배너용. AI 추천 / 검색 /
+     * 커뮤니티 등 어디서 진입했든 현재 해당 영화가 OCR 이벤트 대상인지
+     * 즉시 확인할 수 있도록 단건 조회 EP 를 별도로 제공한다.</p>
+     *
+     * <p>이벤트가 없거나 종료된 경우 {@code data: null} 로 반환한다(200 OK).
+     * 클라이언트는 null 인지만 확인하고, 배너를 렌더링하지 않으면 된다.</p>
+     *
+     * @param movieId 영화 ID (movies.movie_id)
+     * @return 단건 응답 (없으면 null data)
+     */
+    @Operation(
+            summary = "특정 영화의 진행 중 OCR 이벤트 조회",
+            description = "영화 상세 페이지 상단 배너용. ACTIVE/READY + 종료되지 않은 이벤트 1건. 없으면 data=null."
+    )
+    @GetMapping("/by-movie/{movieId}")
+    public ResponseEntity<ApiResponse<OcrEventPublicResponse>> getByMovie(@PathVariable String movieId) {
+        OcrEventPublicResponse event = ocrEventService.getActiveEventByMovie(movieId).orElse(null);
+        log.debug("[OCR 이벤트] 영화별 조회 — movieId={}, found={}", movieId, event != null);
+        return ResponseEntity.ok(ApiResponse.ok(event));
     }
 }

@@ -215,6 +215,9 @@ public class PlaylistDto {
             /** 플레이리스트 고유 ID */
             Long playlistId,
 
+            /** 플레이리스트 소유자 사용자 ID — 프론트엔드 isOwner 판단에 사용 */
+            String userId,
+
             /** 플레이리스트 이름 */
             String playlistName,
 
@@ -250,6 +253,7 @@ public class PlaylistDto {
         public static PlaylistDetailResponse from(Playlist entity, List<PlaylistItemResponse> itemDtos) {
             return new PlaylistDetailResponse(
                     entity.getPlaylistId(),
+                    entity.getUserId(),
                     entity.getPlaylistName(),
                     entity.getDescription(),
                     entity.getIsPublic(),
