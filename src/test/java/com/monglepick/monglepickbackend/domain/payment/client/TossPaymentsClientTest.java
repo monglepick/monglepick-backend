@@ -107,25 +107,31 @@ class TossPaymentsClientTest {
     }
 
     // ============================================================
-    // 웹훅 서명 검증 — 비활성화 케이스
+    // 웹훅 서명 검증 — 시크릿 미설정 시 보안상 거부
     // ============================================================
+    //
+    // [2026-04-10 보안 수정 — CLAUDE.md CRITICAL-2]
+    //   기존 TossPaymentsClient 는 webhook-secret 미설정 시 return true 로 모든 웹훅을
+    //   통과시켰으나, 운영환경에서 환경변수가 누락되면 인증되지 않은 웹훅이 수용되는
+    //   보안 취약점을 초래했다. 이제 webhookSecret 이 비어있으면 항상 false 를 반환한다.
+    //   본 테스트 케이스도 "미설정 = 거부" 정책으로 갱신.
 
     @Nested
-    @DisplayName("verifyWebhookSignature — 검증 비활성화 (개발 환경)")
+    @DisplayName("verifyWebhookSignature — 시크릿 미설정 시 보안상 거부")
     class WebhookSignatureDisabled {
 
         @Test
-        @DisplayName("webhook-secret 미설정 시 모든 요청을 통과시킨다")
-        void passesAllRequestsWhenSecretMissing() {
-            assertTrue(clientWithoutWebhook.verifyWebhookSignature(
+        @DisplayName("webhook-secret 미설정 시 모든 요청을 거부한다 (보안)")
+        void rejectsAllRequestsWhenSecretMissing() {
+            assertFalse(clientWithoutWebhook.verifyWebhookSignature(
                     "any body", "any signature"));
         }
 
         @Test
-        @DisplayName("webhook-secret 미설정 시 서명이 null/빈 문자열이어도 통과시킨다")
-        void passesNullSignatureWhenSecretMissing() {
-            assertTrue(clientWithoutWebhook.verifyWebhookSignature("any body", null));
-            assertTrue(clientWithoutWebhook.verifyWebhookSignature("any body", ""));
+        @DisplayName("webhook-secret 미설정 시 서명이 null/빈 문자열이어도 거부한다")
+        void rejectsNullSignatureWhenSecretMissing() {
+            assertFalse(clientWithoutWebhook.verifyWebhookSignature("any body", null));
+            assertFalse(clientWithoutWebhook.verifyWebhookSignature("any body", ""));
         }
     }
 
