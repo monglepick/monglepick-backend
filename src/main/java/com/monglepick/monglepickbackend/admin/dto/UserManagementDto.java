@@ -156,7 +156,16 @@ public class UserManagementDto {
      * @param reason 지급/회수 사유 (필수, 최대 300자)
      */
     public record ManualPointAdjustRequest(
+            /*
+             * 포인트 변동량 (양수=지급, 음수=회수, 0 금지).
+             *
+             * <p>상한/하한을 두는 이유는 {@code AdminPaymentDto.AdminManualPointRequest#amount} 와 동일하다.
+             * Jackson 직렬화 단계에서 {@code Integer} 범위를 벗어난 값이 들어오면 500 응답으로 떨어지므로
+             * 현실적인 단일 트랜잭션 한도(±1억P)로 사전에 차단한다.</p>
+             */
             @jakarta.validation.constraints.NotNull(message = "amount는 필수입니다.")
+            @jakarta.validation.constraints.Min(value = -100_000_000, message = "amount는 -1억 이상이어야 합니다.")
+            @jakarta.validation.constraints.Max(value = 100_000_000, message = "amount는 1억 이하여야 합니다.")
             Integer amount,
             @jakarta.validation.constraints.NotBlank(message = "사유는 필수입니다.")
             @jakarta.validation.constraints.Size(max = 300, message = "사유는 300자 이하여야 합니다.")

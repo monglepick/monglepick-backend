@@ -6,6 +6,7 @@ import com.monglepick.monglepickbackend.domain.payment.entity.SubscriptionPlan.P
 import com.monglepick.monglepickbackend.domain.payment.repository.SubscriptionPlanRepository;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointItem;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointItemRepository;
+import com.monglepick.monglepickbackend.domain.reward.service.PointService;
 import com.monglepick.monglepickbackend.domain.user.entity.Admin;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
@@ -47,6 +48,14 @@ public class DataInitializer implements ApplicationRunner {
     private final UserMapper userMapper;
     private final AdminAccountRepository adminAccountRepository;
     private final PasswordEncoder passwordEncoder;
+    /**
+     * 관리자 시드 계정용 포인트/쿼터 초기화 전용 주입.
+     *
+     * <p>관리자 시드는 회원가입 경로를 타지 않으므로, {@code user_points}/{@code user_ai_quota}
+     * 레코드가 생성되지 않는다. 이 상태에서 관리자 본인이 수동 포인트 지급 등을 시도하면
+     * {@code POINT_NOT_FOUND} 로 실패하므로 시드 생성 직후 초기 레코드를 함께 만든다.</p>
+     */
+    private final PointService pointService;
 
     /** 관리자 시드 계정 이메일 (환경변수: ADMIN_EMAIL) */
     @Value("${app.admin.email}")
@@ -135,6 +144,19 @@ public class DataInitializer implements ApplicationRunner {
                 .isActive(true)
                 .build();
         adminAccountRepository.save(adminRecord);
+
+        /*
+         * user_points / user_ai_quota 초기화.
+         *
+         * <p>회원가입 경로(AuthService) 에서만 {@link PointService#initializePoint} 가 호출되므로
+         * 관리자 시드는 누락된다. 이 상태에서 관리자 페이지 "결제/포인트 → 수동 지급" 등을 시도하면
+         * {@code POINT_NOT_FOUND(P002)} 로 실패한다. 시드 생성 직후 0P 레코드를 생성하여 이후
+         * 모든 포인트 경로가 정상 동작하도록 보장한다.</p>
+         *
+         * <p>{@code initializePoint} 는 {@code REQUIRES_NEW} + 존재 검사 + UNIQUE 제약 2중 방어가
+         * 걸려 있어 멱등적이다. 재부팅 시 이미 user_points 행이 있으면 no-op 으로 빠져나온다.</p>
+         */
+        pointService.initializePoint(admin.getUserId(), 0);
 
         log.info("관리자 테스트 계정 초기화 완료 — email: {}, role: {}, userId: {}",
                 adminEmail, resolvedRole, admin.getUserId());

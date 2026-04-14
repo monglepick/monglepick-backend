@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.global.exception;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -138,7 +139,63 @@ public class GlobalExceptionHandler {
         details.put("errors", fieldErrors);
 
         ErrorCode errorCode = ErrorCode.INVALID_INPUT;
-        ErrorResponse response = ErrorResponse.of(errorCode, details);
+        // 첫 필드 에러 메시지를 최상위 message 로 노출한다.
+        // 프론트 fetch 래퍼는 기본적으로 `data.message` 만 err.message 로 매핑하므로,
+        // details.errors 를 훑지 않아도 구체 원인("포인트 변동량은 1억 이하여야 합니다." 등)이
+        // 사용자에게 즉시 보이도록 한다.
+        String topMessage = fieldErrors.isEmpty()
+                ? errorCode.getMessage()
+                : fieldErrors.get(0).get("message");
+        ErrorResponse response = new ErrorResponse(
+                errorCode.getCode(),
+                topMessage,
+                details
+        );
+
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(response);
+    }
+
+    /**
+     * 요청 본문 JSON 파싱 실패 처리.
+     *
+     * <p>대표 케이스:</p>
+     * <ul>
+     *   <li>숫자 필드에 타입 범위 초과 값 (예: {@code Integer} 에 10조 입력 → int overflow)</li>
+     *   <li>필수 필드 누락으로 JSON 구조 불완전</li>
+     *   <li>잘못된 JSON 포맷 (따옴표/콤마 누락 등)</li>
+     * </ul>
+     *
+     * <p>기본 {@code Exception} catch-all 로 가면 500 으로 떨어져 원인이 불명확해지므로,
+     * 400 + 구체적 메시지로 변환한다. Jackson 메시지는 디버깅용 내부 정보를 포함할 수 있어
+     * 루트 원인(`getMostSpecificCause`)의 간단한 메시지만 전달한다.</p>
+     *
+     * @param ex 메시지 바디 파싱 실패 예외
+     * @return 400 응답 (원인 메시지 포함)
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    protected ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
+        // 루트 원인 추출 — Jackson 의 InputCoercionException 등이 대표적
+        Throwable rootCause = ex.getMostSpecificCause();
+        String rootMessage = rootCause != null ? rootCause.getMessage() : ex.getMessage();
+
+        // 숫자 범위 초과 (InputCoercionException: "Numeric value ... out of range of `int`") 전용 UX 메시지
+        String userMessage;
+        if (rootMessage != null && rootMessage.contains("out of range")) {
+            userMessage = "입력한 숫자가 허용 범위를 벗어났습니다. 값을 다시 확인해주세요.";
+        } else {
+            userMessage = "요청 본문을 읽을 수 없습니다. 입력 값을 다시 확인해주세요.";
+        }
+
+        log.warn("요청 JSON 파싱 실패 — message={}", rootMessage);
+
+        ErrorCode errorCode = ErrorCode.INVALID_INPUT;
+        ErrorResponse response = new ErrorResponse(
+                errorCode.getCode(),
+                userMessage,
+                Map.of()
+        );
 
         return ResponseEntity
                 .status(errorCode.getHttpStatus())

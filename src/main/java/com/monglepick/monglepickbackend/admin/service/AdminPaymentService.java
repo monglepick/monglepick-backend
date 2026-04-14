@@ -525,6 +525,27 @@ public class AdminPaymentService {
                     "0P 변동은 허용되지 않습니다.");
         }
 
+        // 대상 사용자 존재 검증 — user_id 오타로 들어와도 "포인트 레코드 없음"(P002) 으로 떨어지면
+        // 원인이 모호해지므로 여기서 명확한 USER_NOT_FOUND 를 먼저 던진다.
+        if (!userMapper.existsById(request.userId())) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND,
+                    "사용자를 찾을 수 없습니다: " + request.userId());
+        }
+
+        /*
+         * user_points 방어적 초기화.
+         *
+         * <p>회원가입 경로 외에 생성된 계정(예: DataInitializer 의 관리자 시드, 과거에 회원가입 후
+         * 결제/활동이 없어 잔액 행이 만들어지지 않은 레거시 사용자 등)은 {@code user_points} 행이
+         * 없을 수 있다. 이 상태에서 {@code earnPoint}/{@code deductPoint} 는 POINT_NOT_FOUND(P002)
+         * 로 실패한다.</p>
+         *
+         * <p>{@link PointService#initializePoint(String, int)} 은 {@code REQUIRES_NEW} + {@code existsByUserId}
+         * 1차 방어 + UNIQUE 제약 2차 방어 구조라 이미 존재하면 no-op, 없으면 기본 레코드를 생성한다.
+         * 따라서 매 호출 시 선제적으로 실행해도 성능·정합성 모두 안전하다.</p>
+         */
+        pointService.initializePoint(request.userId(), 0);
+
         Integer newBalance;
         String gradeCode;
 

@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.admin.dto;
 
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -300,7 +301,25 @@ public final class AdminPaymentDto {
             @Size(max = 50, message = "사용자 ID는 최대 50자입니다.")
             String userId,
 
+            /*
+             * 포인트 변동량 (양수=지급, 음수=차감, 0 불가).
+             *
+             * <p>상한/하한을 두는 이유:</p>
+             * <ul>
+             *   <li>{@code Integer} 범위 초과 값을 JSON 으로 보내면 Jackson 이 직렬화 단계에서
+             *       {@code HttpMessageNotReadableException} 을 던져 500 응답으로 떨어진다 (1P=10원이므로
+             *       오타로 10조 등 비현실적 값이 들어오는 것을 방어).</li>
+             *   <li>{@code user_points.balance} / {@code points_history.point_change} 컬럼이 {@code INT}
+             *       (±21억) 이므로 누적 잔액까지 고려해 단일 요청을 훨씬 작은 범위로 제한한다.</li>
+             * </ul>
+             *
+             * <p>상한 {@code 100_000_000} = 1억P = 10억원 상당. 운영 1회 보상으로는 과도하게 큰 값이지만
+             * CS 대응·서비스 장애 보상 범위를 충분히 커버한다. 관리자 UI 에서 실수 방지용 한 번 더 확인을
+             * 거치는 금액대.</p>
+             */
             @NotNull(message = "포인트 변동량은 필수입니다.")
+            @Min(value = -100_000_000, message = "포인트 변동량은 -1억 이상이어야 합니다.")
+            @Max(value = 100_000_000, message = "포인트 변동량은 1억 이하여야 합니다.")
             Integer amount,
 
             @NotBlank(message = "변동 사유는 필수입니다.")

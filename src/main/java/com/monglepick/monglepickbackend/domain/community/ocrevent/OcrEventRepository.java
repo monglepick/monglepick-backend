@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 유저 전용 OCR 인증 이벤트 공개 리포지토리.
@@ -53,4 +54,36 @@ public interface OcrEventRepository extends JpaRepository<OcrEvent, Long> {
             """)
     List<OcrEvent> findPublicEvents(@Param("statuses") List<OcrEventStatus> statuses,
                                     @Param("now") LocalDateTime now);
+
+    /**
+     * 특정 영화의 현재 노출 가능한 OCR 이벤트 1건 조회 (2026-04-14 신규).
+     *
+     * <p>영화 상세 페이지 상단의 "실관람 인증 진행 중" 배너 노출에 사용.
+     * 한 영화에 동시에 여러 이벤트가 걸려있을 가능성이 있으므로,
+     * ACTIVE 가 우선이고 그 다음 종료 임박 순으로 정렬하여 최상위 1건만 반환한다.</p>
+     *
+     * <ul>
+     *   <li>{@code movieId} 일치</li>
+     *   <li>{@code status} IN (ACTIVE, READY) — CLOSED 제외</li>
+     *   <li>{@code endDate} &gt; {@code now} — 이미 종료된 이벤트 제외</li>
+     * </ul>
+     *
+     * @param movieId  대상 영화 ID
+     * @param statuses 허용 상태 (ACTIVE, READY)
+     * @param now      현재 시각 (endDate 비교용)
+     * @return 노출 가능 이벤트 1건 (없으면 {@link Optional#empty()})
+     */
+    @Query("""
+            SELECT e
+              FROM OcrEvent e
+             WHERE e.movieId = :movieId
+               AND e.status IN :statuses
+               AND e.endDate > :now
+             ORDER BY
+                CASE e.status WHEN com.monglepick.monglepickbackend.domain.community.entity.OcrEvent.OcrEventStatus.ACTIVE THEN 0 ELSE 1 END,
+                e.endDate ASC
+            """)
+    List<OcrEvent> findActiveByMovieId(@Param("movieId") String movieId,
+                                       @Param("statuses") List<OcrEventStatus> statuses,
+                                       @Param("now") LocalDateTime now);
 }

@@ -324,6 +324,11 @@ public class SecurityConfig {
                 /* 구독 플랜 조회 — 비로그인 사용자도 요금제 확인 가능 */
                 .requestMatchers(HttpMethod.GET, "/api/v1/subscription/plans").permitAll()
 
+                /* 포인트팩 조회 — 비로그인 허용.
+                 * 관리자 수정이 유저 화면에 실시간 반영되도록 point_pack_prices 테이블을
+                 * 단일 진실 원본으로 공개한다 (하드코딩 상수 제거 이슈 2026-04-14). */
+                .requestMatchers(HttpMethod.GET, "/api/v1/point-packs").permitAll()
+
                 /* 게시글 조회 — 비로그인 허용 */
                 .requestMatchers(HttpMethod.GET, "/api/v1/posts/**").permitAll()
 
