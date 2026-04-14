@@ -10,9 +10,11 @@ import com.monglepick.monglepickbackend.domain.payment.dto.PaymentDto.RefundResp
 import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
 import com.monglepick.monglepickbackend.domain.payment.entity.PointPackPrice;
 import com.monglepick.monglepickbackend.domain.payment.entity.SubscriptionPlan;
+import com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription;
 import com.monglepick.monglepickbackend.domain.payment.repository.PaymentOrderRepository;
 import com.monglepick.monglepickbackend.domain.payment.repository.PointPackPriceRepository;
 import com.monglepick.monglepickbackend.domain.payment.repository.SubscriptionPlanRepository;
+import com.monglepick.monglepickbackend.domain.payment.repository.UserSubscriptionRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
 // Jackson 3.x: com.fasterxml.jackson → tools.jackson 패키지 경로 변경 (Spring Boot 4.x)
 import tools.jackson.databind.JsonNode;
@@ -94,6 +96,21 @@ public class PaymentService {
 
     /** 구독 서비스 (구독 결제 완료 후 UserSubscription 생성) */
     private final SubscriptionService subscriptionService;
+
+    /**
+     * 사용자 구독 리포지토리.
+     *
+     * <p>구독 주문 생성 시점에 이미 ACTIVE 상태의 구독이 존재하는지 사전 검증하기 위해 사용한다.
+     * 과거에는 이 사전 검증이 없어서 카드 승인까지 진행된 뒤 Phase 2의
+     * {@code SubscriptionService.createSubscription()} 에서 {@code ACTIVE_SUBSCRIPTION_EXISTS}
+     * 로 예외가 발생하고, 그 시점에 Phase 2 트랜잭션이 통째로 롤백되면서 사용자에게
+     * "카드는 승인됐는데 결제 내역·구독에 아무 변화가 없다"는 혼란을 일으켰다
+     * (실제로는 Toss 자동 보상 환불이 이어지지만, 유저 관점에서는 결제 내역이 "사라진" 것처럼 보임).
+     *
+     * <p>이 리포지토리를 통해 {@code createOrder} 단계에서 조기 차단하면
+     * 결제창 자체가 뜨지 않으므로 카드 승인/환불 사이클이 발생하지 않는다.</p>
+     */
+    private final UserSubscriptionRepository userSubscriptionRepository;
 
     /**
      * 결제 보상 트랜잭션 서비스.
@@ -235,6 +252,33 @@ public class PaymentService {
 
         // 4. 구독인 경우 plan 조회 + 금액 검증 + 연결
         if (orderType == PaymentOrder.OrderType.SUBSCRIPTION && request.planCode() != null) {
+            // 4-0. ★ 활성 구독 사전 차단 (2026-04-14 버그 수정 + 플랜 변경 허용)
+            //
+            // 동일 planCode 로 중복 결제를 시도하는 경우만 차단한다.
+            // 다른 planCode(업그레이드/다운그레이드/주기 변경)는 Phase 2 의
+            // SubscriptionService.createSubscription() 에서 기존 ACTIVE 를
+            // CANCELLED 로 전이한 뒤 새 구독을 생성하는 원자적 흐름으로 처리하므로
+            // createOrder 시점에서는 통과시킨다.
+            //
+            // 과거 완전 차단 로직은 플랜 변경(basic ↔ premium, monthly ↔ yearly) 자체가
+            // 불가능하게 만들어, 유저가 무조건 "현재 구독 해지 → 잔여 기간 포기 → 재결제"를
+            // 거쳐야 하는 UX 결함을 낳았다. 본 완화 조치는 실제 플랜 전환을 가능하게 하되,
+            // 동일 플랜 중복 결제는 여전히 조기 차단한다 (이용자 금전 손실 방지).
+            userSubscriptionRepository
+                    .findByUserIdAndStatusFetchPlan(userId, UserSubscription.Status.ACTIVE)
+                    .ifPresent(activeSub -> {
+                        String currentPlanCode = activeSub.getPlan() != null
+                                ? activeSub.getPlan().getPlanCode() : null;
+                        if (currentPlanCode != null
+                                && currentPlanCode.equals(request.planCode())) {
+                            log.warn("동일 플랜 중복 결제 시도 차단: userId={}, planCode={}",
+                                    userId, request.planCode());
+                            throw new BusinessException(ErrorCode.ACTIVE_SUBSCRIPTION_EXISTS);
+                        }
+                        log.info("플랜 변경 결제 허용: userId={}, 현재={}, 요청={}",
+                                userId, currentPlanCode, request.planCode());
+                    });
+
             SubscriptionPlan plan = planRepository.findByPlanCode(request.planCode())
                     .orElseThrow(() -> {
                         log.error("구독 상품 조회 실패: planCode={}", request.planCode());

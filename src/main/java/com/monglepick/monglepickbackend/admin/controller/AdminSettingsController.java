@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.admin.controller;
 
+import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminAccountCreateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminAccountResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminRoleUpdateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AuditLogResponse;
@@ -469,6 +470,43 @@ public class AdminSettingsController {
         log.debug("[AdminSettings] 관리자 계정 목록 조회 요청 — page={}", pageable.getPageNumber());
         Page<AdminAccountResponse> result = adminSettingsService.getAdmins(pageable);
         return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    /**
+     * 신규 관리자 계정을 등록한다 — 2026-04-14 신규.
+     *
+     * <p>기존 일반 사용자를 관리자로 승격시키는 경로. 요청 Body 로 userId 또는 email
+     * 중 하나를 전달하면 해당 사용자를 조회하여 users.user_role 을 ADMIN 으로 변경하고
+     * admin 테이블에 신규 레코드를 생성한다.</p>
+     *
+     * <h3>보안</h3>
+     * <p>현재 Spring Security 는 {@code /api/v1/admin/**} 에 {@code authenticated()}
+     * 만 요구한다. 운영 정책상 이 엔드포인트는 SUPER_ADMIN 만 호출해야 하지만,
+     * 엔드포인트 레벨 강제는 {@code @PreAuthorize} 적용 이슈와 함께 후속 처리된다.</p>
+     *
+     * @param request 신규 관리자 등록 요청 DTO (userId/email + adminRole)
+     * @return 생성된 관리자 계정 응답 (HTTP 201 Created)
+     */
+    @Operation(
+            summary = "관리자 계정 신규 등록",
+            description = "기존 일반 사용자를 관리자로 승격시킨다. userId 또는 email 중 하나는 필수이며, " +
+                    "adminRole 은 AdminRole enum 허용값(SUPER_ADMIN/ADMIN/MODERATOR/FINANCE_ADMIN/" +
+                    "SUPPORT_ADMIN/DATA_ADMIN/AI_OPS_ADMIN/STATS_ADMIN) 중 하나여야 한다."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "등록 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+                    description = "유효성 검증 실패 / 허용되지 않은 역할 / 대상 사용자 없음 / 이미 관리자"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "관리자 권한 없음")
+    })
+    @PostMapping("/admins")
+    public ResponseEntity<ApiResponse<AdminAccountResponse>> createAdmin(
+            @RequestBody @Valid AdminAccountCreateRequest request
+    ) {
+        log.info("[AdminSettings] 관리자 계정 신규 등록 요청 — userId={}, email={}, role={}",
+                request.userId(), request.email(), request.adminRole());
+        AdminAccountResponse result = adminSettingsService.createAdminAccount(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(result));
     }
 
     /**

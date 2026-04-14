@@ -24,11 +24,23 @@ public class AdminOcrEventDto {
 
     /**
      * 신규 OCR 이벤트 등록 요청.
+     *
+     * <p>2026-04-14: title(제목)·memo(상세/메모) 필드 추가.
+     * 유저 페이지 커뮤니티 "실관람인증" 탭 카드에 노출되는 핵심 메타.</p>
      */
     public record CreateOcrEventRequest(
             @NotBlank(message = "대상 영화 ID는 필수입니다.")
             @Size(max = 50, message = "영화 ID는 50자 이하여야 합니다.")
             String movieId,
+
+            /** 이벤트 제목 (관리자/유저 양쪽 노출) */
+            @NotBlank(message = "이벤트 제목은 필수입니다.")
+            @Size(max = 200, message = "제목은 200자 이하여야 합니다.")
+            String title,
+
+            /** 이벤트 상세 메모 (선택, 유저 카드 본문) */
+            @Size(max = 2000, message = "메모는 2000자 이하여야 합니다.")
+            String memo,
 
             @NotNull(message = "이벤트 시작일은 필수입니다.")
             LocalDateTime startDate,
@@ -39,11 +51,20 @@ public class AdminOcrEventDto {
 
     /**
      * 기존 OCR 이벤트 메타 수정 요청.
+     *
+     * <p>2026-04-14: title/memo 필드 추가. 수정 폼에서 제목/메모도 함께 편집 가능.</p>
      */
     public record UpdateOcrEventRequest(
             @NotBlank(message = "대상 영화 ID는 필수입니다.")
             @Size(max = 50, message = "영화 ID는 50자 이하여야 합니다.")
             String movieId,
+
+            @NotBlank(message = "이벤트 제목은 필수입니다.")
+            @Size(max = 200, message = "제목은 200자 이하여야 합니다.")
+            String title,
+
+            @Size(max = 2000, message = "메모는 2000자 이하여야 합니다.")
+            String memo,
 
             @NotNull(message = "이벤트 시작일은 필수입니다.")
             LocalDateTime startDate,
@@ -64,10 +85,14 @@ public class AdminOcrEventDto {
 
     /**
      * OCR 이벤트 단일 항목 응답.
+     *
+     * <p>2026-04-14: title/memo 필드 추가. 관리자 목록/단건 조회 응답에도 포함된다.</p>
      */
     public record OcrEventResponse(
             Long eventId,
             String movieId,
+            String title,
+            String memo,
             LocalDateTime startDate,
             LocalDateTime endDate,
             String adminId,

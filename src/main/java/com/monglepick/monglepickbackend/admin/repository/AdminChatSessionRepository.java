@@ -36,6 +36,26 @@ public interface AdminChatSessionRepository extends JpaRepository<ChatSessionArc
     Page<ChatSessionArchive> findByIsDeletedFalseOrderByLastMessageAtDesc(Pageable pageable);
 
     /**
+     * 특정 사용자(userId)의 채팅 세션을 마지막 메시지 시각 기준 최신순으로 페이징 조회한다.
+     *
+     * <p>관리자 페이지 "AI 운영 → 챗봇 대화 로그" 탭의 사용자 검색(UserSearchPicker)에서
+     * 이메일/닉네임으로 사용자를 선택하면 추출된 userId 가 이 메서드의 파라미터로 전달된다.
+     * ChatSessionArchive 는 String FK 직접 보관 방식(JPA/MyBatis 하이브리드 §15.4)이므로
+     * 단순 컬럼 매칭으로 정확히 그 사용자의 세션만 가져온다.</p>
+     *
+     * <p>2026-04-14 신규 — 기존 컨트롤러가 받지도 않던 keyword 입력을 폐기하고
+     * 사용자 단위 필터링으로 일원화하기 위해 추가.</p>
+     *
+     * @param userId   세션 소유자 user_id (정확 일치)
+     * @param pageable 페이지 정보
+     * @return 해당 사용자의 채팅 세션 페이지 (소프트 삭제 제외)
+     */
+    Page<ChatSessionArchive> findByUserIdAndIsDeletedFalseOrderByLastMessageAtDesc(
+            String userId,
+            Pageable pageable
+    );
+
+    /**
      * 특정 세션 UUID로 단건 조회한다 (소프트 삭제 제외).
      *
      * <p>관리자 상세 화면에서 메시지 전체를 조회할 때 사용한다.</p>

@@ -12,9 +12,12 @@ import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.EarnResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.ExchangeResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.HistoryResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.PointItemResponse;
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardCatalogDto.PolicyResponse;
+import com.monglepick.monglepickbackend.domain.reward.dto.RewardCatalogDto.UserRewardStatusResponse;
 import com.monglepick.monglepickbackend.domain.reward.service.AttendanceService;
 import com.monglepick.monglepickbackend.domain.reward.service.PointItemService;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
+import com.monglepick.monglepickbackend.domain.reward.service.RewardQueryService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -65,6 +68,14 @@ public class PointController extends BaseController {
 
     /** 포인트 아이템 서비스 (아이템 조회/교환) */
     private final PointItemService pointItemService;
+
+    /**
+     * 리워드 카탈로그/진행 현황 조회 서비스 (2026-04-14 추가).
+     *
+     * <p>"리워드 지급 기준"(정책 카탈로그) 과 "내 리워드 진행 현황" 을 반환하는 읽기 전용 서비스.
+     * 기존 PointService 가 잔액/차감 비즈니스 로직 위주인 것과 역할을 분리했다.</p>
+     */
+    private final RewardQueryService rewardQueryService;
 
     // ──────────────────────────────────────────────
     // Agent 내부 호출 엔드포인트
@@ -262,6 +273,70 @@ public class PointController extends BaseController {
         log.debug("GET /api/v1/point/attendance/status — userId={}", userId);
 
         AttendanceStatusResponse response = attendanceService.getStatus(userId);
+        return ResponseEntity.ok(response);
+    }
+
+    // ──────────────────────────────────────────────
+    // 리워드 카탈로그/진행 현황 엔드포인트 (클라이언트 전용, 2026-04-14 신설)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 리워드 지급 기준(정책 카탈로그) 조회 — 클라이언트 "리워드 기준 안내" 화면용.
+     *
+     * <p>활성(is_active=true) 리워드 정책 목록을 카테고리별로 필터링하여 반환한다.
+     * 어떤 활동이 얼마의 포인트를 주는지, 일일 한도/쿨다운/최소 글자수 기준은 어떤지
+     * 사용자에게 투명하게 공개하기 위한 읽기 전용 엔드포인트.</p>
+     *
+     * <p>반환 DTO는 관리자 전용 감사 필드(created_by/updated_by 등)를 포함하지 않는
+     * 공개 요약 구조({@link PolicyResponse})를 사용한다.</p>
+     *
+     * @param category 카테고리 필터 (null 이면 전체): CONTENT / ENGAGEMENT / MILESTONE / ATTENDANCE
+     * @return 200 OK + 활성 정책 목록 (카테고리/임계치/actionType 순 정렬)
+     */
+    @Operation(
+            summary = "리워드 지급 기준 조회",
+            description = "활성 리워드 정책 목록을 카테고리별로 조회한다. " +
+                    "사용자가 어떤 활동이 얼마의 포인트를 주는지 확인하는 카탈로그 엔드포인트. " +
+                    "category 파라미터로 CONTENT/ENGAGEMENT/MILESTONE/ATTENDANCE 필터링 가능."
+    )
+    @ApiResponse(responseCode = "200", description = "정책 목록 조회 성공")
+    @GetMapping("/policies")
+    public ResponseEntity<List<PolicyResponse>> getRewardPolicies(
+            @RequestParam(required = false) String category) {
+        log.debug("GET /api/v1/point/policies — category={}", category);
+
+        List<PolicyResponse> response = rewardQueryService.listActivePolicies(category);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 내 리워드 진행 현황 조회 — 클라이언트 "내 리워드 진행 현황" 섹션용.
+     *
+     * <p>현재 로그인한 사용자의 활동별 카운터(리뷰 작성 횟수, 출석 연속 일수 등) 와
+     * threshold 기반 마일스톤 진행률(예: "리뷰 5회 마일스톤 3/5") 을 종합 반환한다.</p>
+     *
+     * <p>응답 구조:</p>
+     * <ul>
+     *   <li>{@code activities} — 일반 활동 진행도 (오늘 n/m 형태 일일 한도 게이지용)</li>
+     *   <li>{@code milestones} — 마일스톤 진행률 (프로그레스 바 + 달성 여부)</li>
+     *   <li>{@code totalEarned / earnedByActivity / currentBalance / gradeCode} — 요약</li>
+     * </ul>
+     *
+     * @return 200 OK + 종합 리워드 현황
+     */
+    @Operation(
+            summary = "내 리워드 진행 현황 조회",
+            description = "활동별 카운터 + 마일스톤 진행률 + 포인트 요약을 종합 반환. " +
+                    "'오늘 리뷰 2/3', '리뷰 5회 마일스톤 3/5 (60%)' 등 사용자 진행 상황을 한 번에 표시."
+    )
+    @ApiResponse(responseCode = "200", description = "진행 현황 조회 성공")
+    @SecurityRequirement(name = "BearerAuth")
+    @GetMapping("/progress")
+    public ResponseEntity<UserRewardStatusResponse> getMyRewardProgress(Principal principal) {
+        String userId = resolveUserIdWithServiceKey(principal, null);
+        log.debug("GET /api/v1/point/progress — userId={}", userId);
+
+        UserRewardStatusResponse response = rewardQueryService.getUserRewardStatus(userId);
         return ResponseEntity.ok(response);
     }
 

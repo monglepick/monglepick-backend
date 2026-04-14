@@ -141,11 +141,34 @@ public class AdminAiOpsService {
      * @return 세션 요약 페이지 (소프트 삭제 제외)
      */
     public Page<ChatSessionSummary> getChatSessions(Pageable pageable) {
-        log.debug("[AdminAiOps] 챗봇 세션 목록 조회 — page={}", pageable.getPageNumber());
+        return getChatSessions(null, pageable);
+    }
 
-        return adminChatSessionRepository
-                .findByIsDeletedFalseOrderByLastMessageAtDesc(pageable)
-                .map(this::toChatSessionSummary);
+    /**
+     * 채팅 세션 목록을 최신순으로 페이징 조회한다 — 사용자 필터 지원.
+     *
+     * <p>2026-04-14 신규 오버로드 — 관리자 페이지 "AI 운영 → 챗봇 대화 로그" 탭에서
+     * UserSearchPicker(이메일/닉네임 검색) 로 선택한 사용자의 세션만 보고 싶을 때
+     * userId 를 전달한다. null/blank 이면 전체 세션을 반환한다.</p>
+     *
+     * <p>기존 1-인자 시그니처는 다른 호출자(통계 등)와의 호환을 위해 위에 유지하며
+     * 내부적으로 이 메서드를 위임 호출한다.</p>
+     *
+     * @param userId   필터링할 사용자 ID (null 또는 blank 면 전체)
+     * @param pageable 페이지 정보
+     * @return 세션 요약 페이지 (소프트 삭제 제외)
+     */
+    public Page<ChatSessionSummary> getChatSessions(String userId, Pageable pageable) {
+        String normalizedUserId = (userId == null || userId.isBlank()) ? null : userId.trim();
+        log.debug("[AdminAiOps] 챗봇 세션 목록 조회 — userId={}, page={}",
+                normalizedUserId, pageable.getPageNumber());
+
+        Page<ChatSessionArchive> archives = (normalizedUserId == null)
+                ? adminChatSessionRepository.findByIsDeletedFalseOrderByLastMessageAtDesc(pageable)
+                : adminChatSessionRepository
+                        .findByUserIdAndIsDeletedFalseOrderByLastMessageAtDesc(normalizedUserId, pageable);
+
+        return archives.map(this::toChatSessionSummary);
     }
 
     /**

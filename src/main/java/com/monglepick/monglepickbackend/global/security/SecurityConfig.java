@@ -337,6 +337,12 @@ public class SecurityConfig {
                 /* 앱 메인 공지 조회 — 비로그인 허용 (사용자 홈 배너/팝업/모달) */
                 .requestMatchers(HttpMethod.GET, "/api/v1/notices/**").permitAll()
 
+                /* 홈 슬라이드 배너 조회 — 비로그인 허용 (2026-04-14 신규, 사용자 화면 우측 플로팅 슬라이드) */
+                .requestMatchers(HttpMethod.GET, "/api/v1/banners/**").permitAll()
+
+                /* OCR 실관람 인증 이벤트 공개 목록 — 비로그인 허용 (2026-04-14 신규, 커뮤니티 실관람인증 탭) */
+                .requestMatchers(HttpMethod.GET, "/api/v1/ocr-events/**").permitAll()
+
                 /* 나머지 모든 요청: 인증 필요 */
                 .anyRequest().authenticated()
             )

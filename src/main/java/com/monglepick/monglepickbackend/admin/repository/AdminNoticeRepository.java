@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -73,4 +74,16 @@ public interface AdminNoticeRepository extends JpaRepository<SupportNotice, Long
             """)
     List<SupportNotice> findActiveAppNotices(@Param("now") LocalDateTime now,
                                              @Param("displayType") String displayType);
+
+    /**
+     * 특정 displayType 집합에 속하는 공지 총 건수 (NoticeDemoInitializer 멱등성 검사용).
+     *
+     * <p>앱 메인 노출 공지(BANNER/POPUP/MODAL)가 단 한 건이라도 존재하는지만 확인하기 위해
+     * Spring Data JPA derived query 로 count 를 조회한다. 활성/기간 조건은 보지 않으므로
+     * 운영자가 비활성화해 둔 공지가 있어도 데모 시드가 중복 삽입되지 않는다.</p>
+     *
+     * @param displayTypes BANNER/POPUP/MODAL 등 집합
+     * @return 해당 displayType 을 가진 공지 총 건수
+     */
+    long countByDisplayTypeIn(Collection<String> displayTypes);
 }

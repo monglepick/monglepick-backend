@@ -103,6 +103,31 @@ public class AdminAuditService {
      * 사용된다. 파일 내용 자체는 저장하지 않고 메타데이터(소스, 행 수, 필터)만 남긴다.</p>
      */
     public static final String ACTION_CSV_EXPORT           = "CSV_EXPORT";
+    /**
+     * 관리자 로그인 성공 (2026-04-14 추가).
+     *
+     * <p>관리자 전용 로그인(AdminLoginFilter: POST /api/v1/admin/auth/login) 또는
+     * 일반 로그인(LoginFilter: POST /api/v1/auth/login) 로 ROLE_ADMIN 사용자가
+     * 성공적으로 인증을 마친 직후 LoginSuccessHandler 가 본 액션을 기록한다.
+     * "누가 언제 어떤 관리자 엔드포인트를 사용했는가"의 출발점을 추적하는 용도.</p>
+     */
+    public static final String ACTION_ADMIN_LOGIN          = "ADMIN_LOGIN";
+    /**
+     * 관리자 계정 생성 (2026-04-14 추가).
+     *
+     * <p>SUPER_ADMIN 이 기존 일반 사용자를 관리자로 승격시키고 {@code admin}
+     * 테이블에 신규 레코드를 INSERT 한 이벤트를 기록한다.</p>
+     */
+    public static final String ACTION_ADMIN_ACCOUNT_CREATE = "ADMIN_ACCOUNT_CREATE";
+    /**
+     * 관리자 역할 변경 (2026-04-14 추가).
+     *
+     * <p>기존 {@link #ACTION_USER_ROLE_UPDATE} 는 users.user_role 컬럼의
+     * USER ↔ ADMIN 전환을 기록한다. 본 액션은 admin.admin_role 컬럼의
+     * 세부 역할 변경(SUPER_ADMIN ↔ MODERATOR 등)을 별도로 구분하기 위해
+     * 분리 기록한다.</p>
+     */
+    public static final String ACTION_ADMIN_ROLE_UPDATE    = "ADMIN_ROLE_UPDATE";
 
     // ──────────────────────────────────────────────────────────
     // targetType 상수
@@ -119,6 +144,13 @@ public class AdminAuditService {
      * "users", "payments" 같은 소스 코드 문자열.
      */
     public static final String TARGET_EXPORT_SOURCE = "EXPORT_SOURCE";
+    /**
+     * 관리자 계정 엔티티 (2026-04-14 추가).
+     *
+     * <p>admin 테이블의 adminId/userId 를 targetId 로 기록한다.
+     * 로그인·계정 생성·역할 변경 등 admin 레코드 자체를 대상으로 하는 이벤트에 사용.</p>
+     */
+    public static final String TARGET_ADMIN         = "ADMIN";
 
     // ──────────────────────────────────────────────────────────
     // Public API

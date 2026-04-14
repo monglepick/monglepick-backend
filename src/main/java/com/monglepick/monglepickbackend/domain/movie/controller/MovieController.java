@@ -46,8 +46,17 @@ public class MovieController {
      * @param keyword 검색 키워드
      * @param size    반환 건수 (기본 12, 최대 30)
      * @return 200 OK + 영화 목록
+     *
+     * @deprecated 2026-04-14: 프런트엔드가 Recommend `/api/v1/search/movies` (ES 우선 +
+     * MySQL LIKE fallback) 로 전환됨. 한글 자모 변형 매칭 이슈 해결용. 이 엔드포인트는 외부
+     * 호환성을 위해 잔존하나 신규 통합 금지. 전수 감사 후 제거 예정.
      */
-    @Operation(summary = "영화 키워드 검색", description = "한국어/영어 제목 검색 (비로그인 가능)")
+    @Deprecated
+    @Operation(
+            summary = "[Deprecated] 영화 키워드 검색",
+            description = "한국어/영어 제목 LIKE 검색 (비로그인 가능). " +
+                    "2026-04-14부터 Deprecated. Recommend `/api/v1/search/movies` 사용 권장."
+    )
     @SecurityRequirement(name = "")
     @GetMapping("/search")
     public ResponseEntity<List<MovieResponse>> searchMovies(

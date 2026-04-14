@@ -76,11 +76,18 @@ public class AdminRoadmapCourseController {
      * @param keyword 검색 키워드 (한국어 또는 영어 제목)
      * @param size    반환 건수 (기본 10, 최대 30)
      * @return 200 OK + 영화 검색 결과 목록 (movieId, title, releaseYear, director, posterPath)
+     *
+     * @deprecated 2026-04-14: 현재 RoadmapCourseTab UI는 영화 ID를 텍스트로 직접 입력받는
+     * 방식이라 이 검색 엔드포인트를 호출하지 않음. 향후 "제목 검색 후 선택" UI 구현 시에는
+     * Recommend `/api/v1/search/movies` (ES 우선 + MySQL LIKE fallback) 호출로 일원화할 것.
+     * 이 엔드포인트는 기동 호환성 위해 잔존.
      */
+    @Deprecated
     @Operation(
-            summary = "영화 검색 (도장깨기 템플릿용)",
+            summary = "[Deprecated] 영화 검색 (도장깨기 템플릿용)",
             description = "제목 키워드로 영화를 검색합니다. " +
-                    "코스 템플릿 생성·수정 화면에서 영화 ID 대신 제목으로 영화를 선택할 때 사용합니다."
+                    "2026-04-14부터 Deprecated. 미사용 엔드포인트. " +
+                    "신규 UI 구현 시 Recommend `/api/v1/search/movies` 사용 권장."
     )
     @GetMapping("/movies/search")
     public ResponseEntity<ApiResponse<List<MovieSearchResult>>> searchMovies(

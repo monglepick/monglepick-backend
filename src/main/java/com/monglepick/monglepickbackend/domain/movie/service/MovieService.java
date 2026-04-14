@@ -77,7 +77,12 @@ public class MovieService {
      * @param keyword 검색 키워드
      * @param size    반환 건수 (최대 30)
      * @return 영화 검색 결과 목록
+     *
+     * @deprecated 2026-04-14: Client 플레이리스트 검색이 Recommend `/api/v1/search/movies`
+     * (ES 우선 + MySQL LIKE fallback) 로 전환됨. 한글 자모 변형 매칭 이슈로 인해 이 LIKE 단독
+     * 경로는 신규 호출을 금지. Controller/Service 는 외부 호환성 위해 잔존.
      */
+    @Deprecated
     public List<MovieResponse> searchByKeyword(String keyword, int size) {
         // size <= 0 방어: 최소 1, 최대 30으로 클램핑
         int limit = Math.max(1, Math.min(size, 30));

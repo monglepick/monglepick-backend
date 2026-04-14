@@ -225,6 +225,8 @@ public final class PaymentDto {
      * 클라이언트의 "내 구독" 화면에서 사용된다.</p>
      *
      * @param hasActiveSubscription 활성 구독 보유 여부
+     * @param planCode              구독 상품 코드 (monthly_basic 등, 없으면 null) — 클라이언트가
+     *                              "같은 플랜 재결제" 판정에 사용한다 (2026-04-14 추가)
      * @param planName              구독 상품명 (없으면 null)
      * @param status                구독 상태 — "ACTIVE", "CANCELLED", "EXPIRED" (없으면 null)
      * @param startedAt             구독 시작 시각 (없으면 null)
@@ -233,6 +235,7 @@ public final class PaymentDto {
      */
     public record SubscriptionStatusResponse(
             boolean hasActiveSubscription,
+            String planCode,
             String planName,
             String status,
             LocalDateTime startedAt,

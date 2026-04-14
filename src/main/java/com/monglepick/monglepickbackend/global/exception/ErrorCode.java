@@ -57,6 +57,18 @@ public enum ErrorCode {
     /** 비활성화(is_active=false)된 포인트 아이템에 대한 교환 시도. */
     ITEM_NOT_ACTIVE(HttpStatus.BAD_REQUEST, "P005", "비활성화된 아이템입니다"),
 
+    /** 보유 아이템(user_items)을 찾을 수 없음 — 2026-04-14 C 방향 신규. */
+    USER_ITEM_NOT_FOUND(HttpStatus.NOT_FOUND, "P006", "보유 아이템을 찾을 수 없습니다"),
+
+    /** 보유 아이템에 대한 타인 접근 — 본인 소유가 아닌 경우. */
+    USER_ITEM_ACCESS_DENIED(HttpStatus.FORBIDDEN, "P007", "해당 아이템에 접근할 권한이 없습니다"),
+
+    /** 착용 불가 상태(만료/사용 완료)의 아이템에 대한 착용·사용 시도. */
+    USER_ITEM_INVALID_STATE(HttpStatus.BAD_REQUEST, "P008", "현재 사용할 수 없는 아이템 상태입니다"),
+
+    /** 아바타·배지가 아닌 카테고리에 대한 착용·해제 시도. */
+    USER_ITEM_NOT_EQUIPPABLE(HttpStatus.BAD_REQUEST, "P009", "착용할 수 없는 카테고리의 아이템입니다"),
+
     // ─────────────────────────────────────────────
     // 쿼터/한도 (Q0xx)
     // ─────────────────────────────────────────────
@@ -368,7 +380,13 @@ public enum ErrorCode {
     INVALID_QUIZ_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "ROAD005", "허용되지 않은 퀴즈 상태 전이입니다"),
 
     /** 도장깨기 — 이미 완료 처리한 영화를 중복 완료 시도. */
-    ALREADY_VERIFIED_MOVIE(HttpStatus.CONFLICT, "ROAD006", "이미 완료 처리한 영화입니다");
+    ALREADY_VERIFIED_MOVIE(HttpStatus.CONFLICT, "ROAD006", "이미 완료 처리한 영화입니다"),
+
+    /** 도장깨기 — 리뷰 인증 기록을 찾을 수 없음 (AI 운영 — 리뷰 인증 탭). */
+    COURSE_VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD007", "리뷰 인증 기록을 찾을 수 없습니다"),
+
+    /** 도장깨기 — REVIEW 타입이 아닌 인증 기록에 리뷰 인증 액션을 시도. */
+    NOT_REVIEW_VERIFICATION(HttpStatus.BAD_REQUEST, "ROAD008", "리뷰 인증 기록이 아닙니다");
 
     // ─────────────────────────────────────────────
     // 필드
