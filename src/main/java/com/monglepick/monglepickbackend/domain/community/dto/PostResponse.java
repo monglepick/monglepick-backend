@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.domain.community.entity.Post;
 import com.monglepick.monglepickbackend.domain.playlist.dto.PlaylistDto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 게시글 응답 DTO
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
  * @param content      본문
  * @param category     카테고리
  * @param author       작성자 닉네임
+ * @param authorId     작성자 ID (본인 글 여부 확인용)
  * @param viewCount    조회수
  * @param likeCount    좋아요 수
  * @param commentCount 댓글 수
@@ -21,6 +23,10 @@ import java.time.LocalDateTime;
  * @param playlistId   연결된 플레이리스트 ID (PLAYLIST_SHARE 전용, 나머지 null)
  * @param playlistInfo 플레이리스트 상세 정보 (PLAYLIST_SHARE 전용, 나머지 null)
  * @param rewardPoints 리워드 지급 포인트 (미지급 시 0, 조회 응답 시 null)
+ * @param imageUrls    첨부 이미지 URL 목록
+ *                     로컬: http://localhost:8080/images/userId/파일명.jpg
+ *                     서버: http://210.109.15.187/images/userId/파일명.jpg
+ *                     추후 S3 전환 시 URL만 변경, 구조 동일
  */
 public record PostResponse(
         Long id,
@@ -28,6 +34,7 @@ public record PostResponse(
         String content,
         String category,
         String author,
+        String authorId,        // ✅ 추가
         int viewCount,
         int likeCount,
         int commentCount,
@@ -35,28 +42,13 @@ public record PostResponse(
         LocalDateTime createdAt,
         Long playlistId,
         PlaylistDto.SharedPlaylistInfo playlistInfo,
-        Integer rewardPoints
+        Integer rewardPoints,
+        List<String> imageUrls  // ✅ 추가
 ) {
-    /**
-     * Post 엔티티를 PostResponse로 변환하는 팩토리 메서드.
-     *
-     * <p>{@link Post#getNickname()}은 MyBatis PostMapper의 JOIN users 쿼리 결과로 채워진다.
-     * JOIN 없이 로드된 Post 객체에서는 null이 될 수 있으며 이 경우 "알 수 없음"으로 표시한다.</p>
-     *
-     * <p>PLAYLIST_SHARE 카테고리일 때는 {@code playlistInfo} 필드에 플레이리스트 상세 정보가
-     * 담긴다 (findPlaylistSharePostsWithDetail 쿼리 결과에서 @Transient 필드로 채워진 경우).</p>
-     */
-    /** 조회 API용 — rewardPoints=null (리워드 정보 미포함). */
     public static PostResponse from(Post post) {
         return from(post, null);
     }
 
-    /**
-     * 게시글 생성 API용 — 리워드 지급 결과를 포함한다.
-     *
-     * @param post         게시글 엔티티
-     * @param rewardPoints 지급된 리워드 포인트 (미지급 시 null 또는 0)
-     */
     public static PostResponse from(Post post, Integer rewardPoints) {
         String nickname = post.getNickname() != null ? post.getNickname() : "알 수 없음";
 
@@ -72,12 +64,20 @@ public record PostResponse(
             );
         }
 
+        // imageUrls: DB에 콤마 구분 문자열로 저장 → List<String>으로 변환
+        // 예: "http://localhost:8080/images/userId/a.jpg,http://localhost:8080/images/userId/b.jpg"
+        // 추후 S3 전환 시 URL 형식만 바뀌고 이 코드는 그대로 유지
+        List<String> imageUrlList = (post.getImageUrls() != null && !post.getImageUrls().isBlank())
+                ? List.of(post.getImageUrls().split(","))
+                : List.of();
+
         return new PostResponse(
                 post.getPostId(),
                 post.getTitle(),
                 post.getContent(),
                 post.getCategory().name(),
                 nickname,
+                post.getUserId(),       // ✅ authorId
                 post.getViewCount(),
                 post.getLikeCount(),
                 post.getCommentCount(),
@@ -85,7 +85,8 @@ public record PostResponse(
                 post.getCreatedAt(),
                 post.getPlaylistId(),
                 playlistInfo,
-                rewardPoints
+                rewardPoints,
+                imageUrlList            // ✅ imageUrls
         );
     }
 }

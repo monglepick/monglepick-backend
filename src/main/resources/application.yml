@@ -8,6 +8,10 @@
 spring:
   application:
     name: monglepick-backend
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 50MB
 
   ## -------------------------------------------------------------------------
   ## MySQL 데이터소스 설정
@@ -210,12 +214,27 @@ logging:
     org.hibernate.SQL: ${HIBERNATE_SQL_LOG:DEBUG}
     org.hibernate.orm.jdbc.bind: ${HIBERNATE_BIND_LOG:TRACE}
 
+
+##------------------------
+##이미지 업로드
+##------------------------
+
 ## -------------------------------------------------------------------------
 ## 앱 커스텀 설정
 ## -------------------------------------------------------------------------
 ## 서비스 키, 포인트 시스템, 등급별 일일/월간 이용 제한 등
 ## 환경변수로 오버라이드 가능: SERVICE_API_KEY, FREE_POINTS_ON_SIGNUP 등
 app:
+  upload:
+    # 로컬: ./uploads (기본값)
+    # 서버 배포 시 .env에서 UPLOAD_DIR=/home/ubuntu/data 로 오버라이드
+    dir: ${UPLOAD_DIR:./uploads}
+
+    # 로컬: http://localhost:8080/images (Spring Boot가 직접 서빙)
+    # 서버 배포 시 .env에서 UPLOAD_URL_PREFIX=http://210.109.15.187/images 로 오버라이드
+    # 서버에서는 NGINX가 /images/** 를 /home/ubuntu/data/ 로 서빙
+    url-prefix: ${UPLOAD_URL_PREFIX:http://localhost:8080/images}
+
   ## 관리자 시드 계정 (DataInitializer가 기동 시 1회 생성, 멱등)
   ## 환경변수(.env) 미설정 시 의도적으로 기동 실패하여 누락 방지
   admin:
@@ -293,6 +312,7 @@ app:
       client-secret: ${NAVER_CLIENT_SECRET:}
       token-uri: https://nid.naver.com/oauth2.0/token
       userinfo-uri: https://openapi.naver.com/v1/nid/me
+
 
 ## -------------------------------------------------------------------------
 ## Toss Payments 설정

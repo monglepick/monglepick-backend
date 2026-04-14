@@ -22,6 +22,7 @@
     <!-- 게시글 기본 매핑 (nickname 없음) -->
     <resultMap id="postResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post">
         <id property="postId" column="post_id"/>
+        <result property="imageUrls" column="image_urls"/>
         <result property="userId" column="user_id"/>
         <result property="title" column="title"/>
         <result property="content" column="content"/>
@@ -102,10 +103,12 @@
 
     <sql id="postColumns">
         p.post_id, p.user_id, p.title, p.content, p.category,
-        p.view_count, p.status, p.like_count, p.comment_count,
-        p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
-        p.created_at, p.updated_at, p.created_by, p.updated_by
+    p.view_count, p.status, p.like_count, p.comment_count,
+    p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
+    p.image_urls,
+    p.created_at, p.updated_at, p.created_by, p.updated_by
     </sql>
+
 
     <!-- ═══ Post 단건 조회 ═══ -->
 
@@ -114,6 +117,7 @@
         FROM posts p
         WHERE p.post_id = #{postId}
     </select>
+
 
     <select id="findByIdWithNickname" resultMap="postWithNicknameResultMap">
         SELECT <include refid="postColumns"/>,
@@ -167,6 +171,8 @@
         </if>
     </select>
 
+
+
     <select id="countByCategoryAndStatus" resultType="long">
         SELECT COUNT(*)
         FROM posts
@@ -211,21 +217,23 @@
           AND status = #{status}
     </select>
 
-    <!-- ═══ Post 쓰기 ═══ -->
+    <!-- ═══ Post 쓰기 , 이미지 업로드 ═══ -->
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="postId">
         INSERT INTO posts (
             user_id, title, content, category, status,
             view_count, like_count, comment_count,
-            is_deleted, is_blinded, playlist_id,
+            is_deleted, is_blinded, playlist_id, image_urls,
             created_at, updated_at, created_by, updated_by
         ) VALUES (
-            #{userId}, #{title}, #{content}, #{category}, #{status},
-            0, 0, 0,
-            false, false, #{playlistId},
-            NOW(), NOW(), #{createdBy}, #{updatedBy}
-        )
+                     #{userId}, #{title}, #{content}, #{category}, #{status},
+                     0, 0, 0,
+                     false, false, #{playlistId}, #{imageUrls},
+                     NOW(), NOW(), #{createdBy}, #{updatedBy}
+                 )
     </insert>
+
+
 
     <update id="update">
         UPDATE posts

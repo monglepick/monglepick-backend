@@ -312,6 +312,8 @@ public class SecurityConfig {
 
                 /* JWT 토큰 교환/갱신 (KMG 패턴: OAuth2 성공 후 /jwt/exchange 호출) */
                 .requestMatchers("/jwt/exchange", "/jwt/refresh").permitAll()
+                     /* ✅ 추가 — 업로드 이미지 서빙 (비로그인 허용) */
+                    .requestMatchers(HttpMethod.GET, "/images/**").permitAll()
 
                 /* 로그인 관련 내부 경로 — OAuth2 체인에서 처리하지 못한 경우 대비 */
                 .requestMatchers("/login", "/login/**").permitAll()

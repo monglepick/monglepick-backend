@@ -5,6 +5,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import java.util.List;
+
 /**
  * 게시글 작성/수정 요청 DTO.
  *
@@ -33,5 +35,7 @@ public record PostCreateRequest(
         Post.Category category,
 
         /** 공유할 플레이리스트 ID (PLAYLIST_SHARE 전용, 다른 카테고리에서는 null) */
-        Long playlistId
+        Long playlistId,
+
+        List<String> imageUrls  // ✅ 추가 — null 허용 (이미지 없는 글도 가능)
 ) {}

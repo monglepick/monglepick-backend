@@ -86,6 +86,13 @@ public class PostService {
                 .status(PostStatus.PUBLISHED)
                 .playlistId(playlistId)
                 .build();
+        // ✅ 이미지 URL 저장
+        // 프론트에서 이미지 업로드 후 받은 URL 목록을 콤마 구분 문자열로 변환하여 저장
+        // 예: "http://localhost:8080/images/userId/a.jpg,http://localhost:8080/images/userId/b.jpg"
+        // 추후 S3 전환 시 URL 형식만 바뀌고 이 코드는 그대로 유지
+        if (request.imageUrls() != null && !request.imageUrls().isEmpty()) {
+            post.setImageUrls(String.join(",", request.imageUrls()));
+        }
 
         // MyBatis insert — useGeneratedKeys로 postId 자동 세팅
         postMapper.insert(post);

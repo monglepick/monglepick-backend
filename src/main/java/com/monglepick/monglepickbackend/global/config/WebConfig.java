@@ -2,6 +2,11 @@ package com.monglepick.monglepickbackend.global.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import java.nio.file.Paths;
 
 /**
  * Spring MVC 웹 설정.
@@ -57,6 +62,39 @@ public class WebConfig implements WebMvcConfigurer {
      *             .maxAge(3600);
      * }
      */
+    /**
+     * 파일 저장 경로
+     * 로컬: ./uploads (기본값)
+     * 서버 배포 시 .env에서 UPLOAD_DIR=/home/ubuntu/data 로 오버라이드
+     */
+    @Value("${app.upload.dir:./uploads}")
+    private String uploadDir;
+
+    /**
+     * 정적 파일(이미지) 서빙 설정
+     *
+     * 【로컬 개발】
+     *   /images/** 요청 → uploadDir 폴더에서 파일 서빙
+     *   예: GET http://localhost:8080/images/userId/abc.jpg
+     *       → ./uploads/userId/abc.jpg 반환
+     *
+     * 【서버 배포】
+     *   이 설정은 로컬에서만 사용됨
+     *   서버에서는 NGINX가 /images/** 를 /home/ubuntu/data/ 로 직접 서빙
+     *   NGINX 설정 예시:
+     *     location /images/ {
+     *         alias /home/ubuntu/data/;
+     *     }
+     *
+     * 【추후 S3/Object Storage 전환 시】
+     *   이 메서드 불필요 — S3 URL을 직접 반환하므로 로컬 서빙 필요 없음
+     */
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        String absolutePath = Paths.get(uploadDir).toAbsolutePath().normalize().toString();
+        registry.addResourceHandler("/images/**")
+                .addResourceLocations("file:" + absolutePath + "/");
+    }
 
     /*
      * ── 인터셉터 등록 예시 (향후 추가) ──

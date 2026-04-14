@@ -251,6 +251,18 @@ public class Post extends BaseAuditEntity {
         this.deletedAt = null;
     }
 
+    /**
+     * 첨부 이미지 URL 목록 (콤마로 구분하여 저장)
+     * 예: "http://localhost:8080/images/userId/a.jpg,http://localhost:8080/images/userId/b.jpg"
+     *
+     * 【추후 S3 전환 시】
+     * URL만 바뀌므로 DB 구조 변경 불필요
+     * 예: "https://objectstorage.kakaocloud.com/bucket/userId/a.jpg,..."
+     */
+    @Column(name = "image_urls", columnDefinition = "TEXT")
+    @Setter
+    private String imageUrls;
+
     /** 신고 블라인드 처리 (REQ_046: 누적 5회 이상 신고 시 호출) */
     public void blind() {
         this.isBlinded = true;
