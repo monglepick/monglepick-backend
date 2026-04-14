@@ -127,23 +127,31 @@
 
     <select id="findByStatusWithNickname" resultMap="postWithNicknameResultMap">
         SELECT <include refid="postColumns"/>,
-               u.nickname AS nickname
+        u.nickname AS nickname
         FROM posts p
         LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.status = #{status}
-          AND p.is_deleted = false
+        AND p.is_deleted = false
+        <if test="keyword != null and keyword != ''">
+            AND (p.title LIKE CONCAT('%', #{keyword}, '%')
+            OR p.content LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
         ORDER BY p.created_at DESC
         LIMIT #{offset}, #{limit}
     </select>
 
     <select id="findByCategoryAndStatusWithNickname" resultMap="postWithNicknameResultMap">
         SELECT <include refid="postColumns"/>,
-               u.nickname AS nickname
+        u.nickname AS nickname
         FROM posts p
         LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.category = #{category}
-          AND p.status = #{status}
-          AND p.is_deleted = false
+        AND p.status = #{status}
+        AND p.is_deleted = false
+        <if test="keyword != null and keyword != ''">
+            AND (p.title LIKE CONCAT('%', #{keyword}, '%')
+            OR p.content LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
         ORDER BY p.created_at DESC
         LIMIT #{offset}, #{limit}
     </select>
@@ -152,15 +160,23 @@
         SELECT COUNT(*)
         FROM posts
         WHERE status = #{status}
-          AND is_deleted = false
+        AND is_deleted = false
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%')
+            OR content LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
     </select>
 
     <select id="countByCategoryAndStatus" resultType="long">
         SELECT COUNT(*)
         FROM posts
         WHERE category = #{category}
-          AND status = #{status}
-          AND is_deleted = false
+        AND status = #{status}
+        AND is_deleted = false
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%')
+            OR content LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
     </select>
 
     <!-- ═══ 사용자별 Post ═══ -->

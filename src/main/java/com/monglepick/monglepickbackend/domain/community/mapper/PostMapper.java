@@ -51,21 +51,25 @@ public interface PostMapper {
      * @param status PostStatus enum 이름 ("PUBLISHED" / "DRAFT")
      */
     List<Post> findByStatusWithNickname(@Param("status") String status,
+                                        @Param("keyword") String keyword,
                                          @Param("offset") int offset,
                                          @Param("limit") int limit);
 
     /** 카테고리 + 상태별 게시글 목록 (닉네임 포함, 페이징) */
     List<Post> findByCategoryAndStatusWithNickname(@Param("category") String category,
                                                     @Param("status") String status,
+                                                    @Param("keyword") String keyword,
                                                     @Param("offset") int offset,
                                                     @Param("limit") int limit);
 
     /** 상태별 총 건수 (소프트 삭제 제외) */
-    long countByStatus(@Param("status") String status);
+    long countByStatus(@Param("status") String status
+                      ,@Param("keyword") String keyword);
 
     /** 카테고리 + 상태별 총 건수 (소프트 삭제 제외) */
     long countByCategoryAndStatus(@Param("category") String category,
-                                   @Param("status") String status);
+                                   @Param("status") String status,
+                                  @Param("keyword") String keyword);
 
     // ═══ 사용자별 Post ═══
 
@@ -303,4 +307,6 @@ public interface PostMapper {
 
     /** 독성 점수 구간별 분포 — [range_label, count] 배열 리스트 */
     List<java.util.Map<String, Object>> countDeclarationsByToxicityBucket();
+
+    long countByStatus(String name);
 }

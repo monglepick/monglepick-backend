@@ -58,6 +58,7 @@ public class PostController {
     @GetMapping
     public ResponseEntity<Page<PostResponse>> getPosts(
             @RequestParam(required = false) String category,
+            @RequestParam(required = false) String keyword,
             @PageableDefault(size = 15, sort = "createdAt", direction = Sort.Direction.DESC)
             Pageable pageable) {
 
@@ -66,7 +67,7 @@ public class PostController {
         Pageable safePage = org.springframework.data.domain.PageRequest.of(
                 pageable.getPageNumber(), safeSize, pageable.getSort());
 
-        Page<PostResponse> posts = postService.getPosts(category, safePage);
+        Page<PostResponse> posts = postService.getPosts(category,  keyword, safePage);
         return ResponseEntity.ok(posts);
     }
 

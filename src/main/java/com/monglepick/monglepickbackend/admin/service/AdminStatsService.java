@@ -168,7 +168,7 @@ public class AdminStatsService {
         double avgRating = avgRatingRaw != null ? Math.round(avgRatingRaw * 100.0) / 100.0 : 0.0;
 
         /* 전체 게시글 수 (PUBLISHED) */
-        long totalPosts = postMapper.countByStatus(PostStatus.PUBLISHED.name());
+        long totalPosts = postMapper.countByStatus(PostStatus.PUBLISHED.name(),null);
 
         log.debug("[admin-stats] 서비스 개요 조회 — DAU={}, MAU={}, 신규={}({}일)", dau, mau, newUsersWeek, days);
         return new OverviewResponse(dau, mau, newUsersWeek, totalReviews, avgRating, totalPosts);
@@ -974,7 +974,7 @@ public class AdminStatsService {
      * <p>전체/오늘 게시글, 댓글 수, 전체/미처리 신고 수.</p>
      */
     public CommunityOverviewResponse getCommunityOverview() {
-        long totalPosts = postMapper.countByStatus(PostStatus.PUBLISHED.name());
+        long totalPosts = postMapper.countByStatus(PostStatus.PUBLISHED.name(),null);
         long totalComments = postMapper.countAllComments();
         long totalReports = postMapper.countAllDeclarations();
         long pendingReports = postMapper.countDeclarationsByStatus("pending");

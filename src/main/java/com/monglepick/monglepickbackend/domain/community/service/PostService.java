@@ -134,7 +134,7 @@ public class PostService {
      * <p>PLAYLIST_SHARE 카테고리는 playlist JOIN 전용 쿼리를 사용하여
      * 플레이리스트 상세 정보(이름/설명/커버/좋아요/영화수)를 함께 반환한다.</p>
      */
-    public Page<PostResponse> getPosts(String category, Pageable pageable) {
+    public Page<PostResponse> getPosts(String category, String keyword, Pageable pageable) {
         int offset = (int) pageable.getOffset();
         int limit  = pageable.getPageSize();
         String statusStr = PostStatus.PUBLISHED.name();
@@ -146,16 +146,15 @@ public class PostService {
             Post.Category cat = Post.Category.fromValue(category);
 
             if (cat == Post.Category.PLAYLIST_SHARE) {
-                // PLAYLIST_SHARE: playlist JOIN 전용 쿼리 (플레이리스트 상세 포함)
                 posts = postMapper.findPlaylistSharePostsWithDetail(offset, limit);
                 total = postMapper.countPlaylistSharePosts();
             } else {
-                posts = postMapper.findByCategoryAndStatusWithNickname(cat.name(), statusStr, offset, limit);
-                total = postMapper.countByCategoryAndStatus(cat.name(), statusStr);
+                posts = postMapper.findByCategoryAndStatusWithNickname(cat.name(), statusStr, keyword, offset, limit);
+                total = postMapper.countByCategoryAndStatus(cat.name(), statusStr, keyword);
             }
         } else {
-            posts = postMapper.findByStatusWithNickname(statusStr, offset, limit);
-            total = postMapper.countByStatus(statusStr);
+            posts = postMapper.findByStatusWithNickname(statusStr, keyword, offset, limit);
+            total = postMapper.countByStatus(statusStr, keyword);
         }
 
         List<PostResponse> content = posts.stream().map(PostResponse::from).toList();
@@ -350,6 +349,7 @@ public class PostService {
         if (existing != null) {
             /* 좋아요 취소 — hard-delete */
             postMapper.deletePostLikeByPostIdAndUserId(postId, userId);
+            postMapper.updateLikeCount(postId, -1);
             liked = false;
         } else {
             /* 좋아요 등록 — INSERT.
@@ -361,9 +361,11 @@ public class PostService {
                                 .userId(userId)
                                 .build()
                 );
+                postMapper.updateLikeCount(postId, +1);
             } catch (org.springframework.dao.DataIntegrityViolationException e) {
                 log.warn("게시글 좋아요 중복 INSERT 감지 (race condition) — userId:{}, postId:{}", userId, postId);
                 postMapper.deletePostLikeByPostIdAndUserId(postId, userId);
+                postMapper.updateLikeCount(postId, -1);
                 long count = postMapper.countPostLikeByPostId(postId);
                 return LikeToggleResponse.of(false, count);
             }
@@ -464,6 +466,8 @@ public class PostService {
             throw new BusinessException(ErrorCode.POST_ACCESS_DENIED);
         }
     }
+
+
 
     /**
      * PLAYLIST_SHARE 게시글 작성 시 플레이리스트 유효성을 검증하고 playlistId를 반환한다.
