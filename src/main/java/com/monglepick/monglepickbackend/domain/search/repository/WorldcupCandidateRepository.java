@@ -45,17 +45,21 @@ public interface WorldcupCandidateRepository extends JpaRepository<WorldcupCandi
     List<String> findActiveMovieIds(@Param("category") String category);
 
     /**
-     * 인기도 임계값 미만 후보를 일괄 비활성화한다 (관리자 일괄 작업).
+     * movies.popularity_score 기준으로 인기도 임계값 미만 후보를 일괄 비활성화한다.
+     *
+     * <p>월드컵 후보 테이블의 비정규화 popularity 컬럼이 아니라
+     * movies 테이블의 최신 popularity_score를 직접 비교한다.</p>
      *
      * @param threshold popularity 최소값
      * @return 영향받은 행 수
      */
     @Modifying
-    @Query("""
-            UPDATE WorldcupCandidate w
-            SET w.isActive = false
-            WHERE w.popularity < :threshold
-              AND w.isActive = true
-            """)
+    @Query(value = """
+            UPDATE worldcup_candidate w
+            JOIN movies m ON m.movie_id = w.movie_id
+            SET w.is_active = false
+            WHERE w.is_active = true
+              AND COALESCE(m.popularity_score, 0) < :threshold
+            """, nativeQuery = true)
     int deactivateBelowPopularity(@Param("threshold") double threshold);
 }

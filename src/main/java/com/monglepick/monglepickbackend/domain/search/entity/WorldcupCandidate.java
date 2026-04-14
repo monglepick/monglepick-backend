@@ -75,8 +75,9 @@ public class WorldcupCandidate extends BaseAuditEntity {
     /**
      * 영화 인기도 점수 (참조용 비정규화 값, 기본 0).
      *
-     * <p>관리자가 임계값 기반 일괄 제외 시 활용한다.
-     * Movie.popularityScore와 동기화되지 않으므로 운영 시 별도 갱신이 필요하다.</p>
+     * <p>관리자 화면 성능과 운영 편의를 위해 snapshot으로 보관한다.
+     * 생성/수정 시 movies.popularity_score 기준으로 재동기화되며,
+     * 일괄 비활성화는 항상 movies 테이블의 최신 popularity_score를 직접 사용한다.</p>
      */
     @Column(name = "popularity", nullable = false)
     @Builder.Default

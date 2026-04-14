@@ -45,6 +45,26 @@ public interface MovieRepository extends JpaRepository<Movie, String> {
     Page<Movie> searchByTitle(@Param("keyword") String keyword, Pageable pageable);
 
     /**
+     * 관리자 월드컵 후보 등록용 영화 검색.
+     *
+     * <p>제목 키워드와 인기도 범위를 조합해 페이지 단위로 조회한다.
+     * keyword가 비어 있으면 전체 영화 중 popularity 범위만으로도 검색 가능하다.</p>
+     */
+    @Query("""
+            SELECT m
+            FROM Movie m
+            WHERE (:keyword IS NULL OR :keyword = '' OR m.title LIKE %:keyword% OR m.titleEn LIKE %:keyword%)
+              AND (:popularityMin IS NULL OR COALESCE(m.popularityScore, 0) >= :popularityMin)
+              AND (:popularityMax IS NULL OR COALESCE(m.popularityScore, 0) <= :popularityMax)
+            """)
+    Page<Movie> searchForWorldcupCandidateSelection(
+            @Param("keyword") String keyword,
+            @Param("popularityMin") Double popularityMin,
+            @Param("popularityMax") Double popularityMax,
+            Pageable pageable
+    );
+
+    /**
      *
      * 인기 영화 조회 (평점 내림차순, 평점 NULL 제외).
      * <p>홈 페이지 "인기 영화" 섹션에서 사용됩니다.</p>

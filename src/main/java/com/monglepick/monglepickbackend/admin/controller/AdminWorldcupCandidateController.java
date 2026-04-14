@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.Bulk
 import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.CandidateResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.CreateRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.DeactivateBelowRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.MovieSearchResult;
 import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.UpdateActiveRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.UpdateRequest;
 import com.monglepick.monglepickbackend.admin.service.AdminWorldcupCandidateService;
@@ -33,11 +34,12 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 관리자 월드컵 후보 영화(WorldcupCandidate) 관리 API 컨트롤러.
  *
- * <p>관리자 페이지 "운영 도구 → 월드컵 후보" 메뉴의 7개 엔드포인트를 제공한다.
+ * <p>관리자 페이지 "운영 도구 → 월드컵 후보" 메뉴의 8개 엔드포인트를 제공한다.
  * 월드컵 후보 풀을 큐레이션하고, 인기 없는 영화를 일괄 제외한다.</p>
  *
  * <h3>담당 엔드포인트</h3>
  * <ul>
+ *   <li>GET    /api/v1/admin/worldcup-candidates/movies/search  — 후보 등록용 영화 검색</li>
  *   <li>GET    /api/v1/admin/worldcup-candidates                — 후보 목록 (페이징 + 카테고리 필터)</li>
  *   <li>GET    /api/v1/admin/worldcup-candidates/{id}           — 단건 조회</li>
  *   <li>POST   /api/v1/admin/worldcup-candidates                — 신규 등록 ((movieId, category) UNIQUE)</li>
@@ -58,6 +60,36 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminWorldcupCandidateController {
 
     private final AdminWorldcupCandidateService adminWorldcupCandidateService;
+
+    /**
+     * 월드컵 후보 신규 등록용 영화 검색.
+     *
+     * <p>recommend 검색 API를 우선 호출하여 ES 검색을 사용하고,
+     * recommend 장애/미설정 시에는 backend MySQL 검색으로 폴백한다.</p>
+     */
+    @Operation(
+            summary = "영화 검색 (월드컵 후보 등록용)",
+            description = "제목 키워드와 popularity 범위로 영화를 검색합니다. 월드컵 후보 신규 등록 화면에서 여러 영화를 선택할 때 사용합니다."
+    )
+    @GetMapping("/movies/search")
+    public ResponseEntity<ApiResponse<Page<MovieSearchResult>>> searchMovies(
+            @Parameter(description = "검색 키워드 (한국어 또는 영어 제목)", example = "인터스텔라")
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = "최소 인기도 (TMDB popularity_score 기준)", example = "10")
+            @RequestParam(required = false) Double popularityMin,
+            @Parameter(description = "최대 인기도 (TMDB popularity_score 기준)", example = "20")
+            @RequestParam(required = false) Double popularityMax,
+            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기 (최대 50)", example = "50")
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        log.debug("[관리자] 월드컵 후보 영화 검색 — keyword={}, popularityMin={}, popularityMax={}, page={}, size={}",
+                keyword, popularityMin, popularityMax, page, size);
+        return ResponseEntity.ok(ApiResponse.ok(
+                adminWorldcupCandidateService.searchMovies(keyword, popularityMin, popularityMax, page, size)
+        ));
+    }
 
     /** 후보 목록 조회 */
     @Operation(
@@ -101,7 +133,7 @@ public class AdminWorldcupCandidateController {
     }
 
     /** 후보 메타 수정 */
-    @Operation(summary = "월드컵 후보 수정", description = "popularity/isActive/adminNote 일괄 수정")
+    @Operation(summary = "월드컵 후보 수정", description = "movies.popularity_score 재동기화 + isActive/adminNote 수정")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<CandidateResponse>> updateCandidate(
             @PathVariable Long id,
@@ -129,11 +161,11 @@ public class AdminWorldcupCandidateController {
     /**
      * 인기도 임계값 미만 일괄 비활성화.
      *
-     * <p>예: threshold=5.0 → popularity &lt; 5.0 인 모든 활성 후보를 isActive=false로 전환.</p>
+     * <p>예: threshold=5.0 → movies.popularity_score &lt; 5.0 인 모든 활성 후보를 isActive=false로 전환.</p>
      */
     @Operation(
             summary = "인기 없는 후보 일괄 비활성화",
-            description = "popularity < threshold 인 모든 활성 후보를 isActive=false로 일괄 전환"
+            description = "movies.popularity_score < threshold 인 모든 활성 후보를 isActive=false로 일괄 전환"
     )
     @PostMapping("/deactivate-below")
     public ResponseEntity<ApiResponse<BulkOperationResponse>> deactivateBelow(
