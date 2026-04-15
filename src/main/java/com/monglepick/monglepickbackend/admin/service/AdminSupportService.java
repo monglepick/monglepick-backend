@@ -102,12 +102,61 @@ public class AdminSupportService {
     }
 
     /**
+     * 커뮤니티 공지 탭(유저 공개) 용 활성 공지 페이징 조회.
+     *
+     * <p>{@link #getActiveAppNotices} 가 홈 메인용(BANNER/POPUP/MODAL만)인 것과 달리
+     * 커뮤니티 "공지사항" 탭에서는 LIST_ONLY 포함 전체 활성/기간 내 공지를 보여준다.
+     * 정렬: isPinned DESC (고정 우선), createdAt DESC (최신). 비로그인 허용.</p>
+     *
+     * @param pageable 페이지 정보 (page/size)
+     * @return 노출 중 공지 페이지
+     */
+    public Page<NoticeResponse> getActivePublicNotices(Pageable pageable) {
+        log.debug("[AdminSupport] 공개 공지 페이지 조회 — page={}, size={}",
+                pageable.getPageNumber(), pageable.getPageSize());
+        return adminNoticeRepository
+                .findActivePublicNotices(LocalDateTime.now(), pageable)
+                .map(this::toNoticeResponse);
+    }
+
+    /**
+     * 커뮤니티 공지 탭용 단건 조회 (비로그인 허용).
+     *
+     * <p>관리자용 {@link #getNotice(Long)} 과 달리 <b>활성 + 기간 내</b> 공지만 반환한다.
+     * 비활성/기간 외 공지는 일반 유저에게 노출되지 않아야 하므로 동일한
+     * "찾을 수 없음" 예외로 응답해 정보 누출을 차단한다.</p>
+     *
+     * @param id 공지 PK
+     * @return 공개 가능한 공지 상세
+     * @throws BusinessException 공지 없음/비활성/기간 외 모두 동일한 INVALID_INPUT 으로 응답
+     */
+    public NoticeResponse getPublicNotice(Long id) {
+        log.debug("[AdminSupport] 공개 공지 단건 조회 — noticeId={}", id);
+        SupportNotice notice = findNoticeOrThrow(id);
+
+        // 비활성 / 공개 전 / 공개 종료 — 보안상 모두 동일 메시지로 반환
+        LocalDateTime now = LocalDateTime.now();
+        boolean inactive = !Boolean.TRUE.equals(notice.getIsActive());
+        boolean notYetStarted = notice.getStartAt() != null && notice.getStartAt().isAfter(now);
+        boolean alreadyEnded = notice.getEndAt() != null && notice.getEndAt().isBefore(now);
+        if (inactive || notYetStarted || alreadyEnded) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "공지사항을 찾을 수 없습니다: id=" + id);
+        }
+        return toNoticeResponse(notice);
+    }
+
+    /**
      * 앱 메인 노출 중 공지 목록 조회 (비로그인 API 용, 구 AppNotice 흡수).
      *
+     * <p>2026-04-15: {@code pinned} 파라미터 추가. 홈 화면에서는 고정 공지만 보고자 할 때
+     * {@code pinned=true} 로 호출. null 이면 고정 여부 무관 전체 노출.</p>
+     *
      * @param displayType BANNER/POPUP/MODAL 필터 (null 이면 전체 앱 메인 노출)
+     * @param pinned      고정 여부 필터 (null/true/false)
      * @return 노출 중 공지 목록
      */
-    public List<NoticeResponse> getActiveAppNotices(String displayType) {
+    public List<NoticeResponse> getActiveAppNotices(String displayType, Boolean pinned) {
         String filter = null;
         if (displayType != null && !displayType.isBlank()) {
             String upper = displayType.trim().toUpperCase();
@@ -117,8 +166,19 @@ public class AdminSupportService {
             }
             filter = upper;
         }
-        return adminNoticeRepository.findActiveAppNotices(LocalDateTime.now(), filter)
+        return adminNoticeRepository
+                .findActiveAppNotices(LocalDateTime.now(), filter, pinned)
                 .stream().map(this::toNoticeResponse).toList();
+    }
+
+    /**
+     * 하위 호환 시그니처 — pinned 필터 없이 전체 앱 메인 공지를 조회한다.
+     *
+     * <p>2026-04-15: 신규 {@link #getActiveAppNotices(String, Boolean)} 추가로
+     * 기존 한 인자 호출부가 깨지지 않도록 유지. 내부적으로 null 을 전달한다.</p>
+     */
+    public List<NoticeResponse> getActiveAppNotices(String displayType) {
+        return getActiveAppNotices(displayType, null);
     }
 
     /** 공지사항 등록. */

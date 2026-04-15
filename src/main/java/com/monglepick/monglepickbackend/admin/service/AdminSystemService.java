@@ -22,14 +22,32 @@ import java.util.Map;
 @Service
 public class AdminSystemService {
 
-    /** 각 서비스 헬스체크 URL */
+    /**
+     * 각 서비스 헬스체크 URL.
+     *
+     * <p>운영(Prod) 환경에서는 backend 컨테이너 안에서 다른 컨테이너/외부 서비스를 호출해야 하므로
+     * 기본값(localhost:*)을 그대로 쓰면 모두 connection refused 가 난다. 운영 docker-compose 에서
+     * `ADMIN_HEALTH_*` 환경변수로 다음과 같이 오버라이드한다 (Spring relaxed binding).</p>
+     *
+     * <ul>
+     *   <li>backend  : http://localhost:8080/actuator/health  (자기 자신 — 컨테이너 내부 actuator)</li>
+     *   <li>agent    : http://monglepick-agent:8000          (compose 내부 DNS, 코드에서 /health 자동 부여)</li>
+     *   <li>recommend: http://monglepick-recommend:8001      (compose 내부 DNS, 코드에서 /health 자동 부여)</li>
+     *   <li>nginx    : http://10.20.0.13/health              (VM1 내부 IP. 전체 URL 그대로 사용)</li>
+     * </ul>
+     *
+     * <p>로컬 개발은 모든 서비스가 호스트의 localhost 로 도달 가능하므로 기본값으로 동작한다.</p>
+     */
+    @Value("${admin.health.backend-url:http://localhost:8080/actuator/health}")
+    private String backendUrl;
+
     @Value("${admin.health.agent-url:http://localhost:8000}")
     private String agentUrl;
 
     @Value("${admin.health.recommend-url:http://localhost:8001}")
     private String recommendUrl;
 
-    @Value("${admin.health.nginx-url:http://localhost:80}")
+    @Value("${admin.health.nginx-url:http://localhost:80/health}")
     private String nginxUrl;
 
     /* ── JWT 설정값 (application.yml에서 읽기) ── */
@@ -50,9 +68,12 @@ public class AdminSystemService {
      */
     public ServiceStatusResponse checkServiceStatus() {
         return new ServiceStatusResponse(
-                checkHealth("Spring Boot", "http://localhost:8080/health"),
+                // backend 는 기본값/오버라이드 모두 전체 URL 형태 (예: /actuator/health)
+                checkHealth("Spring Boot", backendUrl),
+                // agent / recommend 는 base URL + /health 조합
                 checkHealth("AI Agent", agentUrl + "/health"),
                 checkHealth("Recommend", recommendUrl + "/health"),
+                // nginx 는 전체 URL 형태 (기본값/오버라이드 모두)
                 checkHealth("Nginx", nginxUrl)
         );
     }

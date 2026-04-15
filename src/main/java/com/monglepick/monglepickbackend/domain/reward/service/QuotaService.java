@@ -134,27 +134,121 @@ public class QuotaService {
     // ──────────────────────────────────────────────
 
     /**
-     * v3.3 AI 추천 쿼터를 3-소스 모델로 확인한다.
+     * v3.3 AI 추천 쿼터 현황을 <b>읽기 전용</b>으로 조회한다 (2026-04-15 신설).
+     *
+     * <p>차감 없이 현재 상태만 반환한다. SSE 요청 시작 시점에 "사용 가능한 소스 + 잔여 한도"
+     * 를 안내하기 위해 Agent 가 호출한다. 실제 차감은 {@code movie_card} 발행 직전에
+     * {@link #consumeQuota(String, String)} 으로 수행된다.</p>
+     *
+     * <h4>읽기전용 특징</h4>
+     * <ul>
+     *   <li>{@code SELECT ... FOR UPDATE} 락 없음 ({@code findByUserId})</li>
+     *   <li>lazy reset 미적용. 대신 {@code daily_ai_reset} 과 오늘 날짜 비교해서
+     *       <b>effective dailyUsed</b> 만 계산 (쓰기 없음)</li>
+     *   <li>{@code user_ai_quota} 레코드 부재 시 생성하지 않고 기본값(0/0) 으로 응답</li>
+     * </ul>
+     *
+     * @param userId 사용자 ID
+     * @param grade  사용자 등급
+     * @return 쿼터 현황 (차감 없음). {@code allowed=true} 면 어떤 소스로 쓸 수 있는지 {@code source} 에 기록
+     */
+    @Transactional(readOnly = true)
+    public QuotaCheckResult checkQuota(String userId, String grade) {
+        log.debug("v3.3 쿼터 조회(read-only): userId={}, grade={}", userId, grade);
+
+        String gradeKey = (grade != null) ? grade.toUpperCase() : "NORMAL";
+        GradeQuota quota = gradeQuotas.getOrDefault(gradeKey, gradeQuotas.get("NORMAL"));
+        LocalDate today = LocalDate.now();
+
+        // ── 락 없이 현황 조회. 레코드 없으면 0/0 기본값 ─────────────────────────
+        Optional<UserAiQuota> aiQuotaOpt = userAiQuotaRepository.findByUserId(userId);
+
+        // daily_ai_used 는 날짜가 바뀌었으면 effective 0 으로 간주 (실 write 없음)
+        int dailyUsed = aiQuotaOpt
+                .map(a -> {
+                    LocalDate lastReset = a.getDailyAiReset();
+                    boolean sameDay = (lastReset != null) && lastReset.isEqual(today);
+                    return sameDay ? a.getDailyAiUsed() : 0;
+                })
+                .orElse(0);
+
+        int purchasedRemaining = aiQuotaOpt.map(UserAiQuota::getPurchasedAiTokens).orElse(0);
+        int monthlyCouponUsed = aiQuotaOpt
+                .map(a -> {
+                    LocalDate monthlyReset = a.getMonthlyReset();
+                    boolean sameMonth = (monthlyReset != null)
+                            && monthlyReset.getYear() == today.getYear()
+                            && monthlyReset.getMonth() == today.getMonth();
+                    return sameMonth ? a.getMonthlyCouponUsed() : 0;
+                })
+                .orElse(0);
+
+        // 구독 보너스 잔여는 기존 헬퍼 재사용 (헬퍼도 read-only)
+        int subBonus = getSubBonusRemaining(userId, today);
+
+        // ── 소스 결정 (차감 없이 allowed/source 만 판정) ─────────────────────────
+        boolean gradeUnlimited = (quota.dailyLimit() == -1);
+        boolean gradeAvailable = gradeUnlimited || dailyUsed < quota.dailyLimit();
+
+        if (gradeAvailable) {
+            return new QuotaCheckResult(
+                    true, "GRADE_FREE",
+                    dailyUsed, quota.dailyLimit(),
+                    subBonus, purchasedRemaining,
+                    quota.maxInputLength(), ""
+            );
+        }
+        if (subBonus > 0) {
+            return new QuotaCheckResult(
+                    true, "SUB_BONUS",
+                    dailyUsed, quota.dailyLimit(),
+                    subBonus, purchasedRemaining,
+                    quota.maxInputLength(), ""
+            );
+        }
+        int monthlyLimit = getMonthlyLimitForGrade(userId);
+        boolean monthlyLimitExceeded = (monthlyLimit != -1 && monthlyCouponUsed >= monthlyLimit);
+        if (purchasedRemaining > 0 && !monthlyLimitExceeded) {
+            return new QuotaCheckResult(
+                    true, "PURCHASED",
+                    dailyUsed, quota.dailyLimit(),
+                    subBonus, purchasedRemaining,
+                    quota.maxInputLength(), ""
+            );
+        }
+
+        // 모든 소스 소진 → BLOCKED
+        String blockedMsg = buildBlockedMessage(subBonus, purchasedRemaining, quota.dailyLimit());
+        return new QuotaCheckResult(
+                false, "BLOCKED",
+                dailyUsed, quota.dailyLimit(),
+                subBonus, purchasedRemaining,
+                quota.maxInputLength(), blockedMsg
+        );
+    }
+
+    /**
+     * v3.3 AI 추천 쿼터를 3-소스 모델로 <b>차감</b>한다 (2026-04-15 리네임: check→consume).
      *
      * <p>소스 1(GRADE_FREE) → 소스 2(SUB_BONUS) → 소스 3(PURCHASED) 순서로 확인하여
-     * 최초 가능한 소스에서 1회 차감하고 {@link QuotaCheckResult}를 반환한다.</p>
+     * 최초 가능한 소스에서 <b>실제 1회 차감</b>하고 {@link QuotaCheckResult}를 반환한다.
+     * {@code SELECT ... FOR UPDATE} 로 동시성 안전. 결과는 {@code "BLOCKED"} 포함 가능.</p>
      *
-     * <h4>v3.3 변경점</h4>
-     * <ul>
-     *   <li>daily_ai_used, purchased_ai_tokens 조회/갱신: user_points → user_ai_quota</li>
-     *   <li>소스 1 차감(daily_ai_used++): 이 메서드 내 {@code userAiQuota.incrementDailyAiUsed()} 직접 처리
-     *       (기존 PointService.incrementAiUsage() 의존 제거)</li>
-     *   <li>소스 3 차감: {@code userAiQuota.consumePurchasedToken()} 호출</li>
-     * </ul>
+     * <h4>2026-04-15 변경 (쓰기/읽기 분리)</h4>
+     * <p>기존 {@code checkQuota} 가 "확인" 이름과 달리 체크 시점에 카운터를 즉시 증가시켜
+     * "추천이 실제로 완료(movie_card 발행)되기 전에 쿼터가 소진" 되는 정책 버그가 있었다.
+     * 본 메서드는 그 쓰기 경로만 담당하며, Agent 의 {@code movie_card} yield 직전 시점에
+     * {@code POST /api/v1/point/consume} 을 통해 호출된다. 순수 조회는
+     * {@link #readQuotaStatus(String, String)} 를 사용한다.</p>
      *
      * @param userId 사용자 ID
      * @param grade  사용자 등급 문자열 (NORMAL/BRONZE/SILVER/GOLD/PLATINUM/DIAMOND).
      *               null이거나 알 수 없는 등급이면 NORMAL로 fallback
-     * @return 쿼터 확인 결과 (source, 잔여 횟수, 최대 입력 길이 등 포함)
+     * @return 쿼터 차감 결과 (source, 잔여 횟수, 최대 입력 길이 등 포함)
      */
     @Transactional
-    public QuotaCheckResult checkQuota(String userId, String grade) {
-        log.debug("v3.3 쿼터 확인 시작: userId={}, grade={}", userId, grade);
+    public QuotaCheckResult consumeQuota(String userId, String grade) {
+        log.debug("v3.3 쿼터 차감 시작: userId={}, grade={}", userId, grade);
 
         // 1. 등급별 쿼터 설정 조회 (알 수 없는 등급이면 NORMAL fallback)
         String gradeKey = (grade != null) ? grade.toUpperCase() : "NORMAL";

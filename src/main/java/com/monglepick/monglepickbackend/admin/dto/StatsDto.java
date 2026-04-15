@@ -133,18 +133,34 @@ public class StatsDto {
     /**
      * 추천 로그 단건 응답 (테이블 뷰).
      *
-     * <p>recommendation_logs 테이블 구현 시 실데이터로 교체 예정.</p>
+     * <p>2026-04-15 확장: Agent 가 `recommendation_log` 에 직접 저장하는 필드들이
+     * 관리자 화면에 실제로 노출되도록 DTO 확장. 기존 필드명/타입은 하위 호환 위해 유지하고
+     * 영화 제목/이유/랭크/하이브리드 점수/intent/세션 ID 를 추가했다.</p>
      *
-     * @param userId    사용자 ID
-     * @param movieId   추천된 영화 ID
-     * @param score     추천 점수 (0.0~1.0)
-     * @param feedback  사용자 피드백 ("LIKE", "DISLIKE", "SKIP", null)
-     * @param createdAt 추천 발생 시각
+     * @param recommendationLogId 추천 로그 PK (Row key)
+     * @param userId              사용자 ID
+     * @param movieId             추천된 영화 ID
+     * @param movieTitle          추천된 영화 제목 (Movie JOIN FETCH 결과)
+     * @param score               추천 점수 (recommendation_log.score 원본값)
+     * @param hybridScore         하이브리드 합산 점수 (CF + CBF, nullable)
+     * @param rankPosition        추천 목록 내 순위 (1부터, nullable)
+     * @param reason              AI 가 생성한 추천 이유
+     * @param userIntent          Intent-First 요약 (nullable)
+     * @param sessionId           chat_session_archive.session_id 와 매칭
+     * @param feedback            사용자 피드백 ("CLICKED", null). 상세 피드백은 별도 탭 예정
+     * @param createdAt           추천 발생 시각
      */
     public record RecommendationLogResponse(
+            Long recommendationLogId,
             String userId,
             String movieId,
+            String movieTitle,
             double score,
+            Double hybridScore,
+            Integer rankPosition,
+            String reason,
+            String userIntent,
+            String sessionId,
             String feedback,
             LocalDateTime createdAt
     ) {}

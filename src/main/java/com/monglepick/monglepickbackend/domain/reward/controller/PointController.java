@@ -108,6 +108,36 @@ public class PointController extends BaseController {
     }
 
     /**
+     * AI 쿼터 소비 (Agent → Backend, 2026-04-15 신규).
+     *
+     * <p>Agent 가 {@code recommendation_ranker} 완료 후 {@code movie_card} SSE 이벤트를
+     * 발행하는 시점에 호출한다. 실제 쿼터 차감(GRADE_FREE/SUB_BONUS/PURCHASED)이 여기서
+     * 발생하며, {@code /check} 는 조회 전용으로 분리되었다.</p>
+     *
+     * <p>요청 DTO 는 {@link CheckRequest} 를 재사용한다 ({@code userId} 만 필수,
+     * {@code cost} 필드는 v3.0 정책상 무시되어 Agent 는 0 을 보낸다).</p>
+     *
+     * @param request 소비 요청 (userId 필수)
+     * @return 200 OK + CheckResponse (allowed, source, dailyUsed/Limit, 잔여 카운트)
+     */
+    @Operation(summary = "AI 쿼터 소비", description = "movie_card 발행 시점에 실제 1회 차감 (GRADE_FREE/SUB_BONUS/PURCHASED)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "차감 성공 또는 BLOCKED (allowed=false)"),
+            @ApiResponse(responseCode = "401", description = "인증 실패")
+    })
+    @SecurityRequirement(name = "ServiceKeyAuth")
+    @PostMapping("/consume")
+    public ResponseEntity<CheckResponse> consumePoint(
+            Principal principal,
+            @Valid @RequestBody CheckRequest request) {
+        String userId = resolveUserIdWithServiceKey(principal, request.userId());
+        log.debug("POST /api/v1/point/consume — userId={}", userId);
+
+        CheckResponse response = pointService.consumePoint(userId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * 포인트 차감 (Agent → Backend).
      *
      * <p>AI Agent가 추천 완료 후 포인트를 차감한다. 비관적 락으로 동시성을 보장한다.</p>

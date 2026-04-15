@@ -13,8 +13,10 @@ import com.monglepick.monglepickbackend.domain.payment.repository.PaymentOrderRe
 import com.monglepick.monglepickbackend.domain.payment.repository.SubscriptionPlanRepository;
 import com.monglepick.monglepickbackend.domain.payment.repository.UserSubscriptionRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationImpact;
+import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationLog;
 import com.monglepick.monglepickbackend.domain.recommendation.entity.UserBehaviorProfile;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationImpactRepository;
+import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationLogRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.UserBehaviorProfileRepository;
 import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserAiQuotaRepository;
@@ -99,6 +101,13 @@ public class AdminStatsService {
     private final PostMapper postMapper;
     /* 추천 임팩트 리포지토리 — CTR/위시리스트율 집계 */
     private final RecommendationImpactRepository recommendationImpactRepository;
+
+    /**
+     * 추천 로그 리포지토리 (2026-04-15 추가).
+     * 관리자 "AI 추천 분석" 탭이 기존에 RecommendationImpact 를 조회하여 "클릭/찜/봤어요"
+     * 파생 피드백만 보여주던 것을 {@link RecommendationLog} 로 교체하기 위한 의존성.
+     */
+    private final RecommendationLogRepository recommendationLogRepository;
     /* 검색 이력 리포지토리 — 인기 검색어/검색 품질 집계 */
     private final SearchHistoryRepository searchHistoryRepository;
     /* Phase 4: Mock 제거 — Movie genres 파싱 (장르 분포 집계용) */
@@ -320,53 +329,66 @@ public class AdminStatsService {
     /**
      * 추천 로그 목록을 반환한다.
      *
-     * <p>Phase 4 (Mock 제거): {@code recommendation_impact} 테이블에서 최근 임팩트를
-     * 페이징 조회하여 RecommendationLogResponse 로 매핑한다. 점수(score)는 별도 저장 컬럼이 없으므로
-     * 추천 위치(recommendationPosition)를 0~1 정규화한 값으로 대체한다 (1순위=1.0, 10순위=0.1 등).
-     * 피드백은 wishlisted/watched/clicked 플래그로 파생한다.</p>
+     * <p>2026-04-15 전환: 기존 {@code recommendation_impact} 기반 매핑을
+     * {@code recommendation_log} (Agent 저장 원천 테이블) 직접 조회로 교체한다.
+     * Agent 가 추천 완료 시점에 {@code POST /api/v1/recommendations/internal/batch} 로
+     * 저장한 실제 점수/이유/랭크 정보를 그대로 관리자에게 보여준다.</p>
+     *
+     * <h4>점수 · 피드백 필드 매핑</h4>
+     * <ul>
+     *   <li>{@code score}: {@link RecommendationLog#getScore()} 원본값 (0.0~1.0 정규화 가정)</li>
+     *   <li>{@code feedback}: {@code clicked=true} 면 "CLICKED", 그 외 null.
+     *       찜/봤어요/좋아요/관심없음 등 다른 피드백은 현재 {@link RecommendationImpact}
+     *       / {@code recommendation_feedback} 에 분리 저장되어 있어, 본 탭의 단일 컬럼으로는
+     *       클릭 여부만 표시한다 (상세 분석은 별도 탭에서 제공 예정).</li>
+     * </ul>
+     *
+     * <h4>N+1 주의</h4>
+     * <p>{@link RecommendationLogRepository#findAllWithMovie(Pageable)} 는 Movie 를
+     * JOIN FETCH 하여 N+1 을 방지한다.</p>
      */
     public List<RecommendationLogResponse> getRecommendationLogs(int page, int size) {
         log.debug("[admin-stats] 추천 로그 조회 — page={}, size={}", page, size);
 
-        // 1. RecommendationImpact 페이징 조회 (최신순)
         int safeSize = Math.min(Math.max(size, 1), 100);
         int safePage = Math.max(page, 0);
-        Page<RecommendationImpact> impactPage = recommendationImpactRepository.findAll(
+
+        // RecommendationLog 페이징 조회 (Movie JOIN FETCH, createdAt DESC 정렬은 Pageable Sort 로 지정)
+        Page<RecommendationLog> logPage = recommendationLogRepository.findAllWithMovie(
                 PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"))
         );
 
-        // 2. RecommendationLogResponse 매핑
-        return impactPage.getContent().stream()
-                .map(impact -> {
-                    // 점수: 추천 위치(position) 기반 역수 정규화 (1순위=1.0, 10순위=0.1)
-                    // position 이 null 이면 0.5 fallback
-                    double score;
-                    Integer position = impact.getRecommendationPosition();
-                    if (position == null || position <= 0) {
-                        score = 0.5;
-                    } else {
-                        score = Math.max(0.05, 1.0 / position);
-                        score = Math.round(score * 100.0) / 100.0;  // 소수점 2자리 반올림
-                    }
+        return logPage.getContent().stream()
+                .map(logEntity -> {
+                    // score 원본값 (Float → double). null 방어는 0.0 fallback
+                    double score = (logEntity.getScore() != null)
+                            ? logEntity.getScore().doubleValue()
+                            : 0.0;
 
-                    // 피드백 파생: 우선순위 watched > wishlisted > clicked > null
-                    String feedback;
-                    if (Boolean.TRUE.equals(impact.getWatched())) {
-                        feedback = "WATCHED";
-                    } else if (Boolean.TRUE.equals(impact.getWishlisted())) {
-                        feedback = "LIKE";
-                    } else if (Boolean.TRUE.equals(impact.getClicked())) {
-                        feedback = "CLICKED";
-                    } else {
-                        feedback = null;
-                    }
+                    Double hybridScore = (logEntity.getHybridScore() != null)
+                            ? logEntity.getHybridScore().doubleValue()
+                            : null;
+
+                    // 클릭 여부만 단일 피드백 필드로 표시 (그 외 피드백은 별도 탭 대상)
+                    String feedback = Boolean.TRUE.equals(logEntity.getClicked()) ? "CLICKED" : null;
+
+                    // Movie 는 JOIN FETCH 로 이미 로드 — title 까지 한 번에 꺼냄
+                    String movieId = logEntity.getMovie() != null ? logEntity.getMovie().getMovieId() : null;
+                    String movieTitle = logEntity.getMovie() != null ? logEntity.getMovie().getTitle() : null;
 
                     return new RecommendationLogResponse(
-                            impact.getUserId(),
-                            impact.getMovieId(),
+                            logEntity.getRecommendationLogId(),
+                            logEntity.getUserId(),
+                            movieId,
+                            movieTitle,
                             score,
+                            hybridScore,
+                            logEntity.getRankPosition(),
+                            logEntity.getReason(),
+                            logEntity.getUserIntent(),
+                            logEntity.getSessionId(),
                             feedback,
-                            impact.getCreatedAt()
+                            logEntity.getCreatedAt()
                     );
                 })
                 .toList();

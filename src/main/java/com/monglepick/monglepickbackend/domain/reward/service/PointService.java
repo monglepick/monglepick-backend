@@ -141,10 +141,23 @@ public class PointService {
      * <p>Agent의 {@code point_client.py}는 기존 5개 필드(allowed, balance, cost, message,
      * maxInputLength)만 파싱하므로, v3.0 신규 필드들은 Agent가 무시한다.</p>
      *
+     * <h4>트랜잭션 속성 (2026-04-15 수정)</h4>
+     * <p>메서드 이름은 "check" 이지만 실제로는 {@link QuotaService#checkQuota}
+     * 가 {@code findByUserIdWithLock()} ({@code SELECT ... FOR UPDATE}) +
+     * {@code daily_ai_used++} / {@code purchased_ai_tokens--} 같은
+     * <b>쓰기 부작용</b>을 수반한다 (v3.3 "체크 시점에 소비까지 통합" 설계).
+     * 따라서 클래스 레벨 {@code readOnly=true} 를 상속받으면 MySQL 이
+     * {@code ErrorCode 1792 / SQLState 25006 "Cannot execute statement in a
+     * READ ONLY transaction"} 로 거부한다 → Agent 는 500 을 받고
+     * fail-close 로 "포인트 부족" 으로 오표시.<br>
+     * 메서드 단위로 {@code @Transactional} 을 재선언하여 readOnly=false 로
+     * 승격한다 (클래스 주석 §트랜잭션 전략 규칙과 일치).</p>
+     *
      * @param userId 사용자 ID
      * @param cost   필요 포인트 (v3.0 AI 무과금 정책상 항상 0; 응답에 그대로 포함)
      * @return 쿼터 통합 확인 결과 (잔액 정보 포함)
      */
+    @Transactional
     public CheckResponse checkPoint(String userId, int cost) {
         validateUserId(userId);
         log.debug("포인트 + 쿼터 확인 (v3.0): userId={}, cost={}", userId, cost);
@@ -214,6 +227,78 @@ public class PointService {
                 true,
                 balance,
                 0,      // v3.0 AI 무과금: cost는 항상 0
+                message,
+                quotaResult.maxInputLength(),
+                quotaResult.dailyUsed(),
+                quotaResult.dailyLimit(),
+                quotaResult.source(),
+                quotaResult.subBonusRemaining(),
+                quotaResult.purchasedRemaining()
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    // AI 쿼터 소비 (Agent movie_card 발행 시점, v3.4 신규)
+    // ──────────────────────────────────────────────
+
+    /**
+     * AI 추천 쿼터를 실제로 <b>1회 차감</b>한다 (2026-04-15 신설).
+     *
+     * <p>Agent 가 {@code recommendation_ranker} 노드 완료 후 {@code movie_card} SSE 이벤트를
+     * 발행하는 시점에 호출한다. 이전에는 {@link #checkPoint} 시점에 쿼터가 즉시 차감되어
+     * "후속 질문만 하고 추천은 안 받았는데 쿼터가 줄어드는" 정책 버그가 있었다. 이제
+     * {@code checkPoint} 는 순수 조회로 남고, 본 메서드가 유일한 쓰기 경로가 된다.</p>
+     *
+     * <p>내부적으로 {@link QuotaService#consumeQuota(String, String)} 를 호출해 소스별
+     * 실제 차감을 수행한다 ({@code SELECT ... FOR UPDATE} + {@code daily_ai_used++} /
+     * {@code remaining_ai_bonus--} / {@code purchased_ai_tokens--, monthly_coupon_used++}).</p>
+     *
+     * @param userId 사용자 ID
+     * @return 차감 결과 (GRADE_FREE/SUB_BONUS/PURCHASED/BLOCKED). BLOCKED 는 레이스로
+     *         check 시점과 consume 시점 사이 한도가 소진된 경우 — Agent 는 movie_card 를 이미
+     *         발행했으므로 graceful 로 SSE error 만 내려보내고 세션은 유지한다.
+     */
+    @Transactional
+    public CheckResponse consumePoint(String userId) {
+        validateUserId(userId);
+        log.debug("AI 쿼터 차감 시작: userId={}", userId);
+
+        int balance;
+        String grade;
+        var userPointOpt = userPointRepository.findByUserId(userId);
+        if (userPointOpt.isPresent()) {
+            balance = userPointOpt.get().getBalance();
+            grade = userPointOpt.get().getGradeCode();
+        } else {
+            log.warn("포인트 레코드 없음 (NORMAL 등급 fallback): userId={}", userId);
+            balance = 0;
+            grade = "NORMAL";
+        }
+
+        QuotaCheckResult quotaResult = quotaService.consumeQuota(userId, grade);
+
+        String message;
+        switch (quotaResult.source()) {
+            case "GRADE_FREE" ->
+                    message = "AI 추천이 완료되었습니다. (오늘 " + quotaResult.dailyUsed() + "/" +
+                            (quotaResult.dailyLimit() == -1 ? "무제한" : quotaResult.dailyLimit()) + "회)";
+            case "SUB_BONUS" ->
+                    message = "구독 보너스로 AI 추천이 완료되었습니다. (잔여: " + quotaResult.subBonusRemaining() + "회)";
+            case "PURCHASED" ->
+                    message = "이용권으로 AI 추천이 완료되었습니다. (잔여: " + quotaResult.purchasedRemaining() + "회)";
+            default ->
+                    message = quotaResult.message();  // BLOCKED — QuotaService 안내 메시지 사용
+        }
+
+        log.info("AI 쿼터 차감 완료: userId={}, source={}, dailyUsed={}/{}, subBonus={}, purchased={}",
+                userId, quotaResult.source(),
+                quotaResult.dailyUsed(), quotaResult.dailyLimit(),
+                quotaResult.subBonusRemaining(), quotaResult.purchasedRemaining());
+
+        return new CheckResponse(
+                quotaResult.allowed(),
+                balance,
+                0,  // v3.0 AI 무과금: cost 는 항상 0
                 message,
                 quotaResult.maxInputLength(),
                 quotaResult.dailyUsed(),
