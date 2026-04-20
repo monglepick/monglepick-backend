@@ -206,6 +206,7 @@
         FROM posts p
         WHERE p.user_id = #{userId}
           AND p.status = #{status}
+          AND p.is_deleted = false
         ORDER BY p.created_at DESC
         LIMIT #{offset}, #{limit}
     </select>
@@ -215,6 +216,7 @@
         FROM posts
         WHERE user_id = #{userId}
           AND status = #{status}
+          AND is_deleted = false
     </select>
 
     <!-- ═══ Post 쓰기 , 이미지 업로드 ═══ -->
@@ -268,10 +270,12 @@
         LIMIT 1
     </select>
 
-    <delete id="deleteById">
-        DELETE FROM posts
+    <update id="deleteById">
+        UPDATE posts
+        SET is_deleted = true,
+            deleted_at = NOW()
         WHERE post_id = #{postId}
-    </delete>
+    </update>
 
     <update id="incrementViewCount">
         UPDATE posts
