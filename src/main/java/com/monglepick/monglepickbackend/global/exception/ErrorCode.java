@@ -356,6 +356,9 @@ public enum ErrorCode {
     /** 본인의 플레이리스트를 스스로 가져오기 시도. */
     PLAYLIST_SELF_IMPORT(HttpStatus.BAD_REQUEST, "PL010", "본인의 플레이리스트는 가져올 수 없습니다"),
 
+    /** 가져온(복사한) 플레이리스트를 공개로 전환 시도. */
+    PLAYLIST_IMPORTED_CANNOT_SHARE(HttpStatus.BAD_REQUEST, "PL011", "가져온 플레이리스트는 공개할 수 없습니다"),
+
     // ─────────────────────────────────────────────
     // 추천 이력 (REC0xx)
     // ─────────────────────────────────────────────

@@ -182,6 +182,12 @@ public class PlaylistService {
         // 소유자 검증 포함 조회
         Playlist playlist = findOwnedPlaylist(playlistId, userId);
 
+        // 가져온(복사한) 플레이리스트는 공개로 전환 불가
+        if (Boolean.TRUE.equals(playlist.getIsImported()) && Boolean.TRUE.equals(request.isPublic())) {
+            throw new BusinessException(ErrorCode.PLAYLIST_IMPORTED_CANNOT_SHARE,
+                    "가져온 플레이리스트는 공개할 수 없습니다: playlistId=" + playlistId);
+        }
+
         // 도메인 메서드로 null-safe 수정 후 MyBatis UPDATE 명시 호출 (dirty checking 미지원)
         playlist.update(request.playlistName(), request.description(), request.isPublic());
         playlistMapper.updatePlaylist(playlist);

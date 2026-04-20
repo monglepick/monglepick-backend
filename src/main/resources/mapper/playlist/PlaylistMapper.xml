@@ -26,6 +26,7 @@
         <result property="coverImageUrl" column="cover_image_url"/>
         <result property="likeCount" column="like_count"/>
         <result property="isImported" column="is_imported"/>
+        <result property="isDeleted" column="is_deleted"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
         <result property="createdBy" column="created_by"/>
@@ -65,7 +66,7 @@
 
     <sql id="playlistColumns">
         playlist_id, user_id, playlist_name, description, is_public,
-        cover_image_url, like_count, is_imported,
+        cover_image_url, like_count, is_imported, is_deleted,
         created_at, updated_at, created_by, updated_by
     </sql>
 
@@ -75,12 +76,14 @@
         SELECT <include refid="playlistColumns"/>
         FROM playlist
         WHERE playlist_id = #{playlistId}
+          AND is_deleted = false
     </select>
 
     <select id="findByUserId" resultMap="playlistResultMap">
         SELECT <include refid="playlistColumns"/>
         FROM playlist
         WHERE user_id = #{userId}
+          AND is_deleted = false
         ORDER BY created_at DESC
         LIMIT #{offset}, #{limit}
     </select>
@@ -89,12 +92,14 @@
         SELECT COUNT(*)
         FROM playlist
         WHERE user_id = #{userId}
+          AND is_deleted = false
     </select>
 
     <select id="findPublicPlaylists" resultMap="playlistResultMap">
         SELECT <include refid="playlistColumns"/>
         FROM playlist
         WHERE is_public = true
+          AND is_deleted = false
         ORDER BY created_at DESC
         LIMIT #{offset}, #{limit}
     </select>
@@ -103,6 +108,7 @@
         SELECT COUNT(*)
         FROM playlist
         WHERE is_public = true
+          AND is_deleted = false
     </select>
 
     <!-- ═══ Playlist 쓰기 ═══ -->
@@ -110,11 +116,11 @@
     <insert id="insertPlaylist" useGeneratedKeys="true" keyProperty="playlistId">
         INSERT INTO playlist (
             user_id, playlist_name, description, is_public,
-            cover_image_url, like_count, is_imported,
+            cover_image_url, like_count, is_imported, is_deleted,
             created_at, updated_at, created_by, updated_by
         ) VALUES (
             #{userId}, #{playlistName}, #{description}, #{isPublic},
-            #{coverImageUrl}, #{likeCount}, #{isImported},
+            #{coverImageUrl}, #{likeCount}, #{isImported}, false,
             NOW(), NOW(), #{createdBy}, #{updatedBy}
         )
     </insert>
@@ -130,10 +136,12 @@
         WHERE playlist_id = #{playlistId}
     </update>
 
-    <delete id="deletePlaylist">
-        DELETE FROM playlist
+    <update id="deletePlaylist">
+        UPDATE playlist
+        SET is_deleted = true,
+            updated_at = NOW()
         WHERE playlist_id = #{playlistId}
-    </delete>
+    </update>
 
     <!-- 좋아요 수 원자적 증가 — race condition 방지를 위해 DB 레벨 UPDATE -->
     <update id="incrementLikeCount">

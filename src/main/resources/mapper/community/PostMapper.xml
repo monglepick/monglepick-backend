@@ -363,19 +363,22 @@
         FROM posts p
         LEFT JOIN users u    ON p.user_id     = u.user_id
         LEFT JOIN playlist pl ON p.playlist_id = pl.playlist_id
-        WHERE p.category   = 'PLAYLIST_SHARE'
-          AND p.status     = 'PUBLISHED'
-          AND p.is_deleted = false
+        WHERE p.category    = 'PLAYLIST_SHARE'
+          AND p.status      = 'PUBLISHED'
+          AND p.is_deleted  = false
+          AND (pl.playlist_id IS NULL OR pl.is_deleted = false)
         ORDER BY p.created_at DESC
         LIMIT #{offset}, #{limit}
     </select>
 
     <select id="countPlaylistSharePosts" resultType="long">
         SELECT COUNT(*)
-        FROM posts
-        WHERE category   = 'PLAYLIST_SHARE'
-          AND status     = 'PUBLISHED'
-          AND is_deleted = false
+        FROM posts p
+        LEFT JOIN playlist pl ON p.playlist_id = pl.playlist_id
+        WHERE p.category    = 'PLAYLIST_SHARE'
+          AND p.status      = 'PUBLISHED'
+          AND p.is_deleted  = false
+          AND (pl.playlist_id IS NULL OR pl.is_deleted = false)
     </select>
 
     <!-- ═══ PostComment ═══ -->

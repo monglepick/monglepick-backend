@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseProgressRespons
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseDetailResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseListResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseStartResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseReviewResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
 import com.monglepick.monglepickbackend.domain.roadmap.service.RoadmapService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
@@ -216,6 +217,38 @@ public class RoadmapController extends BaseController {
         log.info("영화 완료 요청: userId={}, courseId={}, movieId={}, hasReview={}", userId, courseId, movieId, reviewText != null);
 
         CourseProgressResponse response = roadmapService.completeMovie(courseId, movieId, userId, reviewText);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 시청인증 버튼 진입 시 해당 영화에 대해 사용자가 작성한 리뷰를 조회한다.
+     *
+     * <p>인증 기록이 있으면 리뷰 본문과 verified=true를 반환한다.
+     * 아직 인증하지 않은 영화이면 verified=false, reviewText=null을 반환한다.</p>
+     *
+     * @param courseId  코스 슬러그
+     * @param movieId   영화 ID
+     * @param principal JWT 인증 정보 (필수)
+     * @return 200 OK — 시청 리뷰 응답 DTO
+     */
+    @Operation(
+            summary = "시청 리뷰 조회",
+            description = "코스 내 특정 영화에 대해 작성한 시청 리뷰를 반환합니다. " +
+                    "인증 기록이 없으면 verified=false로 반환됩니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "리뷰 조회 성공 (미인증이면 verified=false)"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @GetMapping("/{courseId}/movies/{movieId}/review")
+    public ResponseEntity<CourseReviewResponse> getMovieReview(
+            @PathVariable String courseId,
+            @PathVariable String movieId,
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        CourseReviewResponse response = roadmapService.getMovieReview(courseId, movieId, userId);
         return ResponseEntity.ok(response);
     }
 

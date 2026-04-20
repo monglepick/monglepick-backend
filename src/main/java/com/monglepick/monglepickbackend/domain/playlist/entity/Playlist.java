@@ -101,6 +101,11 @@ public class Playlist extends BaseAuditEntity {
     @Builder.Default
     private Boolean isImported = false;
 
+    /** 소프트 삭제 여부. true이면 삭제된 플레이리스트 (기본값: false). */
+    @Column(name = "is_deleted")
+    @Builder.Default
+    private Boolean isDeleted = false;
+
     // ─────────────────────────────────────────────
     // 도메인 메서드 (setter 대신 의미 있는 메서드명 사용)
     // ─────────────────────────────────────────────

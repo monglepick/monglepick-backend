@@ -10,6 +10,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.Course
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseListResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseStartResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.MovieInfo;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseReviewResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.RoadmapCourse;
@@ -326,6 +327,25 @@ public class RoadmapService {
                 userId, courseId, progress.getTotalMovies(), deadlineAt);
 
         return new CourseStartResponse(courseId, CourseProgressStatus.IN_PROGRESS.name(), deadlineAt);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 시청 리뷰 조회
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * 특정 코스+영화에 대해 사용자가 작성한 시청 리뷰를 조회한다.
+     *
+     * @param courseId 코스 슬러그
+     * @param movieId  영화 ID
+     * @param userId   사용자 ID
+     * @return 리뷰 응답 DTO (인증 기록 없으면 verified=false)
+     */
+    public CourseReviewResponse getMovieReview(String courseId, String movieId, String userId) {
+        return courseReviewRepository
+                .findByCourseIdAndMovieIdAndUserId(courseId, movieId, userId)
+                .map(CourseReviewResponse::from)
+                .orElseGet(() -> CourseReviewResponse.notVerified(courseId, movieId));
     }
 
     // ────────────────────────────────────────────────────────────────
