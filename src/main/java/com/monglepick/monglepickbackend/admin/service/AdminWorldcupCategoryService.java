@@ -35,7 +35,7 @@ public class AdminWorldcupCategoryService {
     }
 
     public List<CategoryResponse> getAllCategories() {
-        return worldcupCategoryRepository.findAllByOrderByCategoryNameAsc()
+        return worldcupCategoryRepository.findAllByOrderByDisplayOrderAscCategoryNameAsc()
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -56,6 +56,8 @@ public class AdminWorldcupCategoryService {
                 .categoryName(request.categoryName())
                 .description(request.description())
                 .adminNote(request.adminNote())
+                .enabled(request.enabled() == null || request.enabled())
+                .displayOrder(request.displayOrder() != null ? request.displayOrder() : 0)
                 .build();
 
         WorldcupCategory saved = worldcupCategoryRepository.save(entity);
@@ -66,7 +68,13 @@ public class AdminWorldcupCategoryService {
     @Transactional
     public CategoryResponse updateCategory(Long id, UpdateRequest request) {
         WorldcupCategory entity = findByIdOrThrow(id);
-        entity.update(request.categoryName(), request.description(), request.adminNote());
+        entity.update(
+                request.categoryName(),
+                request.description(),
+                request.adminNote(),
+                request.enabled(),
+                request.displayOrder()
+        );
         log.info("[관리자] 월드컵 카테고리 수정 — id={}, code={}", id, entity.getCategoryCode());
         return toResponse(entity);
     }
@@ -108,6 +116,8 @@ public class AdminWorldcupCategoryService {
                 entity.getCategoryName(),
                 entity.getDescription(),
                 entity.getAdminNote(),
+                entity.isEnabled(),
+                entity.getDisplayOrder(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt()
         );

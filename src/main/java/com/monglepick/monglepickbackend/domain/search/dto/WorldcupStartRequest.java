@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.search.dto;
 
+import com.monglepick.monglepickbackend.domain.search.entity.WorldcupSourceType;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
@@ -10,27 +11,27 @@ import java.util.List;
  *
  * <p>클라이언트가 월드컵 세션을 시작할 때 전송하는 요청 바디이다.</p>
  *
- * <h3>candidateMovieIds 처리 정책 (v2 — Frontend 호환)</h3>
+ * <h3>후보 산정 정책</h3>
  * <ul>
- *   <li>{@code candidateMovieIds}가 null 또는 비어있으면 서버가 DB에서 랜덤으로 선택한다.</li>
- *   <li>{@code candidateMovieIds}가 제공되면 해당 목록을 그대로 사용한다
- *       (크기가 roundSize와 일치해야 함).</li>
+ *   <li>{@code sourceType=CATEGORY} 이면 {@code categoryId} 기준으로 활성 후보 풀에서 선택한다.</li>
+ *   <li>{@code sourceType=GENRE} 이면 {@code selectedGenres}를 모두 만족하는 영화 중
+ *       {@code vote_count >= 100} 조건을 충족하는 후보에서 선택한다.</li>
  * </ul>
  *
- * <p>Frontend의 {@code startWorldcup({ round, genre })} 호출 시
- * candidateMovieIds를 전달하지 않아도 400 오류가 발생하지 않는다.</p>
- *
- * @param genreFilter       장르 필터 (nullable — null이면 전체 장르로 랜덤 선택)
- * @param roundSize         토너먼트 크기 (최소 2 — 실제로는 8/16/32 권장)
- * @param candidateMovieIds 후보 영화 ID 목록 (optional — null/empty이면 서버가 DB에서 선택)
+ * @param sourceType     시작 방식 (CATEGORY / GENRE)
+ * @param categoryId     월드컵 카테고리 ID (CATEGORY일 때 필수)
+ * @param selectedGenres 사용자가 고른 장르 목록 (GENRE일 때 필수, 다중 선택)
+ * @param roundSize      토너먼트 크기 (8/16/32/64 중 하나)
  */
 public record WorldcupStartRequest(
-        String genreFilter,
+        @NotNull(message = "월드컵 시작 방식은 필수입니다")
+        WorldcupSourceType sourceType,
+
+        Long categoryId,
+
+        List<String> selectedGenres,
 
         @NotNull(message = "라운드 크기는 필수입니다")
         @Min(value = 2, message = "라운드 크기는 2 이상이어야 합니다")
-        Integer roundSize,
-
-        // optional: null 또는 빈 목록이면 서버가 장르 기반 랜덤 선택
-        List<String> candidateMovieIds
+        Integer roundSize
 ) {}

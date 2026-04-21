@@ -17,7 +17,11 @@ public interface WorldcupCategoryRepository extends JpaRepository<WorldcupCatego
 
     Optional<WorldcupCategory> findByCategoryCode(String categoryCode);
 
+    Optional<WorldcupCategory> findByCategoryIdAndEnabledTrue(Long categoryId);
+
     Page<WorldcupCategory> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
-    List<WorldcupCategory> findAllByOrderByCategoryNameAsc();
+    List<WorldcupCategory> findAllByOrderByDisplayOrderAscCategoryNameAsc();
+
+    List<WorldcupCategory> findByEnabledTrueOrderByDisplayOrderAscCategoryNameAsc();
 }

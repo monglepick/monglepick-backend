@@ -1,8 +1,11 @@
 package com.monglepick.monglepickbackend.domain.search.controller;
 
+import com.monglepick.monglepickbackend.domain.search.dto.WorldcupCategoryOptionResponse;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupPickRequest;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupPickResponse;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupResultResponse;
+import com.monglepick.monglepickbackend.domain.search.dto.WorldcupStartOptionsRequest;
+import com.monglepick.monglepickbackend.domain.search.dto.WorldcupStartOptionsResponse;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupStartRequest;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupStartResponse;
 import com.monglepick.monglepickbackend.domain.search.entity.WorldcupSession;
@@ -33,15 +36,18 @@ import java.util.List;
  *
  * <h3>엔드포인트 목록 (v2)</h3>
  * <ul>
+ *   <li>GET  /api/v1/worldcup/categories         — 사용자 노출용 카테고리 목록 조회</li>
+ *   <li>POST /api/v1/worldcup/options            — 시작 조건별 가능 라운드 계산</li>
  *   <li>POST /api/v1/worldcup/start             — 월드컵 세션 시작 (JWT 필수)</li>
  *   <li>POST /api/v1/worldcup/pick              — 매치 선택 (JWT 필수)</li>
  *   <li>GET  /api/v1/worldcup/sessions          — 진행 중인 세션 목록 조회 (JWT 필수)</li>
  *   <li>GET  /api/v1/worldcup/result/{sessionId} — 완료된 세션 결과 조회 (JWT 필수)</li>
  * </ul>
  *
- * <h3>Frontend 호환 변경 사항 (v2)</h3>
+ * <h3>월드컵 시작 흐름</h3>
  * <ul>
- *   <li>POST /start: {@code candidateMovieIds} 미전송 시 서버가 DB에서 랜덤 선택.</li>
+ *   <li>사용자는 {@code categories} 또는 다중 {@code selectedGenres} 기반으로 시작 조건을 선택한다.</li>
+ *   <li>{@code /options} 응답의 {@code availableRoundSizes}로 진행 가능한 라운드만 노출한다.</li>
  *   <li>POST /start 응답: {@code gameId} 필드 추가 (sessionId 별칭).</li>
  *   <li>POST /pick 응답: {@code isFinished}, {@code finalWinner}, {@code nextMatch} alias 필드 추가.</li>
  *   <li>GET  /result/{sessionId}: 신규 엔드포인트 — Frontend {@code getWorldcupResult(gameId)} 대응.</li>
@@ -61,27 +67,47 @@ public class WorldcupController extends BaseController {
     /** 월드컵 서비스 — 세션/매치/결과 비즈니스 로직 */
     private final WorldcupService worldcupService;
 
+    @Operation(
+            summary = "월드컵 카테고리 목록 조회",
+            description = "사용자에게 노출할 활성 카테고리와 각 카테고리의 가능 라운드 정보를 반환합니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @GetMapping("/categories")
+    public ResponseEntity<List<WorldcupCategoryOptionResponse>> getCategories() {
+        return ResponseEntity.ok(worldcupService.getAvailableCategories());
+    }
+
+    @Operation(
+            summary = "월드컵 시작 가능 라운드 조회",
+            description = "카테고리 또는 장르 기반 조건으로 후보 풀 크기와 시작 가능한 라운드 목록을 계산합니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @PostMapping("/options")
+    public ResponseEntity<WorldcupStartOptionsResponse> getStartOptions(
+            @RequestBody @Valid WorldcupStartOptionsRequest request
+    ) {
+        return ResponseEntity.ok(worldcupService.getStartOptions(request));
+    }
+
     /**
      * 이상형 월드컵 세션을 시작한다.
      *
-     * <p>{@code candidateMovieIds}가 null 또는 빈 목록이면 서버가 DB에서
-     * {@code genreFilter} 기반으로 랜덤 후보 영화를 선택한다.
-     * 응답의 {@code gameId}는 {@code sessionId}와 동일한 값이다 (Frontend 호환).</p>
+     * <p>사용자가 선택한 카테고리 또는 장르 조건을 기준으로 후보를 산정하고,
+     * 선택한 라운드 크기만큼 무작위 매치를 생성한다.</p>
      *
      * @param principal JWT 인증 정보
-     * @param request   세션 시작 요청 (genreFilter, roundSize, candidateMovieIds?)
+     * @param request   세션 시작 요청 (sourceType, categoryId or selectedGenres, roundSize)
      * @return 201 Created — 생성된 세션 ID(gameId 포함) 및 첫 라운드 매치 목록
      */
     @Operation(
             summary = "월드컵 세션 시작",
-            description = "라운드 크기와 선택적 장르 필터로 월드컵 세션을 시작합니다. " +
-                    "candidateMovieIds를 생략하면 서버가 DB에서 랜덤으로 영화를 선택합니다. " +
+            description = "카테고리 기반 또는 장르 기반 조건으로 월드컵 세션을 시작합니다. " +
                     "응답의 gameId는 sessionId와 동일한 별칭 필드입니다.",
             security = @SecurityRequirement(name = "bearerAuth")
     )
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "세션 생성 및 첫 라운드 매치 반환"),
-            @ApiResponse(responseCode = "400", description = "후보 영화 수 불일치 또는 DB 조회 부족"),
+            @ApiResponse(responseCode = "400", description = "잘못된 시작 조건 또는 후보 부족"),
             @ApiResponse(responseCode = "401", description = "인증 필요")
     })
     @PostMapping("/start")
@@ -90,19 +116,10 @@ public class WorldcupController extends BaseController {
             @RequestBody @Valid WorldcupStartRequest request
     ) {
         String userId = resolveUserId(principal);
-        // candidateMovieIds는 optional이므로 null 안전하게 크기 로깅
-        int candidateCount = (request.candidateMovieIds() != null)
-                ? request.candidateMovieIds().size()
-                : 0;
-        log.info("월드컵 시작 요청: userId={}, roundSize={}, candidateCount={}",
-                userId, request.roundSize(), candidateCount);
+        log.info("월드컵 시작 요청: userId={}, sourceType={}, categoryId={}, selectedGenres={}, roundSize={}",
+                userId, request.sourceType(), request.categoryId(), request.selectedGenres(), request.roundSize());
 
-        WorldcupStartResponse response = worldcupService.startWorldcup(
-                userId,
-                request.genreFilter(),
-                request.roundSize(),
-                request.candidateMovieIds()
-        );
+        WorldcupStartResponse response = worldcupService.startWorldcup(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

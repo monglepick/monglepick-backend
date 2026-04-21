@@ -1,6 +1,7 @@
 package com.monglepick.monglepickbackend.admin.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
@@ -21,7 +22,12 @@ public class AdminWorldcupCategoryDto {
 
             String description,
 
-            String adminNote
+            String adminNote,
+
+            Boolean enabled,
+
+            @PositiveOrZero(message = "표시 순서는 0 이상이어야 합니다.")
+            Integer displayOrder
     ) {}
 
     public record UpdateRequest(
@@ -31,7 +37,12 @@ public class AdminWorldcupCategoryDto {
 
             String description,
 
-            String adminNote
+            String adminNote,
+
+            Boolean enabled,
+
+            @PositiveOrZero(message = "표시 순서는 0 이상이어야 합니다.")
+            Integer displayOrder
     ) {}
 
     public record CategoryResponse(
@@ -40,6 +51,8 @@ public class AdminWorldcupCategoryDto {
             String categoryName,
             String description,
             String adminNote,
+            boolean enabled,
+            Integer displayOrder,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {}

@@ -33,6 +33,18 @@ public interface WorldcupCandidateRepository extends JpaRepository<WorldcupCandi
     /** 특정 카테고리에 연결된 후보 영화 수 */
     long countByCategoryCategoryId(Long categoryId);
 
+    /** 특정 카테고리의 활성 후보 영화 수 */
+    long countByCategoryCategoryIdAndIsActiveTrue(Long categoryId);
+
+    /** 특정 카테고리의 활성 후보 movieId 목록 */
+    @Query("""
+            SELECT w.movieId
+            FROM WorldcupCandidate w
+            WHERE w.isActive = true
+              AND w.category.categoryId = :categoryId
+            """)
+    List<String> findActiveMovieIdsByCategoryId(@Param("categoryId") Long categoryId);
+
     /**
      * 활성화된 후보 movieId 목록 조회 (WorldcupService 후보 선택용).
      *

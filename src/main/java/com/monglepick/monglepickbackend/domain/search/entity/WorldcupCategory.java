@@ -55,10 +55,26 @@ public class WorldcupCategory extends BaseAuditEntity {
     @Column(name = "admin_note", columnDefinition = "TEXT")
     private String adminNote;
 
-    /** 카테고리 표시명/설명/관리 메모를 수정한다. */
-    public void update(String categoryName, String description, String adminNote) {
+    /** 사용자 노출 여부 */
+    @Column(name = "is_enabled", nullable = false)
+    @Builder.Default
+    private boolean enabled = true;
+
+    /** 사용자 노출 순서 */
+    @Column(name = "display_order", nullable = false)
+    @Builder.Default
+    private Integer displayOrder = 0;
+
+    /** 카테고리 표시명/설명/관리 메모/노출 옵션을 수정한다. */
+    public void update(String categoryName, String description, String adminNote, Boolean enabled, Integer displayOrder) {
         this.categoryName = categoryName;
         this.description = description;
         this.adminNote = adminNote;
+        if (enabled != null) {
+            this.enabled = enabled;
+        }
+        if (displayOrder != null) {
+            this.displayOrder = displayOrder;
+        }
     }
 }

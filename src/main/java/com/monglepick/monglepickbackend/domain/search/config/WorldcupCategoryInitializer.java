@@ -34,6 +34,8 @@ public class WorldcupCategoryInitializer implements ApplicationRunner {
                         .categoryName("기본 카테고리")
                         .description("별도 테마를 지정하지 않은 기본 월드컵 후보 카테고리")
                         .adminNote("시스템 기본 카테고리")
+                        .enabled(true)
+                        .displayOrder(0)
                         .build()
         );
         log.info("[WorldcupCategoryInitializer] 기본 카테고리 시드 완료 — id={}, code={}",
