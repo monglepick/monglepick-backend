@@ -140,7 +140,11 @@
             AND (p.title LIKE CONCAT('%', #{keyword}, '%')
             OR p.content LIKE CONCAT('%', #{keyword}, '%'))
         </if>
-        ORDER BY p.created_at DESC
+        <choose>
+            <when test="sort == 'likes'">ORDER BY p.like_count DESC, p.created_at DESC</when>
+            <when test="sort == 'views'">ORDER BY p.view_count DESC, p.created_at DESC</when>
+            <otherwise>ORDER BY p.created_at DESC</otherwise>
+        </choose>
         LIMIT #{offset}, #{limit}
     </select>
 
@@ -156,7 +160,11 @@
             AND (p.title LIKE CONCAT('%', #{keyword}, '%')
             OR p.content LIKE CONCAT('%', #{keyword}, '%'))
         </if>
-        ORDER BY p.created_at DESC
+        <choose>
+            <when test="sort == 'likes'">ORDER BY p.like_count DESC, p.created_at DESC</when>
+            <when test="sort == 'views'">ORDER BY p.view_count DESC, p.created_at DESC</when>
+            <otherwise>ORDER BY p.created_at DESC</otherwise>
+        </choose>
         LIMIT #{offset}, #{limit}
     </select>
 

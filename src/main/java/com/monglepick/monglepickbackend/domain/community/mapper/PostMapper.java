@@ -52,13 +52,15 @@ public interface PostMapper {
      */
     List<Post> findByStatusWithNickname(@Param("status") String status,
                                         @Param("keyword") String keyword,
-                                         @Param("offset") int offset,
-                                         @Param("limit") int limit);
+                                        @Param("sort") String sort,
+                                        @Param("offset") int offset,
+                                        @Param("limit") int limit);
 
     /** 카테고리 + 상태별 게시글 목록 (닉네임 포함, 페이징) */
     List<Post> findByCategoryAndStatusWithNickname(@Param("category") String category,
                                                     @Param("status") String status,
                                                     @Param("keyword") String keyword,
+                                                    @Param("sort") String sort,
                                                     @Param("offset") int offset,
                                                     @Param("limit") int limit);
 
