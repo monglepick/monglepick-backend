@@ -40,9 +40,9 @@ import org.springframework.web.bind.annotation.RestController;
  * <h3>담당 엔드포인트</h3>
  * <ul>
  *   <li>GET    /api/v1/admin/worldcup-candidates/movies/search  — 후보 등록용 영화 검색</li>
- *   <li>GET    /api/v1/admin/worldcup-candidates                — 후보 목록 (페이징 + 카테고리 필터)</li>
+ *   <li>GET    /api/v1/admin/worldcup-candidates                — 후보 목록 (페이징 + 카테고리 코드 필터)</li>
  *   <li>GET    /api/v1/admin/worldcup-candidates/{id}           — 단건 조회</li>
- *   <li>POST   /api/v1/admin/worldcup-candidates                — 신규 등록 ((movieId, category) UNIQUE)</li>
+ *   <li>POST   /api/v1/admin/worldcup-candidates                — 신규 등록 ((movieId, category_id) UNIQUE)</li>
  *   <li>PUT    /api/v1/admin/worldcup-candidates/{id}           — 메타 수정</li>
  *   <li>PATCH  /api/v1/admin/worldcup-candidates/{id}/active    — 활성화 토글</li>
  *   <li>POST   /api/v1/admin/worldcup-candidates/deactivate-below — 인기도 임계값 미만 일괄 비활성화</li>
@@ -94,11 +94,11 @@ public class AdminWorldcupCandidateController {
     /** 후보 목록 조회 */
     @Operation(
             summary = "월드컵 후보 목록 조회",
-            description = "category 파라미터로 필터링. 생략 시 전체. createdAt DESC 정렬."
+            description = "category 파라미터(category_code)로 필터링. 생략 시 전체. createdAt DESC 정렬."
     )
     @GetMapping
     public ResponseEntity<ApiResponse<Page<CandidateResponse>>> getCandidates(
-            @Parameter(description = "카테고리 필터 (DEFAULT/ACTION/... 생략 시 전체)")
+            @Parameter(description = "카테고리 코드 필터 (DEFAULT/ACTION/... 생략 시 전체)")
             @RequestParam(required = false) String category,
             @Parameter(description = "페이지 번호 (0부터 시작)")
             @RequestParam(defaultValue = "0") int page,
@@ -120,20 +120,20 @@ public class AdminWorldcupCandidateController {
     /** 신규 후보 등록 */
     @Operation(
             summary = "월드컵 후보 신규 등록",
-            description = "(movieId, category) UNIQUE — 중복 시 409. category 생략 시 'DEFAULT'."
+            description = "(movieId, category_id) UNIQUE — 중복 시 409. category는 category_code를 의미하며 생략 시 DEFAULT를 사용합니다."
     )
     @PostMapping
     public ResponseEntity<ApiResponse<CandidateResponse>> createCandidate(
             @Valid @RequestBody CreateRequest request
     ) {
-        log.info("[관리자] 월드컵 후보 등록 요청 — movieId={}, category={}",
+        log.info("[관리자] 월드컵 후보 등록 요청 — movieId={}, categoryCode={}",
                 request.movieId(), request.category());
         CandidateResponse created = adminWorldcupCandidateService.createCandidate(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(created));
     }
 
     /** 후보 메타 수정 */
-    @Operation(summary = "월드컵 후보 수정", description = "movies.popularity_score 재동기화 + isActive/adminNote 수정")
+    @Operation(summary = "월드컵 후보 수정", description = "movies.popularity_score 재동기화 + isActive 수정")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<CandidateResponse>> updateCandidate(
             @PathVariable Long id,

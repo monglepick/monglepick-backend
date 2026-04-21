@@ -33,7 +33,7 @@ import java.time.LocalDateTime;
  * <h3>주요 필드</h3>
  * <ul>
  *   <li>{@code userId}             — 참가 사용자 ID (VARCHAR(50))</li>
- *   <li>{@code genreFilter}        — 장르 필터 (nullable, 예: "액션", "드라마")</li>
+ *   <li>{@code category}           — 영화 후보 카테고리 (nullable, 예: "ACTION", "DEFAULT")</li>
  *   <li>{@code roundSize}          — 총 라운드 크기 (16/32/64)</li>
  *   <li>{@code currentRound}       — 현재 진행 라운드 번호 (16→8→4→2→1)</li>
  *   <li>{@code currentMatchOrder}  — 현재 라운드 내 매치 순서 (0-based)</li>
@@ -47,7 +47,7 @@ import java.time.LocalDateTime;
  * <h3>인덱스</h3>
  * <ul>
  *   <li>{@code idx_session_user} — user_id + status 복합 인덱스 (진행 중 세션 조회 최적화)</li>
- *   <li>{@code idx_session_genre} — genre_filter 인덱스 (장르별 통계 조회)</li>
+ *   <li>{@code idx_session_category} — category 인덱스 (카테고리별 통계 조회)</li>
  * </ul>
  */
 @Entity
@@ -56,8 +56,8 @@ import java.time.LocalDateTime;
         indexes = {
                 /* 사용자별 진행 중 세션 조회 최적화 */
                 @Index(name = "idx_session_user", columnList = "user_id, status"),
-                /* 장르별 세션 통계 조회 최적화 */
-                @Index(name = "idx_session_genre", columnList = "genre_filter")
+                /* 카테고리별 세션 통계 조회 최적화 */
+                @Index(name = "idx_session_category", columnList = "category")
         }
 )
 @Getter
@@ -82,12 +82,12 @@ public class WorldcupSession extends BaseAuditEntity {
     private String userId;
 
     /**
-     * 장르 필터 (VARCHAR(100), nullable).
-     * 특정 장르만으로 월드컵을 진행하려는 경우 사용자가 선택한 장르명.
-     * 예: "액션", "드라마", null(전체 장르)
+     * 후보 카테고리 코드 (VARCHAR(100), nullable).
+     * 관리자가 구성한 월드컵 후보 카테고리(DEFAULT/ACTION_THEME 등)를 저장한다.
+     * 비어 있으면 전체 후보 풀 또는 장르 fallback 정책을 따른다.
      */
-    @Column(name = "genre_filter", length = 100)
-    private String genreFilter;
+    @Column(name = "category", length = 100)
+    private String category;
 
     /**
      * 총 라운드 크기 (NOT NULL).
