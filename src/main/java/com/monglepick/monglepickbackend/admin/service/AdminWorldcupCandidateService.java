@@ -10,7 +10,9 @@ import com.monglepick.monglepickbackend.admin.dto.AdminWorldcupCandidateDto.Upda
 import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
 import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import com.monglepick.monglepickbackend.domain.search.entity.WorldcupCandidate;
+import com.monglepick.monglepickbackend.domain.search.entity.WorldcupCategory;
 import com.monglepick.monglepickbackend.domain.search.repository.WorldcupCandidateRepository;
+import com.monglepick.monglepickbackend.domain.search.repository.WorldcupCategoryRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +59,7 @@ import java.util.Map;
 public class AdminWorldcupCandidateService {
 
     private final WorldcupCandidateRepository repository;
+    private final WorldcupCategoryRepository worldcupCategoryRepository;
     private final MovieRepository movieRepository;
 
     @Value("${admin.health.recommend-url:http://localhost:8001}")
@@ -126,7 +129,7 @@ public class AdminWorldcupCandidateService {
 
     public Page<CandidateResponse> getCandidates(String category, Pageable pageable) {
         Page<WorldcupCandidate> pageResult = (category != null && !category.isBlank())
-                ? repository.findByCategoryOrderByCreatedAtDesc(category, pageable)
+                ? repository.findByCategoryCategoryCodeOrderByCreatedAtDesc(category, pageable)
                 : repository.findAllByOrderByCreatedAtDesc(pageable);
 
         Map<String, Movie> movieById = loadMoviesById(pageResult.getContent().stream()
@@ -147,11 +150,12 @@ public class AdminWorldcupCandidateService {
 
     @Transactional
     public CandidateResponse createCandidate(CreateRequest request) {
-        String category = (request.category() != null && !request.category().isBlank())
+        String categoryCode = (request.category() != null && !request.category().isBlank())
                 ? request.category() : "DEFAULT";
         Movie movie = findMovieOrThrow(request.movieId());
+        WorldcupCategory category = findCategoryByCodeOrThrow(categoryCode);
 
-        if (repository.existsByMovieIdAndCategory(request.movieId(), category)) {
+        if (repository.existsByMovieIdAndCategoryCategoryId(request.movieId(), category.getCategoryId())) {
             throw new BusinessException(ErrorCode.DUPLICATE_WORLDCUP_CANDIDATE);
         }
 
@@ -161,12 +165,11 @@ public class AdminWorldcupCandidateService {
                 .popularity(resolveMoviePopularity(movie))
                 .isActive(true)
                 .addedBy(resolveCurrentAdminId())
-                .adminNote(request.adminNote())
                 .build();
 
         WorldcupCandidate saved = repository.save(entity);
         log.info("[관리자] 월드컵 후보 등록 — id={}, movieId={}, category={}",
-                saved.getId(), saved.getMovieId(), saved.getCategory());
+                saved.getId(), saved.getMovieId(), saved.getCategory().getCategoryCode());
 
         return toResponse(saved, movie);
     }
@@ -175,7 +178,7 @@ public class AdminWorldcupCandidateService {
     public CandidateResponse updateCandidate(Long id, UpdateRequest request) {
         WorldcupCandidate entity = findOrThrow(id);
         Movie movie = findMovieOrThrow(entity.getMovieId());
-        entity.updateInfo(resolveMoviePopularity(movie), request.isActive(), request.adminNote());
+        entity.updateInfo(resolveMoviePopularity(movie), request.isActive());
 
         log.info("[관리자] 월드컵 후보 수정 — id={}, movieId={}", id, entity.getMovieId());
         return toResponse(entity, movie);
@@ -214,7 +217,7 @@ public class AdminWorldcupCandidateService {
         WorldcupCandidate entity = findOrThrow(id);
         repository.delete(entity);
         log.warn("[관리자] 월드컵 후보 삭제 — id={}, movieId={}, category={}",
-                id, entity.getMovieId(), entity.getCategory());
+                id, entity.getMovieId(), entity.getCategory().getCategoryCode());
     }
 
     // ─────────────────────────────────────────────
@@ -399,6 +402,14 @@ public class AdminWorldcupCandidateService {
                         "월드컵 후보 ID " + id + "를 찾을 수 없습니다"));
     }
 
+    private WorldcupCategory findCategoryByCodeOrThrow(String categoryCode) {
+        return worldcupCategoryRepository.findByCategoryCode(categoryCode)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.WORLDCUP_CATEGORY_NOT_FOUND,
+                        "월드컵 카테고리 코드 " + categoryCode + "를 찾을 수 없습니다"
+                ));
+    }
+
     private String resolveCurrentAdminId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getName())) {
@@ -408,16 +419,18 @@ public class AdminWorldcupCandidateService {
     }
 
     private CandidateResponse toResponse(WorldcupCandidate entity, Movie movie) {
+        WorldcupCategory category = entity.getCategory();
         return new CandidateResponse(
                 entity.getId(),
                 entity.getMovieId(),
                 movie != null ? movie.getTitle() : null,
                 movie != null ? movie.getTitleEn() : null,
-                entity.getCategory(),
+                category != null ? category.getCategoryId() : null,
+                category != null ? category.getCategoryCode() : null,
+                category != null ? category.getCategoryName() : null,
                 resolveMoviePopularity(movie),
                 entity.getIsActive(),
                 entity.getAddedBy(),
-                entity.getAdminNote(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt()
         );

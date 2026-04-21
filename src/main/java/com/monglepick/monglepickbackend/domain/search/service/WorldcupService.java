@@ -115,7 +115,7 @@ public class WorldcupService {
         // ② 세션 생성
         WorldcupSession session = WorldcupSession.builder()
                 .userId(userId)
-                .genreFilter(genreFilter)
+                .category(genreFilter)
                 .roundSize(roundSize)
                 .currentRound(roundSize)    // 첫 라운드 = 전체 크기 (예: 16강)
                 .currentMatchOrder(0)
@@ -306,7 +306,7 @@ public class WorldcupService {
             //   - 풀 크기가 roundSize 이상이면 셔플 후 앞쪽 roundSize개 사용
             String poolCategory = (genreFilter != null && !genreFilter.isBlank())
                     ? genreFilter : null;
-            List<String> poolIds = worldcupCandidateRepo.findActiveMovieIds(poolCategory);
+            List<String> poolIds = worldcupCandidateRepo.findActiveMovieIdsByCategoryCode(poolCategory);
 
             if (poolIds.size() >= roundSize) {
                 java.util.List<String> mutable = new java.util.ArrayList<>(poolIds);
@@ -319,7 +319,7 @@ public class WorldcupService {
 
             // 풀에 후보가 부족하면 카테고리 무시하고 전체 활성 풀 재시도
             if (poolCategory != null) {
-                List<String> allPoolIds = worldcupCandidateRepo.findActiveMovieIds(null);
+                List<String> allPoolIds = worldcupCandidateRepo.findActiveMovieIdsByCategoryCode(null);
                 if (allPoolIds.size() >= roundSize) {
                     java.util.List<String> mutable = new java.util.ArrayList<>(allPoolIds);
                     java.util.Collections.shuffle(mutable);

@@ -92,6 +92,9 @@ public class ContentDto {
      * @param actionTaken    취해진 조치 (NONE/WARN/BLIND/DELETE, nullable=미처리)
      * @param processedAt    조치 처리 시각 (nullable=미처리)
      * @param createdAt      로그 생성 시각
+     * @param inputText      관리자 화면 미리보기용 원문 텍스트
+     * @param toxicityType   관리자 화면 표시용 독성 유형/등급 문자열
+     * @param targetType     관리자 화면 표시용 대상 유형 (contentType과 동일)
      */
     public record ToxicityResponse(
             Long id,
@@ -103,7 +106,10 @@ public class ContentDto {
             String severity,
             String actionTaken,
             LocalDateTime processedAt,
-            LocalDateTime createdAt
+            LocalDateTime createdAt,
+            String inputText,
+            String toxicityType,
+            String targetType
     ) {}
 
     /**

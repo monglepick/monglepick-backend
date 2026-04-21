@@ -12,6 +12,7 @@ import com.monglepick.monglepickbackend.domain.content.mapper.ContentMapper;
 import com.monglepick.monglepickbackend.domain.community.entity.Post;
 import com.monglepick.monglepickbackend.domain.community.entity.PostDeclaration;
 import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
+import com.monglepick.monglepickbackend.domain.community.entity.PostComment;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
 import com.monglepick.monglepickbackend.domain.content.entity.ToxicityLog;
 import com.monglepick.monglepickbackend.domain.review.entity.Review;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 관리자 콘텐츠 관리 서비스.
@@ -231,21 +233,121 @@ public class AdminContentService {
         long total = contentMapper.countAllToxicityLogs(minScoreFloat);
 
         List<ToxicityResponse> content = logs.stream()
-                .map(item -> new ToxicityResponse(
-                        item.getToxicityLogId(),
-                        item.getContentType(),
-                        item.getContentId(),
-                        item.getUserId(),
-                        item.getDetectedWords(),
-                        item.getToxicityScore(),
-                        item.getSeverity(),
-                        item.getActionTaken(),
-                        item.getProcessedAt(),
-                        item.getCreatedAt()
-                ))
+                .map(item -> {
+                    String inputText = resolveToxicityInputText(item);
+                    return new ToxicityResponse(
+                            item.getToxicityLogId(),
+                            item.getContentType(),
+                            item.getContentId(),
+                            item.getUserId(),
+                            item.getDetectedWords(),
+                            item.getToxicityScore(),
+                            item.getSeverity(),
+                            item.getActionTaken(),
+                            item.getProcessedAt(),
+                            item.getCreatedAt(),
+                            inputText,
+                            resolveToxicityType(item),
+                            item.getContentType()
+                    );
+                })
                 .toList();
 
         return new PageImpl<>(content, pageable, total);
+    }
+
+    private String resolveToxicityInputText(ToxicityLog log) {
+        if (log.getContentType() == null || log.getContentId() == null) {
+            return fallbackInputText(log);
+        }
+
+        return switch (log.getContentType().toUpperCase(Locale.ROOT)) {
+            case "POST" -> buildPostPreview(postMapper.findById(log.getContentId()), log);
+            case "COMMENT" -> buildCommentPreview(postMapper.findCommentById(log.getContentId()), log);
+            case "REVIEW" -> buildReviewPreview(reviewMapper.findById(log.getContentId()), log);
+            case "CHAT" -> fallbackInputText(log);
+            default -> fallbackInputText(log);
+        };
+    }
+
+    private String buildPostPreview(Post post, ToxicityLog log) {
+        if (post == null) {
+            return fallbackInputText(log);
+        }
+
+        String title = normalizePreviewText(post.getTitle());
+        String content = normalizePreviewText(post.getContent());
+        if (!title.isBlank() && !content.isBlank()) {
+            return title + " - " + content;
+        }
+        if (!content.isBlank()) {
+            return content;
+        }
+        if (!title.isBlank()) {
+            return title;
+        }
+        return fallbackInputText(log);
+    }
+
+    private String buildCommentPreview(PostComment comment, ToxicityLog log) {
+        if (comment == null) {
+            return fallbackInputText(log);
+        }
+
+        String content = normalizePreviewText(comment.getContent());
+        return content.isBlank() ? fallbackInputText(log) : content;
+    }
+
+    private String buildReviewPreview(Review review, ToxicityLog log) {
+        if (review == null) {
+            return fallbackInputText(log);
+        }
+
+        String content = normalizePreviewText(review.getContent());
+        return content.isBlank() ? fallbackInputText(log) : content;
+    }
+
+    private String fallbackInputText(ToxicityLog log) {
+        String detectedWords = formatDetectedWords(log.getDetectedWords());
+        if (!detectedWords.isBlank()) {
+            return "감지 단어: " + detectedWords;
+        }
+        return "(원문 미리보기 없음)";
+    }
+
+    private String resolveToxicityType(ToxicityLog log) {
+        String severity = log.getSeverity();
+        if (severity == null || severity.isBlank()) {
+            return "미분류";
+        }
+
+        return switch (severity.toUpperCase(Locale.ROOT)) {
+            case "CRITICAL" -> "긴급";
+            case "HIGH" -> "고위험";
+            case "MEDIUM" -> "주의";
+            case "LOW" -> "경미";
+            default -> severity;
+        };
+    }
+
+    private String normalizePreviewText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceAll("\\s+", " ").trim();
+    }
+
+    private String formatDetectedWords(String detectedWords) {
+        String normalized = normalizePreviewText(detectedWords);
+        if (normalized.isBlank()) {
+            return "";
+        }
+
+        return normalized
+                .replace("[", "")
+                .replace("]", "")
+                .replace("\"", "")
+                .trim();
     }
 
     /**

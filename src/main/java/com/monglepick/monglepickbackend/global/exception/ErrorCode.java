@@ -241,6 +241,15 @@ public enum ErrorCode {
     /** 관리자 — 월드컵 후보 영화 중복 등록 시도(같은 movieId+category). */
     DUPLICATE_WORLDCUP_CANDIDATE(HttpStatus.CONFLICT, "WCC002", "이미 등록된 월드컵 후보 영화입니다"),
 
+    /** 관리자 — 월드컵 후보 카테고리를 찾을 수 없음. */
+    WORLDCUP_CATEGORY_NOT_FOUND(HttpStatus.NOT_FOUND, "WCG001", "월드컵 후보 카테고리를 찾을 수 없습니다"),
+
+    /** 관리자 — 월드컵 후보 카테고리 코드 중복 등록 시도. */
+    DUPLICATE_WORLDCUP_CATEGORY_CODE(HttpStatus.CONFLICT, "WCG002", "이미 사용 중인 월드컵 카테고리 코드입니다"),
+
+    /** 관리자 — 후보 영화가 연결된 카테고리를 삭제하려는 시도. */
+    WORLDCUP_CATEGORY_IN_USE(HttpStatus.CONFLICT, "WCG003", "후보 영화가 연결된 월드컵 카테고리는 삭제할 수 없습니다"),
+
     /** 관리자 — 포인트팩(point_pack_prices) 마스터를 찾을 수 없음. */
     POINT_PACK_NOT_FOUND(HttpStatus.NOT_FOUND, "PPK001", "포인트팩을 찾을 수 없습니다"),
 

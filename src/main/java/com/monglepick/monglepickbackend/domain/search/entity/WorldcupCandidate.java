@@ -3,10 +3,13 @@ package com.monglepick.monglepickbackend.domain.search.entity;
 import com.monglepick.monglepickbackend.global.entity.BaseAuditEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
@@ -24,13 +27,12 @@ import lombok.NoArgsConstructor;
  *
  * <h3>운영 모델</h3>
  * <ul>
- *   <li>관리자가 후보 영화를 추가하고 카테고리(예: 액션/감독별/시대별)를 부여한다.</li>
+ *   <li>관리자가 후보 영화를 추가하고 카테고리 마스터({@link WorldcupCategory})를 연결한다.</li>
  *   <li>{@code popularity} 임계값을 설정하여 인기 없는 영화를 풀에서 자동 제외한다.</li>
  *   <li>{@code isActive=false}이면 해당 영화는 월드컵 후보로 노출되지 않는다.</li>
- *   <li>{@code adminNote}로 큐레이션 사유/관리 이력을 자유 형식으로 기록한다.</li>
  * </ul>
  *
- * <p>{@code (movieId, category)} 복합 UNIQUE — 같은 영화를 여러 카테고리에 등록 가능하지만
+ * <p>{@code (movieId, category_id)} 복합 UNIQUE — 같은 영화를 여러 카테고리에 등록 가능하지만
  * 같은 카테고리 내에서는 중복 불가.</p>
  */
 @Entity
@@ -38,11 +40,11 @@ import lombok.NoArgsConstructor;
         name = "worldcup_candidate",
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_worldcup_candidate_movie_category",
-                columnNames = {"movie_id", "category"}
+                columnNames = {"movie_id", "category_id"}
         ),
         indexes = {
                 @Index(name = "idx_wcc_active", columnList = "is_active"),
-                @Index(name = "idx_wcc_category", columnList = "category"),
+                @Index(name = "idx_wcc_category", columnList = "category_id"),
                 @Index(name = "idx_wcc_popularity", columnList = "popularity")
         }
 )
@@ -62,15 +64,10 @@ public class WorldcupCandidate extends BaseAuditEntity {
     @Column(name = "movie_id", nullable = false, length = 50)
     private String movieId;
 
-    /**
-     * 후보 풀 카테고리 (예: "DEFAULT", "ACTION", "DIRECTOR_NOLAN", "ROMANCE_2020S").
-     *
-     * <p>월드컵 시작 시 카테고리별로 후보를 묶어 다양한 테마의 토너먼트를 운영할 수 있다.
-     * 별도 카테고리 없이 일반 풀로 사용할 경우 "DEFAULT"를 지정한다.</p>
-     */
-    @Column(name = "category", nullable = false, length = 100)
-    @Builder.Default
-    private String category = "DEFAULT";
+    /** 연결된 월드컵 카테고리 마스터 (FK → worldcup_category.category_id) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id", nullable = false)
+    private WorldcupCategory category;
 
     /**
      * 영화 인기도 점수 (참조용 비정규화 값, 기본 0).
@@ -96,10 +93,6 @@ public class WorldcupCandidate extends BaseAuditEntity {
     @Column(name = "added_by", length = 50)
     private String addedBy;
 
-    /** 관리자 메모 (큐레이션 사유, 마케팅 목적 등) */
-    @Column(name = "admin_note", columnDefinition = "TEXT")
-    private String adminNote;
-
     // ─────────────────────────────────────────────
     // 도메인 메서드
     // ─────────────────────────────────────────────
@@ -107,10 +100,9 @@ public class WorldcupCandidate extends BaseAuditEntity {
     /**
      * 후보 메타 정보를 수정한다 (movieId/category 제외).
      */
-    public void updateInfo(Double popularity, Boolean isActive, String adminNote) {
+    public void updateInfo(Double popularity, Boolean isActive) {
         this.popularity = popularity != null ? popularity : 0.0;
         this.isActive = isActive != null ? isActive : true;
-        this.adminNote = adminNote;
     }
 
     /** 활성화 토글 */
