@@ -269,6 +269,8 @@ app:
   ai:
     review-verification:
       threshold: ${AI_REVIEW_VERIFICATION_THRESHOLD:0.7}
+  agent:
+    base-url: ${AGENT_BASE_URL:http://localhost:8000}
   ## 등급별 쿼터 (v3.2 6등급 체계, 팝콘 테마)
   ## - daily-limit  : 일일 무료 AI 한도 (-1=무제한)
   ## - monthly-limit: AI 이용권(쿠폰) 월간 한도 (-1=무제한). v3.2 역할 분리

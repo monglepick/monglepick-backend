@@ -1,10 +1,13 @@
 package com.monglepick.monglepickbackend.domain.roadmap.controller;
 
+import com.monglepick.monglepickbackend.domain.roadmap.dto.CompleteMovieSaveResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseCompleteResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseProgressResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseDetailResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseListResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseStartResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseReviewResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.VerifyResultRequest;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
 import com.monglepick.monglepickbackend.domain.roadmap.service.RoadmapService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
@@ -19,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -201,7 +205,7 @@ public class RoadmapController extends BaseController {
             @ApiResponse(responseCode = "404", description = "존재하지 않는 코스")
     })
     @PostMapping("/{courseId}/movies/{movieId}/complete")
-    public ResponseEntity<CourseProgressResponse> completeMovie(
+    public ResponseEntity<CompleteMovieSaveResponse> completeMovie(
             @Parameter(description = "코스 슬러그", required = true, example = "nolan-filmography")
             @PathVariable String courseId,
 
@@ -216,7 +220,39 @@ public class RoadmapController extends BaseController {
         String reviewText = (body != null) ? body.get("review") : null;
         log.info("영화 완료 요청: userId={}, courseId={}, movieId={}, hasReview={}", userId, courseId, movieId, reviewText != null);
 
-        CourseProgressResponse response = roadmapService.completeMovie(courseId, movieId, userId, reviewText);
+        CompleteMovieSaveResponse response = roadmapService.completeMovie(courseId, movieId, userId, reviewText);
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(
+            summary = "AI 검증 결과 적용",
+            description = "프론트엔드가 FastAPI로부터 받은 AI 검증 결과를 Spring Boot에 전달하여 " +
+                    "CourseVerification 상태를 업데이트하고 진행률을 반영합니다. " +
+                    "AUTO_VERIFIED인 경우에만 verifiedMovies가 증가합니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "AI 결과 적용 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요"),
+            @ApiResponse(responseCode = "404", description = "인증 레코드 없음")
+    })
+    @PatchMapping("/{courseId}/movies/{movieId}/verify-result")
+    public ResponseEntity<CourseCompleteResponse> applyVerifyResult(
+            @Parameter(description = "코스 슬러그", required = true)
+            @PathVariable String courseId,
+
+            @Parameter(description = "영화 ID", required = true)
+            @PathVariable String movieId,
+
+            @RequestBody VerifyResultRequest request,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        log.info("AI 검증 결과 적용 요청: userId={}, courseId={}, movieId={}, status={}",
+                userId, courseId, movieId, request.reviewStatus());
+
+        CourseCompleteResponse response = roadmapService.applyVerificationResult(courseId, movieId, userId, request);
         return ResponseEntity.ok(response);
     }
 

@@ -66,14 +66,6 @@ public class User extends BaseAuditEntity {
     @Column(name = "user_role", length = 20)
     private UserRole userRole;
 
-    /** 생년월일 (YYYYMMDD) */
-    @Column(name = "user_birth", length = 20)
-    private String userBirth;
-
-    /** 사용자 이름 (REQ_012: 회원가입 시 이름 입력) */
-    @Column(name = "name", length = 100)
-    private String name;
-
     /** 필수 약관 동의 (이용약관 + 개인정보) */
     @Column(name = "required_term")
     private Boolean requiredTerm;
@@ -147,8 +139,7 @@ public class User extends BaseAuditEntity {
     @Builder
     public User(String userId, String email, String nickname, String passwordHash,
                 String profileImage, Provider provider, String providerId,
-                UserRole userRole, String userBirth, String name,
-                Boolean optionTerm, Boolean requiredTerm, Boolean marketingAgreed) {
+                UserRole userRole, Boolean optionTerm, Boolean requiredTerm, Boolean marketingAgreed) {
         this.userId = userId;
         this.email = email;
         this.nickname = nickname;
@@ -157,8 +148,6 @@ public class User extends BaseAuditEntity {
         this.provider = provider != null ? provider : Provider.LOCAL;
         this.providerId = providerId;
         this.userRole = userRole != null ? userRole : UserRole.USER;
-        this.userBirth = userBirth;
-        this.name = name;
         this.optionTerm = optionTerm != null ? optionTerm : false;
         this.requiredTerm = requiredTerm != null ? requiredTerm : false;
         this.marketingAgreed = marketingAgreed != null ? marketingAgreed : false;

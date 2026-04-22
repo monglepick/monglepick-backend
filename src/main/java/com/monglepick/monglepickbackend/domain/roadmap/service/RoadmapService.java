@@ -5,12 +5,15 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
 import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.CompleteMovieSaveResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseCompleteResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseProgressResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseDetailResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseListResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseStartResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.MovieInfo;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseReviewResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.VerifyResultRequest;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseVerification;
@@ -84,6 +87,9 @@ public class RoadmapService {
 
     /** 업적 서비스 — 코스 완주 업적 달성 연동 */
     private final AchievementService achievementService;
+
+    /** AI 리뷰 검증 에이전트 HTTP 클라이언트 */
+    private final ReviewVerificationAgentClient agentClient;
 
     /**
      * JSON 파싱용 ObjectMapper (스레드 안전, 클래스 로딩 시 1회 초기화).
@@ -275,6 +281,7 @@ public class RoadmapService {
         // ADMIN_REJECTED 영화 목록 — rejectedMovies 응답 구성 + completedMovieIds 필터링용
         List<com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.RejectedMovieInfo> rejectedMovies;
         java.util.Set<String> rejectedSet;
+        java.util.Set<String> pendingSet;
         if (userId != null) {
             List<Object[]> rawRejected = courseVerificationRepository
                     .findRejectedMoviesByUserIdAndCourseId(userId, courseId);
@@ -286,20 +293,27 @@ public class RoadmapService {
             rejectedSet = rejectedMovies.stream()
                     .map(com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.RejectedMovieInfo::movieId)
                     .collect(java.util.stream.Collectors.toSet());
+
+            // PENDING/NEEDS_REVIEW 영화 ID 세트 — "AI 검증 중" 버튼 표시용
+            pendingSet = new java.util.HashSet<>(
+                    courseVerificationRepository.findPendingMovieIdsByUserIdAndCourseId(userId, courseId));
         } else {
             rejectedMovies = Collections.emptyList();
             rejectedSet = java.util.Collections.emptySet();
+            pendingSet = java.util.Collections.emptySet();
         }
 
-        // 완료된 영화 ID 목록 — course_review 기준으로 조회하되 ADMIN_REJECTED 영화는 제외
+        // 완료된 영화 ID — ADMIN_REJECTED · PENDING · NEEDS_REVIEW 제외, AI 검증 완료(AUTO_VERIFIED/ADMIN_APPROVED)만 포함
         List<String> completedMovieIds = (userId != null)
                 ? courseReviewRepository.findAllByCourseIdAndUserId(courseId, userId).stream()
                         .map(com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview::getMovieId)
-                        .filter(id -> !rejectedSet.contains(id))
+                        .filter(id -> !rejectedSet.contains(id) && !pendingSet.contains(id))
                         .toList()
                 : Collections.emptyList();
 
-        return CourseDetailResponse.from(course, movies, started, progressPercent, completedMovieIds, rejectedMovies, deadlineAt);
+        List<String> pendingMovieIds = new java.util.ArrayList<>(pendingSet);
+
+        return CourseDetailResponse.from(course, movies, started, progressPercent, completedMovieIds, pendingMovieIds, rejectedMovies, deadlineAt);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -406,82 +420,157 @@ public class RoadmapService {
      * @return 업데이트된 코스 진행 현황 DTO
      * @throws BusinessException {@link ErrorCode#NOT_FOUND} 코스가 존재하지 않을 때
      */
+    /**
+     * 도장깨기 영화 시청 인증 리뷰를 저장하고 AI 검증 준비 정보를 반환한다.
+     *
+     * <p>기존 Spring Boot → FastAPI 동기 호출 방식에서 변경된 새 아키텍처:
+     * <ol>
+     *   <li>Spring Boot: 리뷰 저장 + CourseVerification(PENDING) 생성 → 200 즉시 반환</li>
+     *   <li>프론트엔드: FastAPI에 직접 AI 검증 요청</li>
+     *   <li>프론트엔드: AI 결과를 {@link #applyVerificationResult}로 Spring Boot에 전달</li>
+     * </ol>
+     * </p>
+     *
+     * @param courseId   코스 슬러그
+     * @param movieId    영화 ID
+     * @param userId     사용자 ID
+     * @param reviewText 리뷰 본문 (nullable)
+     * @return AI 검증에 필요한 verificationId, moviePlot 포함 응답
+     */
     @Transactional
-    public CourseProgressResponse completeMovie(String courseId, String movieId,
-                                                String userId, String reviewText) {
-        // 코스 존재 확인 (totalMovies, defaultRewardPoints 조회 목적)
+    public CompleteMovieSaveResponse completeMovie(String courseId, String movieId,
+                                                   String userId, String reviewText) {
+        // 코스 존재 확인
         RoadmapCourse course = courseRepo.findByCourseId(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
                         "존재하지 않는 코스입니다: courseId=" + courseId));
 
         int totalMovies = course.getMovieCount() != null ? course.getMovieCount() : 0;
-        /* RoadmapCourse 엔티티에 defaultRewardPoints 컬럼이 없으므로 기본값 100P 사용 */
-        int rewardPoints = 100;
 
-        log.info("영화 완료 처리: userId={}, courseId={}, movieId={}", userId, courseId, movieId);
+        log.info("영화 시청 인증 리뷰 저장: userId={}, courseId={}, movieId={}", userId, courseId, movieId);
 
         // 기존 인증 레코드 확인
         Optional<CourseVerification> existingVerification = courseVerificationRepository
                 .findByUserIdAndCourseIdAndMovieId(userId, courseId, movieId);
-        boolean isAdminRejected = existingVerification
-                .map(v -> "ADMIN_REJECTED".equals(v.getReviewStatus()))
+        boolean isRejected = existingVerification
+                .map(v -> "ADMIN_REJECTED".equals(v.getReviewStatus()) || "AUTO_REJECTED".equals(v.getReviewStatus()))
                 .orElse(false);
 
         Optional<CourseReview> existingReview = courseReviewRepository
                 .findByCourseIdAndMovieIdAndUserId(courseId, movieId, userId);
 
-        if (existingReview.isPresent() && !isAdminRejected) {
-            // 이미 인증된 영화(정상 상태) — 중복 카운트 방지
-            log.debug("이미 인증된 영화 — verifyMovie 생략: courseId={}, movieId={}, userId={}",
+        // 이미 인증된 영화(정상 상태) — FastAPI 재호출 없이 기존 상태 반환
+        if (existingReview.isPresent() && !isRejected) {
+            log.debug("이미 인증된 영화 — 재처리 생략: courseId={}, movieId={}, userId={}",
                     courseId, movieId, userId);
-            return progressRepo.findByUserIdAndCourseId(userId, courseId)
-                    .map(CourseProgressResponse::from)
-                    .orElseGet(() -> new CourseProgressResponse(
-                            courseId, totalMovies, 0,
-                            java.math.BigDecimal.ZERO,
-                            com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus.IN_PROGRESS,
-                            false, null, null));
+            String existingStatus = existingVerification
+                    .map(CourseVerification::getReviewStatus).orElse("PENDING");
+            Long existingVerificationId = existingVerification
+                    .map(CourseVerification::getVerificationId).orElse(null);
+            // moviePlot=null → 프론트엔드가 FastAPI를 호출하지 않도록 신호
+            return new CompleteMovieSaveResponse(existingVerificationId, courseId, movieId, null, existingStatus);
         }
 
-        if (isAdminRejected) {
-            // 관리자 반려 후 재인증 — 기존 리뷰 본문 교체, 인증 레코드 초기화
+        // 신규 리뷰 저장 또는 재인증 처리
+        CourseVerification verification;
+        if (isRejected) {
             existingReview.ifPresent(review -> {
                 review.updateReviewText((reviewText != null && !reviewText.isBlank()) ? reviewText : null);
                 courseReviewRepository.save(review);
             });
-            existingVerification.ifPresent(v -> {
-                v.resetForResubmit();
-                courseVerificationRepository.save(v);
-            });
+            existingVerification.get().resetForResubmit();
+            verification = courseVerificationRepository.save(existingVerification.get());
             log.info("도장깨기 재인증 처리 — courseId={}, movieId={}, userId={}", courseId, movieId, userId);
         } else {
-            // 신규 리뷰 저장
             CourseReview newReview = CourseReview.builder()
-                    .courseId(courseId)
-                    .movieId(movieId)
-                    .userId(userId)
+                    .courseId(courseId).movieId(movieId).userId(userId)
                     .reviewText((reviewText != null && !reviewText.isBlank()) ? reviewText : null)
                     .build();
             courseReviewRepository.save(newReview);
-            log.info("도장깨기 리뷰 저장 완료 — courseId={}, movieId={}, userId={}, hasText={}",
-                    courseId, movieId, userId, reviewText != null && !reviewText.isBlank());
 
-            // 리뷰 인증 큐 레코드 생성 (기존 없을 때만)
-            if (existingVerification.isEmpty()) {
-                CourseVerification verification = CourseVerification.builder()
-                        .userId(userId)
-                        .courseId(courseId)
-                        .movieId(movieId)
-                        .verificationType("REVIEW")
-                        .build();
-                courseVerificationRepository.save(verification);
-                log.info("도장깨기 리뷰 인증 큐 등록 완료 — courseId={}, movieId={}, userId={}",
-                        courseId, movieId, userId);
+            CourseVerification newVerification = CourseVerification.builder()
+                    .userId(userId).courseId(courseId).movieId(movieId)
+                    .verificationType("REVIEW").build();
+            verification = courseVerificationRepository.save(newVerification);
+            log.info("도장깨기 리뷰 저장 완료 — courseId={}, movieId={}, userId={}", courseId, movieId, userId);
+        }
+
+        // 영화 줄거리 조회 (FastAPI 검증 시 필요)
+        String moviePlot = movieRepository.findById(movieId)
+                .map(m -> m.getOverview() != null ? m.getOverview() : "")
+                .orElse("");
+
+        // 진행 레코드 없으면 PENDING 상태로 미리 생성 (applyVerificationResult에서 갱신됨)
+        progressRepo.findByUserIdAndCourseId(userId, courseId)
+                .orElseGet(() -> progressRepo.save(UserCourseProgress.builder()
+                        .userId(userId).courseId(courseId).totalMovies(totalMovies)
+                        .startedAt(LocalDateTime.now()).build()));
+
+        return new CompleteMovieSaveResponse(
+                verification.getVerificationId(), courseId, movieId, moviePlot, "PENDING");
+    }
+
+    /**
+     * 프론트엔드로부터 FastAPI AI 검증 결과를 받아 CourseVerification에 적용한다.
+     *
+     * <p>새 아키텍처 3단계 중 마지막 단계:
+     * 프론트엔드가 FastAPI 검증 결과를 이 엔드포인트로 전달하면
+     * DB 업데이트와 진행률 반영(AUTO_VERIFIED 시)을 수행한다.</p>
+     *
+     * @param courseId 코스 슬러그
+     * @param movieId  영화 ID
+     * @param userId   사용자 ID
+     * @param req      FastAPI 검증 결과 DTO
+     * @return 업데이트된 코스 진행 현황
+     */
+    @Transactional
+    public CourseCompleteResponse applyVerificationResult(String courseId, String movieId,
+                                                          String userId, VerifyResultRequest req) {
+        CourseVerification verification = courseVerificationRepository
+                .findById(req.verificationId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_VERIFICATION_NOT_FOUND,
+                        "인증 레코드를 찾을 수 없습니다: verificationId=" + req.verificationId()));
+
+        // matched_keywords List → JSON 직렬화
+        String matchedKeywordsJson = null;
+        if (req.matchedKeywords() != null && !req.matchedKeywords().isEmpty()) {
+            try {
+                matchedKeywordsJson = OBJECT_MAPPER.writeValueAsString(req.matchedKeywords());
+            } catch (Exception ex) {
+                log.warn("matched_keywords 직렬화 실패: {}", ex.getMessage());
             }
         }
 
-        // verifyMovie에 위임 — 진행 레코드 생성/업데이트 + 완주 판정 + 리워드 지급
-        return verifyMovie(userId, courseId, totalMovies, rewardPoints);
+        verification.applyAiDecision(
+                req.similarityScore(),
+                matchedKeywordsJson,
+                req.confidence(),
+                req.reviewStatus(),
+                req.rationale()
+        );
+        courseVerificationRepository.save(verification);
+
+        log.info("AI 검증 결과 적용 — verificationId={}, status={}, userId={}",
+                req.verificationId(), req.reviewStatus(), userId);
+
+        RoadmapCourse course = courseRepo.findByCourseId(courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
+                        "존재하지 않는 코스입니다: courseId=" + courseId));
+        int totalMovies = course.getMovieCount() != null ? course.getMovieCount() : 0;
+        int rewardPoints = 100;
+
+        // AUTO_VERIFIED일 때만 진행률 반영
+        if ("AUTO_VERIFIED".equals(req.reviewStatus())) {
+            verifyMovie(userId, courseId, totalMovies, rewardPoints);
+        }
+
+        UserCourseProgress progress = progressRepo
+                .findByUserIdAndCourseId(userId, courseId)
+                .orElseGet(() -> progressRepo.save(UserCourseProgress.builder()
+                        .userId(userId).courseId(courseId).totalMovies(totalMovies)
+                        .startedAt(LocalDateTime.now()).build()));
+
+        return CourseCompleteResponse.from(progress, req.reviewStatus(), req.rationale(), req.similarityScore(), true);
     }
 
     // ────────────────────────────────────────────────────────────────

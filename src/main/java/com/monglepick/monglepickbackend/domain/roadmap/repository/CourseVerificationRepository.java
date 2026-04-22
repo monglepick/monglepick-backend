@@ -28,11 +28,22 @@ public interface CourseVerificationRepository extends JpaRepository<CourseVerifi
             String userId, String courseId, String movieId);
 
     /**
-     * 관리자 반려(ADMIN_REJECTED) 처리된 영화의 [movieId, decisionReason] 목록 조회.
+     * 반려(AUTO_REJECTED / ADMIN_REJECTED) 처리된 영화의 [movieId, decisionReason] 목록 조회.
      * getCourseDetail()의 rejectedMovies 구성 및 completedMovieIds 필터링에 사용된다.
      */
     @Query("SELECT cv.movieId, cv.decisionReason FROM CourseVerification cv " +
-           "WHERE cv.userId = :userId AND cv.courseId = :courseId AND cv.reviewStatus = 'ADMIN_REJECTED'")
+           "WHERE cv.userId = :userId AND cv.courseId = :courseId " +
+           "AND cv.reviewStatus IN ('ADMIN_REJECTED', 'AUTO_REJECTED')")
     List<Object[]> findRejectedMoviesByUserIdAndCourseId(
+            @Param("userId") String userId, @Param("courseId") String courseId);
+
+    /**
+     * AI 검증 대기(PENDING) 또는 관리자 검토 필요(NEEDS_REVIEW) 상태 영화 ID 목록 조회.
+     * getCourseDetail()의 pendingMovieIds 구성에 사용된다.
+     */
+    @Query("SELECT cv.movieId FROM CourseVerification cv " +
+           "WHERE cv.userId = :userId AND cv.courseId = :courseId " +
+           "AND cv.reviewStatus IN ('PENDING', 'NEEDS_REVIEW')")
+    List<String> findPendingMovieIdsByUserIdAndCourseId(
             @Param("userId") String userId, @Param("courseId") String courseId);
 }

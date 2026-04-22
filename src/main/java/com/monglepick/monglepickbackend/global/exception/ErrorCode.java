@@ -384,6 +384,7 @@ public enum ErrorCode {
 
     /** courseId(slug)에 해당하는 도장깨기 코스를 찾을 수 없음. */
     ROADMAP_COURSE_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD001", "존재하지 않는 도장깨기 코스입니다"),
+    ROADMAP_VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD002", "도장깨기 인증 레코드를 찾을 수 없습니다"),
 
     /** quizId에 해당하는 퀴즈가 존재하지 않거나 PUBLISHED 상태가 아님. */
     QUIZ_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD002", "존재하지 않거나 출제 중이 아닌 퀴즈입니다"),

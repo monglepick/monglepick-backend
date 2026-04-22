@@ -151,7 +151,8 @@ public class CourseResponse {
      * @param quizEnabled       퀴즈 활성화 여부
      * @param started           현재 사용자가 이미 코스를 시작했는지 여부
      * @param progressPercent   현재 사용자의 진행률 % (미시작 시 0.0)
-     * @param completedMovieIds 현재 사용자가 완료(리뷰 작성) 처리한 영화 ID 목록 (미시작/비로그인 시 빈 리스트)
+     * @param completedMovieIds 현재 사용자가 AI 검증 완료(AUTO_VERIFIED/ADMIN_APPROVED) 처리한 영화 ID 목록
+     * @param pendingMovieIds   AI 검증 대기(PENDING) 또는 관리자 검토 중(NEEDS_REVIEW) 영화 ID 목록 — "⏳ AI 검증 중" 버튼 표시용
      * @param rejectedMovies    관리자가 반려(ADMIN_REJECTED) 처리한 영화 목록 (movieId + rejectionReason) — "시청 재인증" 버튼 및 사유 표시용
      * @param deadlineDays      코스 완주 데드라인 (일 수, null이면 제한 없음)
      * @param deadlineAt        현재 사용자의 완주 데드라인 시각 (미시작/데드라인 없으면 null)
@@ -170,6 +171,7 @@ public class CourseResponse {
             boolean started,
             double progressPercent,
             List<String> completedMovieIds,
+            List<String> pendingMovieIds,
             List<RejectedMovieInfo> rejectedMovies,
             Integer deadlineDays,
             LocalDateTime deadlineAt
@@ -179,6 +181,7 @@ public class CourseResponse {
                                                 boolean started,
                                                 double progressPercent,
                                                 List<String> completedMovieIds,
+                                                List<String> pendingMovieIds,
                                                 List<RejectedMovieInfo> rejectedMovies,
                                                 LocalDateTime deadlineAt) {
             return new CourseDetailResponse(
@@ -195,6 +198,7 @@ public class CourseResponse {
                     started,
                     progressPercent,
                     completedMovieIds,
+                    pendingMovieIds,
                     rejectedMovies,
                     course.getDeadlineDays(),
                     deadlineAt

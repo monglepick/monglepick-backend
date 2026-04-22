@@ -62,7 +62,6 @@ public class UserManagementDto {
      * @param userId           사용자 고유 ID
      * @param email            이메일 주소
      * @param nickname         닉네임
-     * @param name             실명 (회원가입 시 입력한 이름)
      * @param userRole         역할 (USER, ADMIN)
      * @param status           계정 상태 (ACTIVE, SUSPENDED, LOCKED)
      * @param provider         로그인 제공자 (LOCAL, GOOGLE, KAKAO, NAVER)
@@ -82,7 +81,6 @@ public class UserManagementDto {
             String userId,
             String email,
             String nickname,
-            String name,
             String userRole,
             String status,
             String provider,

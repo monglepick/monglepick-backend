@@ -39,7 +39,7 @@ public final class AuthDto {
      * email, password, nickname, requiredTerm(true여야 함)
      *
      * <h3>선택 항목</h3>
-     * name, userBirth, profileImage, optionTerm, marketingAgreed
+     * profileImage, optionTerm, marketingAgreed
      */
     @Schema(description = "로컬 회원가입 요청")
     public record SignupRequest(
@@ -70,17 +70,6 @@ public final class AuthDto {
             Boolean requiredTerm,
 
             // ── 선택 항목 ──────────────────────────────────
-            @Schema(description = "이름 (선택)", example = "홍길동", nullable = true)
-            @Size(max = 100, message = "이름은 100자를 초과할 수 없습니다")
-            String name,
-
-            @Schema(description = "생년월일 YYYYMMDD (선택)", example = "19990101", nullable = true)
-            @Pattern(
-                    regexp = "^\\d{8}$|^$",
-                    message = "생년월일은 YYYYMMDD 형식이어야 합니다"
-            )
-            String userBirth,
-
             @Schema(description = "프로필 이미지 URL (선택)", example = "https://example.com/img.jpg", nullable = true)
             @Size(max = 500, message = "프로필 이미지 URL은 500자를 초과할 수 없습니다")
             String profileImage,

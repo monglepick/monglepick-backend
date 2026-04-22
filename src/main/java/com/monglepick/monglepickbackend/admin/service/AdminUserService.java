@@ -224,7 +224,6 @@ public class AdminUserService {
                 user.getUserId(),
                 user.getEmail(),
                 user.getNickname(),
-                user.getName(),
                 user.getUserRole() != null ? user.getUserRole().name() : null,
                 user.getStatus() != null ? user.getStatus().name() : null,
                 user.getProvider() != null ? user.getProvider().name() : null,

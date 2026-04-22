@@ -111,8 +111,6 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
                 .passwordHash(passwordHash)
                 .provider(User.Provider.LOCAL)
                 .requiredTerm(request.requiredTerm())
-                .name(request.name())
-                .userBirth(request.userBirth())
                 .profileImage(request.profileImage())
                 .optionTerm(request.optionTerm() != null ? request.optionTerm() : false)
                 .marketingAgreed(request.marketingAgreed() != null ? request.marketingAgreed() : false)
