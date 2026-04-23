@@ -95,7 +95,7 @@ class ChatSuggestionServiceTest {
         @Test
         @DisplayName("limit=0 → 1로 클램프되어 칩 1개 반환")
         void limitZero_clampsToOne() {
-            when(chatSuggestionRepository.findActiveAt(any())).thenReturn(buildPool(5));
+            when(chatSuggestionRepository.findActiveBySurfaceAt(any(), any())).thenReturn(buildPool(5));
 
             List<ChatSuggestionResponse> result = chatSuggestionService.getActivePool(0);
 
@@ -105,7 +105,7 @@ class ChatSuggestionServiceTest {
         @Test
         @DisplayName("limit=-1 → 1로 클램프되어 칩 1개 반환")
         void limitNegative_clampsToOne() {
-            when(chatSuggestionRepository.findActiveAt(any())).thenReturn(buildPool(5));
+            when(chatSuggestionRepository.findActiveBySurfaceAt(any(), any())).thenReturn(buildPool(5));
 
             List<ChatSuggestionResponse> result = chatSuggestionService.getActivePool(-1);
 
@@ -115,7 +115,7 @@ class ChatSuggestionServiceTest {
         @Test
         @DisplayName("limit=11 → 10으로 클램프되어 칩 최대 10개 반환")
         void limitExceedsMax_clampsToTen() {
-            when(chatSuggestionRepository.findActiveAt(any())).thenReturn(buildPool(15));
+            when(chatSuggestionRepository.findActiveBySurfaceAt(any(), any())).thenReturn(buildPool(15));
 
             List<ChatSuggestionResponse> result = chatSuggestionService.getActivePool(11);
 
@@ -125,7 +125,7 @@ class ChatSuggestionServiceTest {
         @Test
         @DisplayName("활성 풀이 비어 있으면 빈 리스트 반환")
         void emptyPool_returnsEmptyList() {
-            when(chatSuggestionRepository.findActiveAt(any())).thenReturn(List.of());
+            when(chatSuggestionRepository.findActiveBySurfaceAt(any(), any())).thenReturn(List.of());
 
             List<ChatSuggestionResponse> result = chatSuggestionService.getActivePool(4);
 
@@ -135,7 +135,7 @@ class ChatSuggestionServiceTest {
         @Test
         @DisplayName("풀 크기가 limit 보다 작으면 풀 전체 반환")
         void poolSmallerThanLimit_returnsAll() {
-            when(chatSuggestionRepository.findActiveAt(any())).thenReturn(buildPool(2));
+            when(chatSuggestionRepository.findActiveBySurfaceAt(any(), any())).thenReturn(buildPool(2));
 
             List<ChatSuggestionResponse> result = chatSuggestionService.getActivePool(4);
 
@@ -145,7 +145,7 @@ class ChatSuggestionServiceTest {
         @Test
         @DisplayName("풀 크기가 limit 과 정확히 같으면 전부 반환")
         void poolExactlyLimit_returnsAll() {
-            when(chatSuggestionRepository.findActiveAt(any())).thenReturn(buildPool(4));
+            when(chatSuggestionRepository.findActiveBySurfaceAt(any(), any())).thenReturn(buildPool(4));
 
             List<ChatSuggestionResponse> result = chatSuggestionService.getActivePool(4);
 
@@ -161,7 +161,7 @@ class ChatSuggestionServiceTest {
                     .isActive(true)
                     .displayOrder(10)
                     .build();
-            when(chatSuggestionRepository.findActiveAt(any())).thenReturn(List.of(suggestion));
+            when(chatSuggestionRepository.findActiveBySurfaceAt(any(), any())).thenReturn(List.of(suggestion));
 
             List<ChatSuggestionResponse> result = chatSuggestionService.getActivePool(1);
 

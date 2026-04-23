@@ -64,6 +64,17 @@ server:
 
 # JWT + 앱 공통 설정 (JwtTokenProvider는 app.jwt.* 경로 사용)
 app:
+  # 2026-04-23: GenreMasterInitializer 비활성화.
+  # rebuildContentsCountFromMovies() 가 MySQL JSON_TABLE 을 사용해 H2 에서 실행 시
+  # ApplicationContext 로딩이 실패(contextLoads 깨짐). 운영/스테이징은 기본 true(matchIfMissing).
+  genre-initializer:
+    enabled: false
+  # 2026-04-23: DataInitializer(관리자 시드) 비활성화.
+  # UserMapper.insertUser 가 user_birth 컬럼을 INSERT 하는데 User 엔티티에 해당 필드가 없어
+  # H2 스키마에 컬럼 자체가 생성되지 않는다. 운영은 수동 ALTER 로 존재하지만 테스트는 깨짐.
+  # schema drift 해소 전까지 test 에서만 OFF. 운영은 matchIfMissing=true 로 항상 ON.
+  data-initializer:
+    enabled: false
   jwt:
     secret: test-secret-key-must-be-at-least-256-bits-long-for-hmac-sha256-algorithm
     access-token-expiry: 3600000
