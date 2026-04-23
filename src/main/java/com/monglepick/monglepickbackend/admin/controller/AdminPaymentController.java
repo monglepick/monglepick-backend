@@ -30,6 +30,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -152,6 +153,8 @@ public class AdminPaymentController {
             summary = "결제 주문 환불",
             description = "COMPLETED 주문을 환불 처리한다. POINT_PACK 은 포인트를 자동 회수한다."
     )
+    /* 2026-04-23 Step 2B: 환불 — Tier 3 위험 Write (금전). Step 2C 에서 FINANCE_ADMIN 으로 세분화. */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/payment/orders/{orderId}/refund")
     public ResponseEntity<ApiResponse<AdminRefundResponse>> refundOrder(
             @Parameter(description = "환불할 주문 UUID") @PathVariable String orderId,
@@ -216,6 +219,8 @@ public class AdminPaymentController {
             summary = "결제 보상 수동 복구",
             description = "COMPENSATION_FAILED 상태 주문을 관리자 메모와 함께 COMPLETED 로 복구한다."
     )
+    /* 2026-04-23 Step 2B: 구독 보상 복구 — Tier 3 위험 Write (금전성 포인트/토큰 지급). */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/subscription/{orderId}/compensate")
     public ResponseEntity<ApiResponse<AdminCompensateResponse>> compensateOrder(
             @Parameter(description = "복구할 주문 UUID") @PathVariable String orderId,
@@ -236,6 +241,8 @@ public class AdminPaymentController {
             summary = "구독 취소 (관리자)",
             description = "ACTIVE 상태 구독을 CANCELLED 로 변경하고 자동 갱신을 중지한다. 혜택은 만료일까지 유지된다."
     )
+    /* 2026-04-23 Step 2B: 구독 취소 — Tier 3 위험 Write (금전). */
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/subscription/{subscriptionId}/cancel")
     public ResponseEntity<ApiResponse<AdminCancelSubscriptionResponse>> cancelSubscription(
             @Parameter(description = "취소할 구독 레코드 ID") @PathVariable Long subscriptionId
@@ -256,6 +263,8 @@ public class AdminPaymentController {
             summary = "구독 연장 (관리자)",
             description = "구독을 1주기(월간=1개월, 연간=1년) 연장한다. CANCELLED 상태는 ACTIVE 로 재활성화된다."
     )
+    /* 2026-04-23 Step 2B: 구독 기간 연장 — Tier 3 위험 Write (금전). */
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/subscription/{subscriptionId}/extend")
     public ResponseEntity<ApiResponse<AdminExtendSubscriptionResponse>> extendSubscription(
             @Parameter(description = "연장할 구독 레코드 ID") @PathVariable Long subscriptionId,
@@ -315,6 +324,8 @@ public class AdminPaymentController {
             summary = "포인트 수동 지급/차감",
             description = "amount 양수는 지급, 음수는 차감. 등급 계산에는 반영되지 않는다 (isActivityReward=false)."
     )
+    /* 2026-04-23 Step 2B: 포인트 수동 지급/차감 — Tier 3 위험 Write (금전). Step 2C FINANCE_ADMIN. */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/point/manual")
     public ResponseEntity<ApiResponse<AdminManualPointResponse>> manualPoint(
             @RequestBody @Valid AdminManualPointRequest request

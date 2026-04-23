@@ -22,6 +22,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -74,6 +75,19 @@ import java.util.Map;
  */
 @Configuration
 @EnableWebSecurity
+/*
+ * 2026-04-23 Step 2B: @PreAuthorize / @PostAuthorize 메서드 가드 활성화.
+ *
+ * 기존 설계(주석 §322 부근)에는 @EnableMethodSecurity 를 쓰지 않고 SecurityConfig 의
+ * URL matcher 에서 역할 확인을 확정한다고 기록돼 있었으나, 위험 Write EP(계정 정지 /
+ * 환불 / 포인트 수동 조정 / AI 이용권 발급)가 늘어나면서 컨트롤러 메서드별 2차 방어가
+ * 필요해졌다. URL 레벨 `.hasRole("ADMIN")` 이 누락/오타로 통과돼도 method-level 가드가
+ * 이중 차단한다.
+ *
+ * Step 2C(후속)에서 FINANCE_ADMIN · MODERATOR 등 세분 role 매트릭스를 도입하면 각 메서드
+ * @PreAuthorize 값만 교체해 곧바로 확장 가능하다. 지금은 "hasRole('ADMIN')" 으로 통일.
+ */
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
