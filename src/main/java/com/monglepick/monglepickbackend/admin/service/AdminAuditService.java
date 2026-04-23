@@ -128,6 +128,17 @@ public class AdminAuditService {
      * 분리 기록한다.</p>
      */
     public static final String ACTION_ADMIN_ROLE_UPDATE    = "ADMIN_ROLE_UPDATE";
+    /**
+     * 관리자 AI 에이전트가 실행한 작업 (2026-04-23 Step 6a 추가).
+     *
+     * <p>monglepick-agent 의 `tool_executor` 가 Tier 2/3 쓰기 tool 을 실행한 직후 Backend
+     * 감사 EP `POST /api/v1/admin/audit-logs/agent` 로 callback 하여 이 actionType 으로
+     * 기록된다. Backend EP 가 발행하는 기존 도메인별 actionType(POINT_MANUAL 등)과
+     * **중복 기록**되는 점이 중요하다 — 한 줄은 Backend 내부 로직이, 한 줄은 에이전트
+     * 트리거가 남겨 "어느 에이전트 턴이 어떤 쓰기를 유발했는지" 양방향 추적(설계서 §5.1,
+     * §7.1)이 가능하다. description 에는 tool_name + 관리자 발화 원문이 담긴다.</p>
+     */
+    public static final String ACTION_AGENT_EXECUTED       = "AGENT_EXECUTED";
 
     // ──────────────────────────────────────────────────────────
     // targetType 상수

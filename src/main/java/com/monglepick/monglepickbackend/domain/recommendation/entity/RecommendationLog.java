@@ -153,5 +153,29 @@ public class RecommendationLog extends BaseAuditEntity {
     @Builder.Default
     private Boolean clicked = false;
 
+    /**
+     * 추천 소스 타입 (2026-04-23 후속 과제 추가).
+     *
+     * <p>{@code INTERNAL} = 내부 DB(Qdrant/ES/Neo4j) 기반 일반 추천 (기본값).</p>
+     * <p>{@code EXTERNAL_DDGS} = AI Agent {@code external_search_node} 가 DuckDuckGo
+     * 웹 검색으로 찾아온 영화. "2026년 개봉 영화" 같은 DB 밖 신작 질의 fallback 경로.</p>
+     *
+     * <p>EXTERNAL_DDGS 로 저장된 행은 Movie FK 가 반드시 내부 DB 에 존재하는 영화가 아닐 수
+     * 있으므로 (기술적으로는 존재해야 저장 가능 — 현재 Agent 는 external_ 접두사 id 는
+     * save 경로 자체를 건너뛰므로 EXTERNAL_DDGS 행은 "내부 DB 에 있는 영화인데 AI 가
+     * 외부 검색 경로를 통해 찾아낸" 케이스에 국한된다).</p>
+     *
+     * <p>용도:
+     * <ul>
+     *   <li>관리자 "AI 추천 분석" 통계에서 외부 검색 비율 추적</li>
+     *   <li>마이픽 추천 내역에서 "웹 정보" 뱃지 표시 (Client Phase)</li>
+     *   <li>추천 품질 분석 시 internal vs external 분리 측정</li>
+     * </ul>
+     * </p>
+     */
+    @Column(name = "source_type", nullable = false, length = 20)
+    @Builder.Default
+    private String sourceType = "INTERNAL";
+
     /* created_at은 BaseAuditEntity(→BaseTimeEntity)에서 자동 관리 — 수동 @CreationTimestamp 필드 제거됨 */
 }

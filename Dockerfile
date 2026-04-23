@@ -27,8 +27,10 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
-# curl 설치 (헬스체크용)
-RUN apk add --no-cache curl
+# curl: 헬스체크용
+# tzdata: Asia/Seoul 시간대 지원 (QA #162/#177 — LocalDateTime naive 직렬화가 UTC 기준이 되는 문제 해소).
+#   Alpine 기본 이미지는 tzdata 미포함이라 TZ=Asia/Seoul 만 지정하면 여전히 UTC 로 동작한다.
+RUN apk add --no-cache curl tzdata
 
 # JAR 복사 (빌드 결과물)
 COPY --from=builder /app/build/libs/*.jar app.jar
@@ -37,9 +39,13 @@ COPY --from=builder /app/build/libs/*.jar app.jar
 RUN adduser -D -s /bin/sh appuser
 USER appuser
 
+# 기본 타임존 — docker-compose 에서 TZ 환경변수로 오버라이드 가능.
+# JVM 옵션 -Duser.timezone 도 함께 사용해 Jackson/Hibernate/LocalDateTime.now() 전부 KST 기준이 되도록 한다.
+ENV TZ=Asia/Seoul
+
 # 헬스체크용 포트 노출
 EXPOSE 8080
 
 # Spring Boot 실행
-# JVM 메모리 설정은 환경변수 JAVA_OPTS로 주입 가능
-ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS:--Xms512m -Xmx1536m} -jar app.jar"]
+# JVM 메모리 + 타임존 고정. JAVA_OPTS 로 추가 튜닝 가능하며 기본값을 KST 로 못박는다.
+ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS:--Xms512m -Xmx1536m} -Duser.timezone=Asia/Seoul -jar app.jar"]

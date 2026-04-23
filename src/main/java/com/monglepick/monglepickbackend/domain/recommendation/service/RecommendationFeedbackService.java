@@ -81,22 +81,23 @@ public class RecommendationFeedbackService {
         RecommendationFeedback feedback = feedbackRepository
                 .findByUserIdAndRecommendationLog_RecommendationLogId(userId, recommendationLogId)
                 .map(existing -> {
-                    // 3-a. 기존 피드백이 있으면 유형과 코멘트를 갱신 (dirty checking으로 자동 UPDATE)
-                    log.info("기존 피드백 업데이트: feedbackId={}, userId={}, recommendationLogId={}, newType={}",
+                    // 3-a. 기존 피드백이 있으면 유형/코멘트/별점 갱신 (dirty checking 자동 UPDATE)
+                    log.info("기존 피드백 업데이트: feedbackId={}, userId={}, recommendationLogId={}, newType={}, rating={}",
                             existing.getRecommendationFeedbackId(), userId, recommendationLogId,
-                            request.feedbackType());
-                    existing.update(request.feedbackType(), request.comment());
+                            request.feedbackType(), request.rating());
+                    existing.update(request.feedbackType(), request.comment(), request.rating());
                     return existing;
                 })
                 .orElseGet(() -> {
-                    // 3-b. 기존 피드백이 없으면 새 피드백 생성
-                    log.info("신규 피드백 생성: userId={}, recommendationLogId={}, type={}",
-                            userId, recommendationLogId, request.feedbackType());
+                    // 3-b. 기존 피드백이 없으면 새 피드백 생성 (별점 포함 — QA #172)
+                    log.info("신규 피드백 생성: userId={}, recommendationLogId={}, type={}, rating={}",
+                            userId, recommendationLogId, request.feedbackType(), request.rating());
                     return feedbackRepository.save(
                             RecommendationFeedback.builder()
                                     .userId(userId)
                                     .recommendationLog(recommendationLog)
                                     .feedbackType(request.feedbackType())
+                                    .rating(request.rating())
                                     .comment(request.comment())
                                     .build()
                     );

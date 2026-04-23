@@ -307,6 +307,20 @@ public class SecurityConfig {
                 /* 인증 API (회원가입, 로그인, 소셜 로그인 등) */
                 .requestMatchers("/api/v1/auth/**").permitAll()
 
+                /*
+                 * 게스트 쿠키 발급 — 비로그인 사용자가 앱 진입 시 호출.
+                 * HttpOnly 쿠키 mongle_guest 를 내려받는다.
+                 */
+                .requestMatchers(HttpMethod.POST, "/api/v1/guest/token").permitAll()
+
+                /*
+                 * 게스트 쿼터 체크/소비 — Agent 전용 ServiceKey 인증.
+                 * ServiceKeyAuthFilter 가 X-Service-Key 헤더를 검증하고 ROLE_SERVICE 로 인증시키므로
+                 * hasRole("SERVICE") 로 URL 레벨에서 강제 차단.
+                 * @EnableMethodSecurity 미적용 환경이므로 @PreAuthorize 대신 여기서 확정.
+                 */
+                .requestMatchers(HttpMethod.POST, "/api/v1/guest/quota/**").hasRole("SERVICE")
+
                 /* 관리자 전용 로그인 — AdminLoginFilter가 처리, permitAll 필요 */
                 .requestMatchers("/api/v1/admin/auth/login").permitAll()
 
@@ -349,6 +363,14 @@ public class SecurityConfig {
 
                 /* OCR 실관람 인증 이벤트 공개 목록 — 비로그인 허용 (2026-04-14 신규, 커뮤니티 실관람인증 탭) */
                 .requestMatchers(HttpMethod.GET, "/api/v1/ocr-events/**").permitAll()
+
+                /*
+                 * 채팅 추천 칩 — Public 노출 (환영 화면) + 클릭 트래킹.
+                 * 와일드카드(/chat/suggestions/**)를 회피하고 path 단위로 명시하여
+                 * Admin EP(/api/v1/admin/chat-suggestions)가 열리지 않도록 한다.
+                 */
+                .requestMatchers(HttpMethod.GET,  "/api/v1/chat/suggestions").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/chat/suggestions/*/click").permitAll()
 
                 /* 나머지 모든 요청: 인증 필요 */
                 .anyRequest().authenticated()

@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.recommendation.dto;
 
+import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationFeedback;
 import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationLog;
 
 import java.time.LocalDateTime;
@@ -92,25 +93,42 @@ public class RecommendationHistoryDto {
             boolean wishlisted,
 
             /** 봤어요 여부 (RecommendationImpact.watched, 임팩트 없으면 false) */
-            boolean watched
+            boolean watched,
+
+            /**
+             * 피드백 유형 (like/dislike/watched/not_interested, 없으면 null).
+             * QA #172 (2026-04-23): 별점 복원과 함께 전송해 Frontend 가 어떤 액션이었는지 표시.
+             */
+            String feedbackType,
+
+            /**
+             * 별점 (1~5, 없으면 null).
+             * QA #172: 마이픽 추천 카드 재방문 시 별점을 원시값으로 복원하기 위한 필드.
+             * Frontend `recommendation.feedbackRating` 이 이 값을 참조한다.
+             */
+            Integer feedbackRating,
+
+            /** 피드백 코멘트 (없으면 null) */
+            String feedbackComment
 
     ) {
         /**
-         * RecommendationLog 엔티티와 Impact 상태 값으로 응답 DTO를 생성한다.
+         * RecommendationLog 엔티티 + Impact 상태 + Feedback 을 조합해 응답 DTO를 생성한다.
          *
-         * <p>Impact 정보는 RecommendationImpactRepository에서 별도로 조회하여
-         * 서비스 레이어에서 이 메서드에 전달한다.
-         * Impact 레코드가 없으면 wishlisted=false, watched=false로 처리한다.</p>
+         * <p>QA #172 (2026-04-23): feedback 인자를 추가해 별점/코멘트/유형을 응답에 실어준다.
+         * feedback 이 null 이면 세 필드 모두 null 로 채워 기존 동작 호환.</p>
          *
          * @param log        추천 로그 엔티티 (movie JOIN FETCH 필수)
          * @param wishlisted 찜 여부 (Impact 없으면 false)
          * @param watched    봤어요 여부 (Impact 없으면 false)
+         * @param feedback   이 추천에 대한 피드백 (없으면 null)
          * @return 추천 이력 응답 DTO
          */
         public static RecommendationHistoryResponse from(
                 RecommendationLog log,
                 boolean wishlisted,
-                boolean watched
+                boolean watched,
+                RecommendationFeedback feedback
         ) {
             return new RecommendationHistoryResponse(
                     log.getRecommendationLogId(),
@@ -122,7 +140,11 @@ public class RecommendationHistoryDto {
                     log.getReason(),
                     log.getCreatedAt(),     // BaseAuditEntity.createdAt → 추천 발생 시각
                     wishlisted,
-                    watched
+                    watched,
+                    feedback != null && feedback.getFeedbackType() != null
+                            ? feedback.getFeedbackType().name() : null,
+                    feedback != null ? feedback.getRating() : null,
+                    feedback != null ? feedback.getComment() : null
             );
         }
     }

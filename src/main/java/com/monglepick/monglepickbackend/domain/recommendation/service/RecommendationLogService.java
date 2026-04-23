@@ -85,6 +85,13 @@ public class RecommendationLogService {
             // reason 은 Entity NOT NULL 이므로 빈 값이면 공백 1자로 대체
             String safeReason = (item.reason() == null || item.reason().isBlank()) ? " " : item.reason();
 
+            // 2026-04-23 후속: sourceType 널/공백 가드 → "INTERNAL" 기본값.
+            // 화이트리스트 외 값이 오면 오탈자로 보고 INTERNAL 로 폴백 (데이터 위생).
+            String rawSourceType = item.sourceType();
+            String safeSourceType = (rawSourceType == null || rawSourceType.isBlank())
+                    ? "INTERNAL"
+                    : ("EXTERNAL_DDGS".equals(rawSourceType) ? "EXTERNAL_DDGS" : "INTERNAL");
+
             RecommendationLog logEntity = RecommendationLog.builder()
                     .userId(userId)
                     .sessionId(sessionId)
@@ -102,6 +109,7 @@ public class RecommendationLogService {
                     .responseTimeMs(responseTimeMs)
                     .modelVersion(modelVersion)
                     .clicked(false)
+                    .sourceType(safeSourceType)
                     .build();
 
             RecommendationLog saved = recommendationLogRepository.save(logEntity);

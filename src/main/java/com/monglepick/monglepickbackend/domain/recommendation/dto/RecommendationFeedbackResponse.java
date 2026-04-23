@@ -29,6 +29,12 @@ public record RecommendationFeedbackResponse(
         /** 피드백 유형 문자열 (EnumType.STRING 매핑 기준: like/dislike/watched/not_interested) */
         String feedbackType,
 
+        /**
+         * 별점 (1~5, null 가능).
+         * QA #172 (2026-04-23): Frontend 별점 UI 복원 및 재방문 시 표시를 위해 응답에 포함.
+         */
+        Integer rating,
+
         /** 피드백 코멘트 (선택 입력, 없으면 null) */
         String comment
 
@@ -46,6 +52,7 @@ public record RecommendationFeedbackResponse(
         return new RecommendationFeedbackResponse(
                 entity.getRecommendationFeedbackId(),
                 entity.getFeedbackType().name(),   // enum → 소문자 문자열 (like, dislike 등)
+                entity.getRating(),
                 entity.getComment()
         );
     }
