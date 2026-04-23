@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,9 +38,21 @@ import java.util.UUID;
  *   <li>구독 상품 (subscription_plans) — 4건</li>
  * </ul>
  */
+/*
+ * 2026-04-23: MyBatis UserMapper.insertUser 가 `user_birth` 컬럼을 INSERT 하는데
+ * User 엔티티에는 해당 필드가 없어 H2 `ddl-auto=create-drop` 환경에서 컬럼 자체가 생성되지
+ * 않는다 (mapper XML 과 엔티티 간 schema drift). 운영은 수동 ALTER 로 이 컬럼이 존재하지만
+ * 테스트 환경에선 ApplicationContext 로딩 중 insertUser() 호출이 실패해 contextLoads 깨짐.
+ * flag 로 DataInitializer 를 test 에서 비활성화한다 (운영은 matchIfMissing=true 로 항상 활성).
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(
+        name = "app.data-initializer.enabled",
+        havingValue = "true",
+        matchIfMissing = true
+)
 public class DataInitializer implements ApplicationRunner {
 
     private final PointItemRepository pointItemRepository;

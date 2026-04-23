@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,10 +20,21 @@ import java.util.List;
  * 기본 장르 마스터를 멱등하게 적재한다. 이미 한 건이라도 존재하면 운영자가 관리 중인
  * 데이터로 간주하고 전체 시드를 건너뛴다.</p>
  */
+/*
+ * 2026-04-23: rebuildContentsCountFromMovies() 가 MySQL JSON_TABLE 을 사용해 H2 에서
+ * contextLoads 가 깨지는 문제를 막기 위해 flag 로 빈 생성을 제어한다.
+ * - 운영/스테이징(MySQL): `app.genre-initializer.enabled` 미설정 → matchIfMissing=true 로 활성
+ * - 테스트(H2):           src/test/resources/application.yml 에 false 설정 → 빈 미생성
+ */
 @Slf4j
 @Component
 @Order(120)
 @RequiredArgsConstructor
+@ConditionalOnProperty(
+        name = "app.genre-initializer.enabled",
+        havingValue = "true",
+        matchIfMissing = true
+)
 public class GenreMasterInitializer implements ApplicationRunner {
 
     private final GenreMasterRepository genreMasterRepository;
