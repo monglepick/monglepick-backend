@@ -198,6 +198,9 @@ public enum ErrorCode {
     /** 같은 사용자가 같은 영화에 중복 리뷰 작성 시도. */
     DUPLICATE_REVIEW(HttpStatus.CONFLICT, "REV001", "이미 리뷰를 작성했습니다"),
 
+    /** 이미 소프트 삭제된 리뷰에 대해 다시 삭제를 시도한 경우. */
+    REVIEW_ALREADY_DELETED(HttpStatus.CONFLICT, "REV002", "이미 삭제된 리뷰입니다"),
+
     // ─────────────────────────────────────────────
     // 영화 (MOV0xx)
     // ─────────────────────────────────────────────

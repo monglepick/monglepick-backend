@@ -34,6 +34,12 @@ public interface ReviewMapper {
     /** PK로 리뷰 조회 (없으면 null, nickname 미포함) */
     Review findById(@Param("reviewId") Long reviewId);
 
+    /** PK 존재 여부만 확인 (관리자 삭제 등 가벼운 존재 검증용) */
+    boolean existsById(@Param("reviewId") Long reviewId);
+
+    /** 리뷰의 소프트 삭제 여부만 조회 (없으면 null) */
+    Boolean isDeletedById(@Param("reviewId") Long reviewId);
+
     /** PK로 리뷰 + 작성자 닉네임 조회 (JOIN users) */
     Review findByIdWithNickname(@Param("reviewId") Long reviewId);
 
@@ -68,7 +74,7 @@ public interface ReviewMapper {
     void update(Review review);
 
     /** 리뷰 소프트 삭제 */
-    void softDelete(@Param("reviewId") Long reviewId);
+    int softDelete(@Param("reviewId") Long reviewId);
 
     /** 리뷰 소프트 삭제 복원 (관리자 기능) */
     void restore(@Param("reviewId") Long reviewId);
