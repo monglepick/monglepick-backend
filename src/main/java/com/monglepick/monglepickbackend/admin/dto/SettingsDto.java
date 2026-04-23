@@ -346,4 +346,42 @@ public class SettingsDto {
             @Size(max = 500, message = "필터 정보는 최대 500자입니다.")
             String filterInfo
     ) {}
+
+    /**
+     * Agent 가 실행한 관리 작업의 감사 로그 등록 요청 DTO (2026-04-23 Step 6a 신규).
+     *
+     * <p>관리자 AI 어시스턴트(monglepick-agent) 가 Tier 2/3 쓰기 tool 을 실행한 뒤 Backend
+     * 로 callback 하여 이 엔드포인트에 POST 한다. actor prefix 는 `AdminAuditService.log()`
+     * 내부에서 `SecurityContext.auth.getName()` 로 자동 삽입되므로, Agent 는 JWT forwarding
+     * 으로 해당 관리자 identity 를 유지한 상태에서 호출해야 한다.</p>
+     *
+     * <h3>필드 규칙</h3>
+     * <ul>
+     *   <li>{@code actionType} — 기본값 {@code AGENT_EXECUTED}. 호출자가 더 세부 타입을
+     *       (예: {@code AGENT_FAQ_CREATE}) 지정해도 허용. 최대 50자.</li>
+     *   <li>{@code targetType}/{@code targetId} — 영향받는 리소스 (nullable). Tier 1 읽기에는
+     *       보통 null, Tier 2/3 쓰기에는 {@code TARGET_USER}/{@code TARGET_PAYMENT} 등.</li>
+     *   <li>{@code description} — 필수. "[tool=faq_create] 관리자 프롬프트: '...'" 형식 권장.</li>
+     *   <li>{@code beforeData}/{@code afterData} — 구조적 저장용 JSON 문자열 (nullable).
+     *       Agent 는 Tier 3 실행 전후 리소스 스냅샷을 여기에 넣는다.</li>
+     * </ul>
+     */
+    public record AgentAuditLogRequest(
+            @Size(max = 50, message = "actionType 은 최대 50자입니다.")
+            String actionType,
+
+            @Size(max = 50, message = "targetType 은 최대 50자입니다.")
+            String targetType,
+
+            @Size(max = 100, message = "targetId 는 최대 100자입니다.")
+            String targetId,
+
+            @NotBlank(message = "description 은 필수입니다.")
+            @Size(max = 2000, message = "description 은 최대 2000자입니다.")
+            String description,
+
+            String beforeData,
+
+            String afterData
+    ) {}
 }

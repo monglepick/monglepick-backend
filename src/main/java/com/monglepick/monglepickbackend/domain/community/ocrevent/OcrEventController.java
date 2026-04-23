@@ -28,8 +28,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/ocr-events")
 @RequiredArgsConstructor
-public class
-OcrEventController {
+public class OcrEventController {
 
     private final OcrEventService ocrEventService;
 

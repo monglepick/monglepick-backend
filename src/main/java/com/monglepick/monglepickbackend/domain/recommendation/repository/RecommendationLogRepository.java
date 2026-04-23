@@ -92,6 +92,60 @@ public interface RecommendationLogRepository extends JpaRepository<Recommendatio
     Page<RecommendationLog> findByUserIdWithMovie(@Param("userId") String userId, Pageable pageable);
 
     /**
+     * 특정 사용자의 추천 이력 중 RecommendationImpact 에 wishlisted=true 인 레코드만
+     * 최신 순으로 페이징 조회한다 (N+1 방지 — movie JOIN FETCH).
+     *
+     * <p>QA 후속 (2026-04-23): "찜한영화" 탭 전용 쿼리. Impact 레코드와 INNER JOIN 하여
+     * 현재 wishlist 상태인 추천만 반환한다. 동일 (user_id, movie_id, rec_log_id) 조합의
+     * Impact 는 UNIQUE 제약으로 최대 1건이라 중복 걱정 없다.</p>
+     *
+     * @param userId   조회 대상 사용자 ID
+     * @param pageable 페이징 정보 (정렬 `createdAt DESC` 권장)
+     * @return 찜 상태인 추천 로그 페이지
+     */
+    @Query(value = "SELECT r FROM RecommendationLog r " +
+                   "JOIN FETCH r.movie m " +
+                   "WHERE r.userId = :userId AND EXISTS (" +
+                   "  SELECT 1 FROM RecommendationImpact ri " +
+                   "  WHERE ri.recommendationLog = r AND ri.userId = :userId " +
+                   "    AND ri.wishlisted = true" +
+                   ")",
+           countQuery = "SELECT COUNT(r) FROM RecommendationLog r " +
+                   "WHERE r.userId = :userId AND EXISTS (" +
+                   "  SELECT 1 FROM RecommendationImpact ri " +
+                   "  WHERE ri.recommendationLog = r AND ri.userId = :userId " +
+                   "    AND ri.wishlisted = true" +
+                   ")")
+    Page<RecommendationLog> findByUserIdWishlistedWithMovie(
+            @Param("userId") String userId, Pageable pageable);
+
+    /**
+     * 특정 사용자의 추천 이력 중 RecommendationImpact 에 watched=true 인 레코드만
+     * 최신 순으로 페이징 조회한다 (N+1 방지 — movie JOIN FETCH).
+     *
+     * <p>QA 후속 (2026-04-23): "본영화" 탭 전용 쿼리.</p>
+     *
+     * @param userId   조회 대상 사용자 ID
+     * @param pageable 페이징 정보
+     * @return 봤어요 상태인 추천 로그 페이지
+     */
+    @Query(value = "SELECT r FROM RecommendationLog r " +
+                   "JOIN FETCH r.movie m " +
+                   "WHERE r.userId = :userId AND EXISTS (" +
+                   "  SELECT 1 FROM RecommendationImpact ri " +
+                   "  WHERE ri.recommendationLog = r AND ri.userId = :userId " +
+                   "    AND ri.watched = true" +
+                   ")",
+           countQuery = "SELECT COUNT(r) FROM RecommendationLog r " +
+                   "WHERE r.userId = :userId AND EXISTS (" +
+                   "  SELECT 1 FROM RecommendationImpact ri " +
+                   "  WHERE ri.recommendationLog = r AND ri.userId = :userId " +
+                   "    AND ri.watched = true" +
+                   ")")
+    Page<RecommendationLog> findByUserIdWatchedWithMovie(
+            @Param("userId") String userId, Pageable pageable);
+
+    /**
      * 특정 사용자의 추천 이력 중 추천 로그 ID로 단건을 조회한다.
      *
      * <p>찜/봤어요 토글 API에서 소유권 검증에 사용한다.

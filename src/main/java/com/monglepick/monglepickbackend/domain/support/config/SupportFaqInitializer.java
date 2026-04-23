@@ -39,7 +39,7 @@ import java.util.List;
 public class SupportFaqInitializer implements ApplicationRunner {
 
     /** 시드 데이터 총 건수 (정보 로그용 상수) */
-    private static final int EXPECTED_SEED_COUNT = 21;
+    private static final int EXPECTED_SEED_COUNT = 24;
 
     private final SupportFaqRepository faqRepository;
 
@@ -114,6 +114,51 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "별도의 iOS/Android 네이티브 앱은 아직 출시되지 않았으며, 모바일 앱 출시 계획은 향후 공지사항을 통해 안내드릴 예정입니다.\n\n"
                                 + "홈 화면에 추가하면 앱처럼 사용하실 수 있으니, 브라우저 메뉴의 '홈 화면에 추가' 기능을 활용해 보세요.")
                         .sortOrder(40)
+                        .build(),
+                /*
+                 * 연락처/전화/콜센터 문의에 대응하는 FAQ (sortOrder=50).
+                 * AI 챗봇이 "전화번호 알려줘", "고객센터 연락처" 같은 질의에 근거 문서로 사용한다.
+                 * 전화 상담은 현재 미운영이므로 이메일/티켓 창구로 자연스럽게 유도한다.
+                 */
+                SupportFaq.builder()
+                        .category(SupportCategory.GENERAL)
+                        .question("고객센터 전화번호와 연락처가 어떻게 되나요?")
+                        .answer("몽글픽 고객센터는 현재 이메일과 1:1 문의하기 창구로 운영됩니다.\n\n"
+                                + "• 이메일: contact@monglepick.com (24시간 접수, 평일 기준 영업일 내 답변)\n"
+                                + "• 1:1 문의: 고객센터 → '문의하기' 탭에서 티켓 등록 (로그인 필요)\n"
+                                + "• 전화 상담은 현재 운영하지 않으며, 오픈 시점은 공지사항으로 안내드릴 예정입니다.\n\n"
+                                + "빠른 처리를 위해 결제 문의는 주문번호, 기술 문의는 스크린샷을 함께 첨부해 주세요.\n"
+                                + "긴급한 장애/결제 문제는 '문의하기' 티켓 본문 상단에 '긴급' 이라고 적어주시면 우선 확인합니다.")
+                        .sortOrder(50)
+                        .build(),
+                /*
+                 * 이메일/문의 접수 경로를 별도 FAQ로 분리.
+                 * "이메일 알려줘", "어디로 메일 보내요" 등의 짧은 질의에 단독 매칭되도록 한다.
+                 */
+                SupportFaq.builder()
+                        .category(SupportCategory.GENERAL)
+                        .question("이메일로 문의하고 싶어요. 어디로 보내면 되나요?")
+                        .answer("공식 문의 이메일은 contact@monglepick.com 입니다.\n\n"
+                                + "다만 내부 이력 관리와 빠른 응답을 위해 로그인 사용자는 '고객센터 → 문의하기' 탭에서 티켓을 등록해 주시는 것을 권장해요.\n"
+                                + "• 티켓 등록 시 장점: 답변 알림, 이력 조회, 파일 첨부, 상태 추적(OPEN/답변/해결)\n"
+                                + "• 이메일 문의 시 포함할 정보: 가입 이메일, 발생 일시, 문제 현상, 스크린샷\n\n"
+                                + "스팸 필터 오차단을 방지하려면 수신처를 주소록에 등록하신 뒤 답변을 기다려 주세요.")
+                        .sortOrder(51)
+                        .build(),
+                /*
+                 * 응답 시간/운영 시간 문의 FAQ.
+                 * "고객센터 운영시간", "언제 답변 와요" 같은 질의 대응.
+                 */
+                SupportFaq.builder()
+                        .category(SupportCategory.GENERAL)
+                        .question("고객센터 응답 시간과 운영 시간이 어떻게 되나요?")
+                        .answer("몽글픽 고객센터는 이메일·티켓 창구로 24시간 접수하며, 답변은 다음 기준으로 드립니다.\n\n"
+                                + "• 일반 문의: 평일(월~금) 영업일 기준 24시간 이내 답변\n"
+                                + "• 결제·환불 문의: 영업일 기준 1~3일 이내 처리\n"
+                                + "• 주말/공휴일 접수 건: 다음 영업일에 순차 답변\n\n"
+                                + "서비스 자체는 24시간 365일 이용 가능하며, 정기 점검은 보통 새벽 2~5시 사이에 공지와 함께 진행됩니다.\n"
+                                + "긴급한 결제 오류/계정 접근 문제는 티켓 제목에 '긴급' 을 표시하시면 우선 확인합니다.")
+                        .sortOrder(52)
                         .build(),
 
                 // ─────────────────────────────────────────────

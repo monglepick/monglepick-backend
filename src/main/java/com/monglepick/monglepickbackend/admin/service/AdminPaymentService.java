@@ -34,6 +34,7 @@ import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -128,26 +129,30 @@ public class AdminPaymentService {
      * @return 결제 주문 요약 페이지
      */
     /**
-     * 결제 주문 목록을 필터 조합으로 조회한다 (2026-04-14 확장).
+     * 결제 주문 목록을 필터 조합으로 조회한다 (2026-04-14 도입, 2026-04-23 날짜 범위 확장).
      *
      * @param status     주문 상태 문자열 (nullable — 생략 시 전체)
      * @param orderType  주문 유형 문자열 (SUBSCRIPTION/POINT_PACK, nullable)
      * @param userId     사용자 ID (nullable — 이메일/닉네임 검색으로 얻은 UUID)
+     * @param fromDate   주문 생성일 시작 inclusive (nullable)
+     * @param toDate     주문 생성일 종료 exclusive (nullable)
      * @param pageable   페이지 정보
      * @return 결제 주문 요약 페이지 (nickname/email enrich 포함)
      */
     public Page<PaymentOrderSummary> getOrders(
-            String status, String orderType, String userId, Pageable pageable
+            String status, String orderType, String userId,
+            LocalDateTime fromDate, LocalDateTime toDate,
+            Pageable pageable
     ) {
-        log.debug("[AdminPayment] 결제 내역 조회 — status={}, orderType={}, userId={}, page={}",
-                status, orderType, userId, pageable.getPageNumber());
+        log.debug("[AdminPayment] 결제 내역 조회 — status={}, orderType={}, userId={}, from={}, to={}, page={}",
+                status, orderType, userId, fromDate, toDate, pageable.getPageNumber());
 
         PaymentOrder.OrderStatus statusEnum = parseOrderStatus(status);
         PaymentOrder.OrderType   typeEnum   = parseOrderType(orderType);
         String                   userIdOrNull = (userId != null && !userId.isBlank()) ? userId : null;
 
         Page<PaymentOrder> page = adminPaymentOrderRepository.searchByFilters(
-                statusEnum, typeEnum, userIdOrNull, pageable
+                statusEnum, typeEnum, userIdOrNull, fromDate, toDate, pageable
         );
 
         Map<String, User> userMap = fetchUserMap(page.getContent().stream()
@@ -178,19 +183,6 @@ public class AdminPaymentService {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
                     "허용되지 않은 주문 유형: " + raw);
         }
-    }
-
-    /**
-     * 결제 주문 목록을 최신순으로 페이징 조회한다 (구버전, 시그니처 호환용).
-     * 신규 코드는 {@link #getOrders(String, String, String, Pageable)} 를 사용한다.
-     *
-     * @param status   주문 상태 문자열 (null/blank 이면 전체)
-     * @param pageable 페이지 정보
-     * @return 결제 주문 요약 페이지
-     */
-    @Deprecated
-    public Page<PaymentOrderSummary> getOrders(String status, Pageable pageable) {
-        return getOrders(status, null, null, pageable);
     }
 
     /**
@@ -282,26 +274,30 @@ public class AdminPaymentService {
      * @return 구독 요약 페이지
      */
     /**
-     * 구독 목록을 필터 조합으로 조회한다 (2026-04-14 확장).
+     * 구독 목록을 필터 조합으로 조회한다 (2026-04-14 도입, 2026-04-23 날짜 범위 확장).
      *
      * @param status    구독 상태 문자열 (nullable)
      * @param planCode  구독 플랜 코드 (예: monthly_basic, nullable)
      * @param userId    사용자 ID (nullable)
+     * @param fromDate  구독 생성일 시작 inclusive (nullable)
+     * @param toDate    구독 생성일 종료 exclusive (nullable)
      * @param pageable  페이지 정보
      * @return 구독 요약 페이지 (nickname/email enrich 포함)
      */
     public Page<SubscriptionSummary> getSubscriptions(
-            String status, String planCode, String userId, Pageable pageable
+            String status, String planCode, String userId,
+            LocalDateTime fromDate, LocalDateTime toDate,
+            Pageable pageable
     ) {
-        log.debug("[AdminPayment] 구독 목록 조회 — status={}, planCode={}, userId={}, page={}",
-                status, planCode, userId, pageable.getPageNumber());
+        log.debug("[AdminPayment] 구독 목록 조회 — status={}, planCode={}, userId={}, from={}, to={}, page={}",
+                status, planCode, userId, fromDate, toDate, pageable.getPageNumber());
 
         UserSubscription.Status statusEnum = parseSubStatus(status);
         String planCodeOrNull = (planCode != null && !planCode.isBlank()) ? planCode : null;
         String userIdOrNull   = (userId != null && !userId.isBlank()) ? userId : null;
 
         Page<UserSubscription> page = adminSubscriptionRepository.searchByFilters(
-                statusEnum, planCodeOrNull, userIdOrNull, pageable
+                statusEnum, planCodeOrNull, userIdOrNull, fromDate, toDate, pageable
         );
 
         Map<String, User> userMap = fetchUserMap(page.getContent().stream()
@@ -320,15 +316,6 @@ public class AdminPaymentService {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
                     "허용되지 않은 구독 상태: " + raw);
         }
-    }
-
-    /**
-     * 구독 목록 조회 (시그니처 호환용).
-     * 신규 코드는 {@link #getSubscriptions(String, String, String, Pageable)} 를 사용한다.
-     */
-    @Deprecated
-    public Page<SubscriptionSummary> getSubscriptions(String status, Pageable pageable) {
-        return getSubscriptions(status, null, null, pageable);
     }
 
     /**
@@ -477,27 +464,29 @@ public class AdminPaymentService {
     // ======================== 포인트 이력 ========================
 
     /**
-     * 포인트 변동 이력을 최신순으로 페이징 조회한다.
+     * 포인트 변동 이력을 최신순으로 페이징 조회한다 (2026-04-23 날짜 범위 확장).
      *
-     * <p>userId 파라미터가 null/공백이면 전체 사용자 이력, 그 외에는 해당 사용자 이력만 필터링한다.</p>
+     * <p>userId 와 기간 범위를 선택적으로 조합해 필터링한다. 모든 파라미터가 null 이면
+     * 전체 사용자의 전체 기간 이력을 반환한다.</p>
      *
-     * @param userId   사용자 ID (생략 시 전체)
-     * @param pageable 페이지 정보
+     * @param userId    사용자 ID (nullable — 생략 시 전체)
+     * @param fromDate  이력 생성일 시작 inclusive (nullable)
+     * @param toDate    이력 생성일 종료 exclusive (nullable)
+     * @param pageable  페이지 정보
      * @return 포인트 이력 페이지
      */
-    public Page<PointHistoryItem> getPointHistories(String userId, Pageable pageable) {
-        log.debug("[AdminPayment] 포인트 이력 조회 — userId={}, page={}", userId, pageable.getPageNumber());
+    public Page<PointHistoryItem> getPointHistories(
+            String userId, LocalDateTime fromDate, LocalDateTime toDate, Pageable pageable
+    ) {
+        log.debug("[AdminPayment] 포인트 이력 조회 — userId={}, from={}, to={}, page={}",
+                userId, fromDate, toDate, pageable.getPageNumber());
 
-        Page<PointsHistory> pageResult;
-        if (userId != null && !userId.isBlank()) {
-            pageResult = adminPointsHistoryRepository
-                    .findByUserIdOrderByCreatedAtDesc(userId, pageable);
-        } else {
-            pageResult = adminPointsHistoryRepository.findAllByOrderByCreatedAtDesc(pageable);
-        }
+        String userIdOrNull = (userId != null && !userId.isBlank()) ? userId : null;
+        Page<PointsHistory> pageResult = adminPointsHistoryRepository.searchByFilters(
+                userIdOrNull, fromDate, toDate, pageable
+        );
 
-        /* 닉네임/이메일 enrich — 특정 사용자 이력 조회 시에는 단일 사용자만 조회되므로
-         * 전체 조회 시에도 맵 크기는 page.size 이내로 제한된다. */
+        /* 닉네임/이메일 enrich — 페이지 크기 이내로만 단건 조회를 반복한다. */
         Map<String, User> userMap = fetchUserMap(pageResult.getContent().stream()
                 .map(PointsHistory::getUserId).toList());
 

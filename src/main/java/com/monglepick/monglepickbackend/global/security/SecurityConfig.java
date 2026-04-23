@@ -22,6 +22,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -74,6 +75,19 @@ import java.util.Map;
  */
 @Configuration
 @EnableWebSecurity
+/*
+ * 2026-04-23 Step 2B: @PreAuthorize / @PostAuthorize 메서드 가드 활성화.
+ *
+ * 기존 설계(주석 §322 부근)에는 @EnableMethodSecurity 를 쓰지 않고 SecurityConfig 의
+ * URL matcher 에서 역할 확인을 확정한다고 기록돼 있었으나, 위험 Write EP(계정 정지 /
+ * 환불 / 포인트 수동 조정 / AI 이용권 발급)가 늘어나면서 컨트롤러 메서드별 2차 방어가
+ * 필요해졌다. URL 레벨 `.hasRole("ADMIN")` 이 누락/오타로 통과돼도 method-level 가드가
+ * 이중 차단한다.
+ *
+ * Step 2C(후속)에서 FINANCE_ADMIN · MODERATOR 등 세분 role 매트릭스를 도입하면 각 메서드
+ * @PreAuthorize 값만 교체해 곧바로 확장 가능하다. 지금은 "hasRole('ADMIN')" 으로 통일.
+ */
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -307,6 +321,20 @@ public class SecurityConfig {
                 /* 인증 API (회원가입, 로그인, 소셜 로그인 등) */
                 .requestMatchers("/api/v1/auth/**").permitAll()
 
+                /*
+                 * 게스트 쿠키 발급 — 비로그인 사용자가 앱 진입 시 호출.
+                 * HttpOnly 쿠키 mongle_guest 를 내려받는다.
+                 */
+                .requestMatchers(HttpMethod.POST, "/api/v1/guest/token").permitAll()
+
+                /*
+                 * 게스트 쿼터 체크/소비 — Agent 전용 ServiceKey 인증.
+                 * ServiceKeyAuthFilter 가 X-Service-Key 헤더를 검증하고 ROLE_SERVICE 로 인증시키므로
+                 * hasRole("SERVICE") 로 URL 레벨에서 강제 차단.
+                 * @EnableMethodSecurity 미적용 환경이므로 @PreAuthorize 대신 여기서 확정.
+                 */
+                .requestMatchers(HttpMethod.POST, "/api/v1/guest/quota/**").hasRole("SERVICE")
+
                 /* 관리자 전용 로그인 — AdminLoginFilter가 처리, permitAll 필요 */
                 .requestMatchers("/api/v1/admin/auth/login").permitAll()
 
@@ -350,8 +378,40 @@ public class SecurityConfig {
                 /* OCR 실관람 인증 이벤트 공개 목록 — 비로그인 허용 (2026-04-14 신규, 커뮤니티 실관람인증 탭) */
                 .requestMatchers(HttpMethod.GET, "/api/v1/ocr-events/**").permitAll()
 
-                /* OCR 이미지 분석 — 비로그인 허용 (영수증 텍스트 추출, Python OCR 위임) */
-                .requestMatchers(HttpMethod.POST, "/api/v1/ocr-events/analyze").permitAll()
+                /*
+                 * 채팅 추천 칩 — Public 노출 (환영 화면) + 클릭 트래킹.
+                 * 와일드카드(/chat/suggestions/**)를 회피하고 path 단위로 명시하여
+                 * Admin EP(/api/v1/admin/chat-suggestions)가 열리지 않도록 한다.
+                 */
+                .requestMatchers(HttpMethod.GET,  "/api/v1/chat/suggestions").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/chat/suggestions/*/click").permitAll()
+
+                /*
+                 * OCR 미리보기 분석은 로그인 필수 (2026-04-23 보안 수정).
+                 * PaddleOCR 호출 자체가 비용 큰 연산이라 비로그인 허용 시 DoS 벡터가
+                 * 되고, 이벤트 참여 플로우도 JWT 사용자 전제이므로 public 노출 이점이
+                 * 없다. 실제 제출 EP ({eventId}/verify) 와 동일하게 authenticated() 로
+                 * 기본 정책에 위임한다 — 별도 requestMatchers 선언을 의도적으로 두지 않음.
+                 */
+
+                /*
+                 * 관리자 API — ADMIN role 전용 (2026-04-23, Step 2A).
+                 *
+                 * 이전에는 .anyRequest().authenticated() 만 있어 JWT 존재 여부만 확인했다.
+                 * 이 상태에서는 USER role 의 일반 사용자도 본인 토큰으로 /api/v1/admin/**
+                 * 을 호출할 수 있는 구조적 허점이 있었다. Agent(FastAPI) 쪽에서는 role 을
+                 * 별도 검증하지만 Backend 직접 호출 경로는 막히지 않았다.
+                 *
+                 * hasRole("ADMIN") 은 JwtAuthenticationFilter 가 세팅하는 "ROLE_ADMIN"
+                 * authority 와 매칭된다(JwtAuthenticationFilter 의 `ROLE_` 접두사). 관리자
+                 * 전용 로그인 EP(/api/v1/admin/auth/login)는 상단에서 이미 permitAll 처리
+                 * 되므로 이 가드의 영향을 받지 않는다 (Spring Security 는 먼저 매칭된
+                 * 규칙을 적용).
+                 *
+                 * 세분화된 @PreAuthorize (FINANCE_ADMIN · MODERATOR 등 8종 role 매트릭스)
+                 * 부착은 Step 2B 에서 별도 이슈로 이어진다.
+                 */
+                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
 
                 /* 나머지 모든 요청: 인증 필요 */
                 .anyRequest().authenticated()

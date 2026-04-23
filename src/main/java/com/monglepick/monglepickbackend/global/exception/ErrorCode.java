@@ -79,6 +79,13 @@ public enum ErrorCode {
     /** 월간 사용 한도 초과. */
     MONTHLY_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "Q002", "월간 사용 한도를 초과했습니다"),
 
+    /**
+     * 비로그인(게스트) 평생 1회 무료 체험 쿼터를 모두 사용한 경우.
+     * 쿠키(mongle_guest) 또는 IP 기반 Redis 키(chat:guest_used_*) 둘 중 하나라도 소비 기록이 있으면 반환한다.
+     * Client 는 이 에러 코드를 받으면 로그인/회원가입 유도 모달을 노출한다.
+     */
+    GUEST_QUOTA_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "Q003", "무료 체험 1회를 모두 사용하셨습니다. 로그인 후 이용해주세요"),
+
     // ─────────────────────────────────────────────
     // 보안/인증 (S0xx)
     // ─────────────────────────────────────────────
@@ -333,6 +340,9 @@ public enum ErrorCode {
 
     /** 본인 세션이 아닌 경우 접근 거부. */
     CHAT_SESSION_ACCESS_DENIED(HttpStatus.FORBIDDEN, "CHAT002", "채팅 세션 접근 권한이 없습니다"),
+
+    /** suggestionId에 해당하는 채팅 추천 칩을 찾을 수 없음 (관리자 CRUD). */
+    CHAT_SUGGESTION_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT003", "채팅 추천 칩을 찾을 수 없습니다"),
 
     // ─────────────────────────────────────────────
     // 플레이리스트 (PL0xx)

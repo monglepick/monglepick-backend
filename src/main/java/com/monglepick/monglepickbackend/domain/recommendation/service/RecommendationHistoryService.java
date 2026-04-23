@@ -1,8 +1,10 @@
 package com.monglepick.monglepickbackend.domain.recommendation.service;
 
 import com.monglepick.monglepickbackend.domain.recommendation.dto.RecommendationHistoryDto;
+import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationFeedback;
 import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationImpact;
 import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationLog;
+import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationFeedbackRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationImpactRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationLogRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -14,7 +16,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 추천 이력 서비스 — 사용자별 추천 이력 조회 및 찜/봤어요 토글 비즈니스 로직.
@@ -51,6 +57,12 @@ public class RecommendationHistoryService {
     /** 추천 임팩트 리포지토리 — 찜/봤어요 상태 저장 및 토글 */
     private final RecommendationImpactRepository recommendationImpactRepository;
 
+    /**
+     * 추천 피드백 리포지토리 — 별점/피드백유형 복원용 (QA #172).
+     * getRecommendationHistory 에서 페이지 단위 배치 조회로 N+1 을 회피한다.
+     */
+    private final RecommendationFeedbackRepository recommendationFeedbackRepository;
+
     // ─────────────────────────────────────────────
     // 조회 (readOnly = true 상속)
     // ─────────────────────────────────────────────
@@ -70,30 +82,66 @@ public class RecommendationHistoryService {
      * @return 추천 이력 응답 DTO 페이지
      */
     public Page<RecommendationHistoryDto.RecommendationHistoryResponse> getRecommendationHistory(
-            String userId, Pageable pageable) {
+            String userId, String status, Pageable pageable) {
 
-        log.debug("추천 이력 조회: userId={}, page={}", userId, pageable.getPageNumber());
+        log.debug("추천 이력 조회: userId={}, page={}, status={}",
+                userId, pageable.getPageNumber(), status);
+
+        // QA 후속 (2026-04-23): status 필터 지원.
+        //   - null/"ALL" → 기존 전체 목록
+        //   - "WISHLIST" → Impact.wishlisted=true 만
+        //   - "WATCHED"  → Impact.watched=true 만
+        // 그 외 임의 값은 전체로 폴백 (대소문자 무시).
+        final String normalized = status == null ? "ALL" : status.trim().toUpperCase();
 
         // 사용자별 추천 로그 페이징 조회 (movie JOIN FETCH — N+1 방지)
-        Page<RecommendationLog> logPage =
-                recommendationLogRepository.findByUserIdWithMovie(userId, pageable);
+        final Page<RecommendationLog> logPage;
+        switch (normalized) {
+            case "WISHLIST" -> logPage =
+                    recommendationLogRepository.findByUserIdWishlistedWithMovie(userId, pageable);
+            case "WATCHED" -> logPage =
+                    recommendationLogRepository.findByUserIdWatchedWithMovie(userId, pageable);
+            default -> logPage =
+                    recommendationLogRepository.findByUserIdWithMovie(userId, pageable);
+        }
 
-        // 각 로그에 대응하는 Impact 상태를 조회하여 DTO로 변환
-        return logPage.map(log -> {
+        // QA #172 (2026-04-23): 현재 페이지의 모든 로그 ID 를 모아 한 번의 쿼리로 피드백을 배치 조회.
+        // 루프 안에서 feedback 단건 조회를 돌리면 페이지당 최대 20회 추가 쿼리가 발생하므로
+        // IN 절 1회 조회로 대체해 N+1 을 방지한다. 피드백이 없으면 맵에서 get() 결과 null.
+        List<Long> pageLogIds = logPage.getContent().stream()
+                .map(RecommendationLog::getRecommendationLogId)
+                .toList();
+        Map<Long, RecommendationFeedback> feedbackByLogId = pageLogIds.isEmpty()
+                ? Map.of()
+                : recommendationFeedbackRepository
+                        .findAllByUserIdAndLogIdIn(userId, pageLogIds)
+                        .stream()
+                        .collect(Collectors.toMap(
+                                fb -> fb.getRecommendationLog().getRecommendationLogId(),
+                                Function.identity(),
+                                // user_id+recommendation_id UNIQUE 제약으로 중복 불가하지만
+                                // 방어적으로 가장 나중 것 우선.
+                                (a, b) -> b
+                        ));
+
+        // 각 로그에 대응하는 Impact + Feedback 을 조립해 DTO 로 변환.
+        return logPage.map(recLog -> {
             // (userId, movieId, recommendationLogId) 조합으로 Impact 단건 조회
             Optional<RecommendationImpact> impact =
                     recommendationImpactRepository
                             .findByUserIdAndMovieIdAndRecommendationLog_RecommendationLogId(
                                     userId,
-                                    log.getMovie().getMovieId(),
-                                    log.getRecommendationLogId()
+                                    recLog.getMovie().getMovieId(),
+                                    recLog.getRecommendationLogId()
                             );
 
             // Impact 레코드가 없으면 찜/봤어요 모두 false
             boolean wishlisted = impact.map(RecommendationImpact::getWishlisted).orElse(false);
             boolean watched    = impact.map(RecommendationImpact::getWatched).orElse(false);
 
-            return RecommendationHistoryDto.RecommendationHistoryResponse.from(log, wishlisted, watched);
+            RecommendationFeedback feedback = feedbackByLogId.get(recLog.getRecommendationLogId());
+            return RecommendationHistoryDto.RecommendationHistoryResponse.from(
+                    recLog, wishlisted, watched, feedback);
         });
     }
 

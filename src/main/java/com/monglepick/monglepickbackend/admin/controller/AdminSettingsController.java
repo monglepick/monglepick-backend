@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.admin.controller;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminAccountCreateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminAccountResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AdminRoleUpdateRequest;
+import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AgentAuditLogRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.AuditLogResponse;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.BannerCreateRequest;
 import com.monglepick.monglepickbackend.admin.dto.SettingsDto.BannerResponse;
@@ -426,6 +427,66 @@ public class AdminSettingsController {
                 description,
                 null,
                 afterData
+        );
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(null));
+    }
+
+    /**
+     * 관리자 AI 에이전트 실행 감사 로그 등록 — Step 6a (2026-04-23 신규).
+     *
+     * <p>monglepick-agent 의 `tool_executor` 가 Tier 2/3 쓰기 tool 을 실행한 직후 이
+     * 엔드포인트로 callback 하여 감사 기록을 남긴다. actor 식별은 Agent 가 forwarding 한
+     * 관리자 JWT 의 SecurityContext 에서 `AdminAuditService.resolveCurrentActor()` 가 자동
+     * 추출한다(설계서 §5.1 JWT forwarding / §7.1 actionType 네임스페이스).</p>
+     *
+     * <h3>기존 도메인 감사 로그와의 관계</h3>
+     * <p>Tier 2/3 쓰기가 실제 수행되면 Backend 의 서비스 레이어(AdminUserService 등) 가
+     * 이미 {@link AdminAuditService#ACTION_USER_SUSPEND} 같은 도메인 actionType 으로 로그
+     * 한 건을 남긴다. 이 EP 가 남기는 레코드는 별도 한 건 — {@code AGENT_EXECUTED} — 으로,
+     * "어느 에이전트 턴이 어떤 관리 작업을 유발했는지" 를 명시적으로 추적한다. 두 레코드는
+     * target(userId, paymentId 등)이 동일하므로 사후 조회 시 조인 가능.</p>
+     *
+     * <h3>보안</h3>
+     * <p>일반 관리자(ROLE_ADMIN) 가 JWT 로 호출하며 SecurityConfig 의 `/api/v1/admin/**`
+     * 인증 게이트가 1차 방어. description 에 사용자 프롬프트 원문이 담기므로 Agent 측에서
+     * 과도한 길이를 자르는 책임을 지고, 여기서는 DTO `@Size(max=2000)` 검증으로 2차 방어.</p>
+     */
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Agent 실행 감사 로그 등록",
+            description = "관리자 AI 에이전트가 Tier 2/3 쓰기 tool 을 실행한 뒤 callback 하는 감사 로그 기록 EP. " +
+                    "actionType 기본값은 AGENT_EXECUTED. 기존 도메인별 감사 로그와 별도로 한 건 추가 기록한다."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "감사 로그 기록 완료"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "description 누락 등 필수 필드 오류"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "관리자 권한 없음")
+    })
+    @PostMapping("/audit-logs/agent")
+    public ResponseEntity<ApiResponse<Void>> recordAgentExecution(
+            @Valid @RequestBody AgentAuditLogRequest request
+    ) {
+        // actionType 미지정 시 기본값 AGENT_EXECUTED — Agent 클라이언트는 보통 생략하고
+        // 더 세부 분기가 필요할 때만 override 한다(예: AGENT_FAQ_CREATE).
+        String actionType = (request.actionType() != null && !request.actionType().isBlank())
+                ? request.actionType()
+                : AdminAuditService.ACTION_AGENT_EXECUTED;
+
+        log.info(
+                "[AdminSettings] Agent 감사 로그 등록 — actionType={}, targetType={}, targetId={}",
+                actionType, request.targetType(), request.targetId()
+        );
+
+        // AdminAuditService.log 는 REQUIRES_NEW 로 격리되어 있어 실패해도 컨트롤러에
+        // 예외 전파하지 않는다. before/after 는 Agent 가 Tier 3 에서만 채우고, Tier 2 는
+        // 보통 null 로 호출하므로 그대로 통과시킨다.
+        adminAuditService.log(
+                actionType,
+                request.targetType(),
+                request.targetId(),
+                request.description(),
+                request.beforeData(),
+                request.afterData()
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(null));

@@ -88,6 +88,13 @@ public class RecommendationHistoryController extends BaseController {
             @Parameter(description = "페이지 크기 (최대 100)", example = "20")
             @RequestParam(defaultValue = "20") int size,
 
+            // QA 후속 (2026-04-23): 찜한영화/본영화 필터 미적용 버그 수정.
+            // Client 는 `?status=WISHLIST|WATCHED` 쿼리를 보내왔으나 기존엔 이 파라미터를 아예 받지 않아
+            // Service 가 항상 전체 목록을 반환 → 세 탭 결과가 동일.
+            // null/"ALL" 은 필터 없음(기존 동작 호환), WISHLIST/WATCHED 는 Impact 테이블 JOIN 으로 필터링.
+            @Parameter(description = "필터 상태 (ALL/WISHLIST/WATCHED)", example = "WISHLIST")
+            @RequestParam(required = false) String status,
+
             Principal principal
     ) {
         String userId = resolveUserId(principal);
@@ -99,7 +106,8 @@ public class RecommendationHistoryController extends BaseController {
         Pageable pageable = PageRequest.of(page, limitedSize,
                 Sort.by(Sort.Direction.DESC, "createdAt"));
 
-        log.debug("추천 이력 목록 조회 요청: userId={}, page={}, size={}", userId, page, limitedSize);
+        log.debug("추천 이력 목록 조회 요청: userId={}, page={}, size={}, status={}",
+                userId, page, limitedSize, status);
 
         // 2026-04-16 반환 타입 bare 화 (ApiResponse 래핑 제거).
         // 프로젝트 컨벤션: 페이징 리스트 엔드포인트는 ApiResponse 래핑 없이 Page 직접 반환.
@@ -108,7 +116,7 @@ public class RecommendationHistoryController extends BaseController {
         // 최종 data={success, data:{content}, error} 형태가 되어 RecommendationPage `data?.content`
         // 접근이 undefined 로 귀결 → 실제 48건 저장되어 있어도 빈 배열로 렌더링되던 문제.
         Page<RecommendationHistoryDto.RecommendationHistoryResponse> result =
-                recommendationHistoryService.getRecommendationHistory(userId, pageable);
+                recommendationHistoryService.getRecommendationHistory(userId, status, pageable);
 
         return ResponseEntity.ok(result);
     }

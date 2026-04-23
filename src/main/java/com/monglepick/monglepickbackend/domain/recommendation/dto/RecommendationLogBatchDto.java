@@ -91,6 +91,8 @@ public class RecommendationLogBatchDto {
          * @param hybridScore   하이브리드 합산 점수 (nullable)
          * @param genreMatch    장르 일치율 0.0~1.0 (nullable)
          * @param moodMatch     무드 매치율 0.0~1.0 (nullable)
+         * @param sourceType    추천 소스 타입 ("INTERNAL" / "EXTERNAL_DDGS"). null 이면 Service 에서 "INTERNAL" 기본값.
+         *                      2026-04-23 후속 과제: external_search_node 경로로 생성된 추천 식별용.
          */
         public record Item(
                 @NotBlank(message = "movieId 는 필수입니다")
@@ -109,7 +111,17 @@ public class RecommendationLogBatchDto {
                 Float cbfScore,
                 Float hybridScore,
                 Float genreMatch,
-                Float moodMatch
+                Float moodMatch,
+
+                /**
+                 * 추천 소스 타입 (2026-04-23 후속 과제 추가, nullable).
+                 * <ul>
+                 *   <li>{@code "INTERNAL"} = 내부 DB 기반 일반 추천 (기본값)</li>
+                 *   <li>{@code "EXTERNAL_DDGS"} = Agent external_search_node 가 DuckDuckGo 로 찾은 영화</li>
+                 * </ul>
+                 * null/공백 이면 Service 에서 "INTERNAL" 로 폴백.
+                 */
+                String sourceType
         ) {}
     }
 

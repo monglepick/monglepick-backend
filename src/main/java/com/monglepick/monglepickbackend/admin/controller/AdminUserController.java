@@ -28,6 +28,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -190,6 +191,8 @@ public class AdminUserController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "유효하지 않은 역할 값"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "사용자를 찾을 수 없음")
     })
+    /* 2026-04-23 Step 2B: 역할 변경은 관리자 전용 method-level 가드. Step 2C 에서 SUPER_ADMIN 전용으로 강화 예정. */
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{userId}/role")
     public ResponseEntity<ApiResponse<UserDetailResponse>> updateUserRole(
             @Parameter(description = "역할을 변경할 사용자 ID", example = "user_abc123")
@@ -223,6 +226,8 @@ public class AdminUserController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "계정 정지 성공"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "사용자를 찾을 수 없음")
     })
+    /* 2026-04-23 Step 2B: 계정 정지 — Tier 3 위험 Write. Step 2C 에서 MODERATOR 이상으로 완화 가능. */
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{userId}/suspend")
     public ResponseEntity<ApiResponse<String>> suspendUser(
             @Parameter(description = "정지할 사용자 ID", example = "user_abc123")
@@ -256,6 +261,8 @@ public class AdminUserController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "계정 복구 성공"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "사용자를 찾을 수 없음")
     })
+    /* 2026-04-23 Step 2B: 계정 복구 — Tier 3 위험 Write. */
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{userId}/activate")
     public ResponseEntity<ApiResponse<String>> activateUser(
             @Parameter(description = "복구할 사용자 ID", example = "user_abc123")
@@ -318,6 +325,8 @@ public class AdminUserController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "amount=0 또는 잔액 부족"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "사용자 또는 user_points 없음")
     })
+    /* 2026-04-23 Step 2B: 수동 포인트 조정 — Tier 3 위험 Write (금전). Step 2C 에서 FINANCE_ADMIN 으로 세분화. */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{userId}/points/adjust")
     public ResponseEntity<ApiResponse<ManualPointResponse>> adjustUserPoints(
             @Parameter(description = "대상 사용자 ID", example = "user_abc123")
@@ -345,6 +354,8 @@ public class AdminUserController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "count가 1 미만"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "사용자 또는 AI 쿼터 레코드 없음")
     })
+    /* 2026-04-23 Step 2B: AI 이용권 수동 발급 — Tier 3 위험 Write (금전성). Step 2C 에서 FINANCE_ADMIN 으로. */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{userId}/tokens/grant")
     public ResponseEntity<ApiResponse<GrantAiTokenResponse>> grantAiTokens(
             @Parameter(description = "대상 사용자 ID", example = "user_abc123")

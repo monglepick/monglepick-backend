@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -39,6 +41,28 @@ public interface RecommendationFeedbackRepository extends JpaRepository<Recommen
      */
     Optional<RecommendationFeedback> findByUserIdAndRecommendationLog_RecommendationLogId(
             String userId, Long recommendationLogId);
+
+    /**
+     * 특정 사용자 + 여러 추천 로그 ID 조합의 피드백을 배치 조회한다.
+     *
+     * <p>QA #172 (2026-04-23): 추천 이력 페이지(20건 페이지) 에서 별점/피드백을 복원하기 위해
+     * 한 번의 쿼리로 모든 피드백을 모아온다. 이전엔 Service 가 피드백을 조회하지 않아
+     * `recommendation.feedbackRating` 이 항상 undefined 였고 별점 UI 가 빈 상태로 렌더됐다.</p>
+     *
+     * <p>RecommendationFeedback 은 feedbackType 을 lazy 로 들고 있지 않으므로 추가 fetch join 불필요.
+     * recommendationLog 는 LAZY 지만 이 쿼리에서는 엔티티 바깥에서 id 만 매핑에 쓰므로 접근하지 않는다
+     * (Service 에서 `feedback.getRecommendationLog().getRecommendationLogId()` 호출 금지).</p>
+     *
+     * @param userId                피드백을 남긴 사용자 ID
+     * @param recommendationLogIds  조회 대상 추천 로그 ID 집합
+     * @return 해당 조합의 피드백 리스트 (없으면 빈 리스트)
+     */
+    @Query("SELECT f FROM RecommendationFeedback f " +
+           "WHERE f.userId = :userId " +
+           "AND f.recommendationLog.recommendationLogId IN :recommendationLogIds")
+    List<RecommendationFeedback> findAllByUserIdAndLogIdIn(
+            @Param("userId") String userId,
+            @Param("recommendationLogIds") Collection<Long> recommendationLogIds);
 
     /**
      * 지정 시각 이후 생성된 피드백 총 수를 집계한다.
