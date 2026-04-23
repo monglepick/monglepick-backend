@@ -36,20 +36,33 @@ import java.time.LocalDateTime;
  *
  * <h3>인덱스 설계</h3>
  * <ul>
- *   <li>{@code idx_chat_suggestions_active} — 활성 칩 조회(is_active, start_at, end_at) 복합 커버링</li>
+ *   <li>{@code idx_chat_suggestions_active} — 활성 칩 조회(is_active, start_at, end_at) 복합 커버링 (legacy)</li>
+ *   <li>{@code idx_suggestions_surface_active} — 2026-04-23 신규. AI 에이전트 3채널 통합용.
+ *       surface 별 활성 풀 조회 경로(Public API findActiveBySurfaceAt)의 1번 인덱스.</li>
  * </ul>
  *
  * <h3>변경 이력</h3>
  * <ul>
  *   <li>2026-04-20: 채팅 환영 화면 추천 칩 동적화 기능 최초 생성</li>
+ *   <li>2026-04-23: {@code surface} 컬럼 추가 — 유저 채팅 / 관리자 AI 어시스턴트 /
+ *       FAQ 챗봇 3개 AI 에이전트 채널의 빠른 질문 칩을 단일 테이블로 통합 관리.
+ *       기존 10개 시드는 {@code user_chat} 로 자동 할당되어 하위 호환 유지.</li>
  * </ul>
  */
 @Entity
 @Table(
         name = "chat_suggestions",
         indexes = {
-                /* 활성 칩 목록 조회: is_active + 기간 필터 커버링 인덱스 */
-                @Index(name = "idx_chat_suggestions_active", columnList = "is_active, start_at, end_at")
+                /* 활성 칩 목록 조회: is_active + 기간 필터 커버링 인덱스 (legacy) */
+                @Index(name = "idx_chat_suggestions_active", columnList = "is_active, start_at, end_at"),
+                /* 2026-04-23 surface 별 활성 풀 조회 — Public API 의 가장 빈번한 접근 패턴.
+                   MySQL 은 좌측 prefix 매칭이므로 surface 를 맨 앞에 두어야
+                   WHERE surface=? AND is_active=? AND (start_at IS NULL OR start_at<=?) AND (...)
+                   패턴에서 인덱스 전체 활용 가능. */
+                @Index(
+                        name = "idx_suggestions_surface_active",
+                        columnList = "surface, is_active, start_at, end_at"
+                )
         }
 )
 @Getter
@@ -126,6 +139,36 @@ public class ChatSuggestion extends BaseAuditEntity {
     private Long clickCount = 0L;
 
     /**
+     * AI 에이전트 채널 구분 (VARCHAR(30), NOT NULL, default: 'user_chat') — 2026-04-23 추가.
+     *
+     * <p>동일 테이블로 3개 AI 에이전트 채널의 빠른 질문 칩을 통합 관리하기 위한 구분자.
+     * 허용 값 (서비스 레이어에서 검증):
+     * <ul>
+     *   <li>{@code user_chat} — 유저 채팅 환영 화면 (기존 역할, 기본값)</li>
+     *   <li>{@code admin_assistant} — 관리자 AI 어시스턴트 빈 상태 빠른 질문</li>
+     *   <li>{@code faq_chatbot} — 고객센터 FAQ 챗봇 위젯 빠른 질문</li>
+     * </ul>
+     *
+     * <p>enum 대신 VARCHAR 를 쓰는 이유: 신규 채널 추가 시 DDL 변경 없이 서비스 레이어
+     * `ALLOWED_SURFACES` 상수만 확장하면 된다. 인덱스 `idx_suggestions_surface_active` 의
+     * 맨 앞 컬럼이므로 조회 성능은 enum 과 동일.
+     */
+    /*
+     * columnDefinition 으로 MySQL DDL 을 명시한다 — `ddl-auto=update` 가 기존 DB 에
+     * 이 컬럼을 추가할 때 DEFAULT 값이 없으면 기존 레코드가 빈 문자열 또는 NULL 로 채워질
+     * 수 있어 "surface 가 비어 있어서 3채널 분리가 안 된다" 는 증상이 발생한다.
+     * DEFAULT 를 명시해 기존 10건 시드 모두 자동으로 user_chat 으로 변환되도록 한다.
+     */
+    @Column(
+            name = "surface",
+            length = 30,
+            nullable = false,
+            columnDefinition = "VARCHAR(30) NOT NULL DEFAULT 'user_chat'"
+    )
+    @Builder.Default
+    private String surface = "user_chat";
+
+    /**
      * 등록 관리자 ID (VARCHAR(50), nullable).
      * users.user_id를 논리적으로 참조한다.
      */
@@ -172,9 +215,11 @@ public class ChatSuggestion extends BaseAuditEntity {
      * @param startAt      새 노출 시작 시각 (null이면 기존 값 유지)
      * @param endAt        새 노출 종료 시각 (null이면 기존 값 유지)
      * @param displayOrder 새 정렬 우선순위 (null이면 기존 값 유지)
+     * @param surface      새 채널 구분 (null 또는 빈 문자열이면 기존 값 유지). 2026-04-23 추가.
      */
     public void update(String text, String category,
-                       LocalDateTime startAt, LocalDateTime endAt, Integer displayOrder) {
+                       LocalDateTime startAt, LocalDateTime endAt, Integer displayOrder,
+                       String surface) {
         if (text != null) {
             this.text = text;
         }
@@ -189,6 +234,9 @@ public class ChatSuggestion extends BaseAuditEntity {
         }
         if (displayOrder != null) {
             this.displayOrder = displayOrder;
+        }
+        if (surface != null && !surface.isBlank()) {
+            this.surface = surface;
         }
     }
 }

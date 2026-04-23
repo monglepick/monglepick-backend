@@ -18,6 +18,9 @@ import java.time.LocalDateTime;
  * @param startAt      노출 시작 시각 (옵셔널, null 이면 즉시)
  * @param endAt        노출 종료 시각 (옵셔널, null 이면 무기한)
  * @param displayOrder 정렬 우선순위 (옵셔널, 미전달 시 기본값 0)
+ * @param surface      AI 에이전트 채널 (2026-04-23 추가). 'user_chat' / 'admin_assistant' /
+ *                     'faq_chatbot' 중 하나. null 또는 빈 문자열이면 기본값 'user_chat'.
+ *                     서비스 레이어 `ChatSuggestionService.ALLOWED_SURFACES` 로 화이트리스트 검증.
  */
 public record ChatSuggestionRequest(
         @NotBlank(message = "추천 칩 문구는 필수입니다")
@@ -33,6 +36,9 @@ public record ChatSuggestionRequest(
 
         LocalDateTime endAt,
 
-        Integer displayOrder
+        Integer displayOrder,
+
+        @Size(max = 30, message = "surface 는 최대 30자입니다")
+        String surface
 ) {
 }

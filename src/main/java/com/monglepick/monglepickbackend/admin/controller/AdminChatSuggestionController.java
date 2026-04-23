@@ -77,6 +77,13 @@ public class AdminChatSuggestionController {
     })
     @GetMapping
     public Page<AdminChatSuggestionResponse> getList(
+            @Parameter(
+                    description = "AI 에이전트 채널 필터 (user_chat / admin_assistant / faq_chatbot). "
+                            + "미전달 또는 빈 문자열이면 전체. 2026-04-23 추가.",
+                    example = "user_chat"
+            )
+            @RequestParam(required = false) String surface,
+
             @Parameter(description = "활성 여부 필터 (미전달 시 전체)")
             @RequestParam(required = false) Boolean isActive,
 
@@ -90,7 +97,7 @@ public class AdminChatSuggestionController {
 
             @PageableDefault(size = 20) Pageable pageable
     ) {
-        return chatSuggestionService.getList(isActive, fromDate, toDate, pageable);
+        return chatSuggestionService.getList(surface, isActive, fromDate, toDate, pageable);
     }
 
     /**

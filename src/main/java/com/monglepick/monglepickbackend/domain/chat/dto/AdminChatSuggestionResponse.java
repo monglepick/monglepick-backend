@@ -18,6 +18,8 @@ import java.time.LocalDateTime;
  * @param endAt        노출 종료 시각 (nullable)
  * @param displayOrder 정렬 우선순위
  * @param clickCount   클릭 수 누적
+ * @param surface      AI 에이전트 채널 — 'user_chat' / 'admin_assistant' / 'faq_chatbot'
+ *                     (2026-04-23 추가). 관리자 UI 가 이 값을 필터 셀렉트 + 테이블 컬럼에 노출.
  * @param adminId      등록 관리자 ID (nullable)
  * @param createdAt    생성 시각
  * @param updatedAt    최종 수정 시각
@@ -31,6 +33,7 @@ public record AdminChatSuggestionResponse(
         LocalDateTime endAt,
         Integer displayOrder,
         Long clickCount,
+        String surface,
         String adminId,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
@@ -51,6 +54,7 @@ public record AdminChatSuggestionResponse(
                 entity.getEndAt(),
                 entity.getDisplayOrder(),
                 entity.getClickCount(),
+                entity.getSurface(),
                 entity.getAdminId(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt()

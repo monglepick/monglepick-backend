@@ -287,7 +287,8 @@ class ChatSuggestionServiceTest {
                     .build();
 
             // category=null → 기존 "mood" 유지, text/displayOrder 만 변경
-            suggestion.update("수정된 문구", null, null, null, 20);
+            // 2026-04-23: surface 파라미터 추가됨 (null → 기존 값 유지)
+            suggestion.update("수정된 문구", null, null, null, 20, null);
 
             assertThat(suggestion.getText()).isEqualTo("수정된 문구");
             assertThat(suggestion.getCategory()).isEqualTo("mood");   // 유지
@@ -306,7 +307,7 @@ class ChatSuggestionServiceTest {
             LocalDateTime start = LocalDateTime.of(2026, 5, 1, 0, 0);
             LocalDateTime end   = LocalDateTime.of(2026, 5, 31, 23, 59);
 
-            suggestion.update(null, null, start, end, null);
+            suggestion.update(null, null, start, end, null, null);
 
             assertThat(suggestion.getStartAt()).isEqualTo(start);
             assertThat(suggestion.getEndAt()).isEqualTo(end);
@@ -327,8 +328,9 @@ class ChatSuggestionServiceTest {
         void update_notFound_throwsException() {
             when(chatSuggestionRepository.findById(999L)).thenReturn(Optional.empty());
 
+            // 2026-04-23: surface 파라미터 추가로 7 인자 (String, String, Boolean, LocalDateTime, LocalDateTime, Integer, String)
             ChatSuggestionRequest request = new ChatSuggestionRequest(
-                    "수정 문구", null, null, null, null, null);
+                    "수정 문구", null, null, null, null, null, null);
 
             assertThatThrownBy(() -> chatSuggestionService.update(999L, request))
                     .isInstanceOf(BusinessException.class)

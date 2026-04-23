@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+
 /**
  * 관리자 전용 결제 주문 리포지토리.
  *
@@ -55,14 +57,20 @@ public interface AdminPaymentOrderRepository extends JpaRepository<PaymentOrder,
     Page<PaymentOrder> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     /**
-     * 관리자 결제 내역 탭의 복합 필터 검색 (2026-04-14 추가).
+     * 관리자 결제 내역 탭의 복합 필터 검색 (2026-04-14 추가, 2026-04-23 날짜 범위 확장).
      *
-     * <p>상태(status) / 주문 유형(orderType) / 사용자 ID 를 선택적으로 조합해 검색한다.
-     * null 인 파라미터는 WHERE 조건에서 자동 제외된다.</p>
+     * <p>상태(status) / 주문 유형(orderType) / 사용자 ID / 생성일 범위(fromDate~toDate)
+     * 를 선택적으로 조합해 검색한다. null 인 파라미터는 WHERE 조건에서 자동 제외된다.</p>
+     *
+     * <p>날짜 필터 의미론 — {@code fromDate} 는 inclusive(이상), {@code toDate} 는 exclusive(미만).
+     * 프로젝트 전 Admin Repository 의 날짜 범위 규약({@link AdminAuditLogRepository},
+     * {@link AdminCourseVerificationRepository})과 일치.</p>
      *
      * @param status     주문 상태 enum (nullable)
      * @param orderType  주문 유형 enum (nullable)
      * @param userId     사용자 ID (nullable)
+     * @param fromDate   주문 생성일 시작 inclusive (nullable)
+     * @param toDate     주문 생성일 종료 exclusive (nullable)
      * @param pageable   페이지 정보
      * @return 조건에 매칭되는 결제 주문 페이지 (생성일시 내림차순)
      */
@@ -71,16 +79,22 @@ public interface AdminPaymentOrderRepository extends JpaRepository<PaymentOrder,
                     "WHERE (:status IS NULL OR p.status = :status) " +
                     "  AND (:orderType IS NULL OR p.orderType = :orderType) " +
                     "  AND (:userId IS NULL OR p.userId = :userId) " +
+                    "  AND (:fromDate IS NULL OR p.createdAt >= :fromDate) " +
+                    "  AND (:toDate   IS NULL OR p.createdAt <  :toDate) " +
                     "ORDER BY p.createdAt DESC",
             countQuery = "SELECT COUNT(p) FROM PaymentOrder p " +
                     "WHERE (:status IS NULL OR p.status = :status) " +
                     "  AND (:orderType IS NULL OR p.orderType = :orderType) " +
-                    "  AND (:userId IS NULL OR p.userId = :userId)"
+                    "  AND (:userId IS NULL OR p.userId = :userId) " +
+                    "  AND (:fromDate IS NULL OR p.createdAt >= :fromDate) " +
+                    "  AND (:toDate   IS NULL OR p.createdAt <  :toDate)"
     )
     Page<PaymentOrder> searchByFilters(
             @Param("status") PaymentOrder.OrderStatus status,
             @Param("orderType") PaymentOrder.OrderType orderType,
             @Param("userId") String userId,
+            @Param("fromDate") LocalDateTime fromDate,
+            @Param("toDate") LocalDateTime toDate,
             Pageable pageable
     );
 }

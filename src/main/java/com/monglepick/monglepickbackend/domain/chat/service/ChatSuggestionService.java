@@ -44,7 +44,39 @@ public class ChatSuggestionService {
     /** limit 파라미터의 최댓값 — 10 초과 요청은 10으로 클램프 */
     private static final int LIMIT_MAX = 10;
 
+    /**
+     * AI 에이전트 채널 코드 화이트리스트 (2026-04-23 추가).
+     *
+     * <p>Public/Admin API 가 받는 `surface` 파라미터를 이 set 으로 검증한다.
+     * 허용 외 값은 기본값 {@link #DEFAULT_SURFACE} 로 보정되어 잘못된 채널 호출로
+     * 엉뚱한 칩 풀이 노출되는 것을 방지.</p>
+     *
+     * <p>신규 채널 추가 시 이 set 과 UI 셀렉트 옵션만 업데이트하면 된다 (DDL 무변경).</p>
+     */
+    public static final java.util.Set<String> ALLOWED_SURFACES = java.util.Set.of(
+            "user_chat",
+            "admin_assistant",
+            "faq_chatbot"
+    );
+
+    /** 기본 채널. 기존 호환 — 쿼리 파라미터 미지정 시 유저 채팅 풀을 반환. */
+    public static final String DEFAULT_SURFACE = "user_chat";
+
     private final ChatSuggestionRepository chatSuggestionRepository;
+
+    /**
+     * 사용자가 전달한 surface 를 정규화한다. 공백·null·허용 외 값은 기본값으로 fallback.
+     */
+    static String normalizeSurface(String surface) {
+        if (surface == null) {
+            return DEFAULT_SURFACE;
+        }
+        String trimmed = surface.trim();
+        if (trimmed.isEmpty()) {
+            return DEFAULT_SURFACE;
+        }
+        return ALLOWED_SURFACES.contains(trimmed) ? trimmed : DEFAULT_SURFACE;
+    }
 
     // ─────────────────────────────────────────────
     // Public API — 채팅 환영 화면 칩 노출
@@ -63,13 +95,27 @@ public class ChatSuggestionService {
      * @return 활성 추천 칩 DTO 목록 (최대 limit 개, 풀이 부족하면 그보다 적을 수 있음)
      */
     public List<ChatSuggestionResponse> getActivePool(int limit) {
+        return getActivePool(DEFAULT_SURFACE, limit);
+    }
+
+    /**
+     * {@code surface} 별 활성 추천 칩 풀에서 랜덤으로 {@code limit} 개를 반환한다
+     * (2026-04-23 추가).
+     *
+     * <p>`surface` 는 화이트리스트 검증 후 정규화된다. 허용 외 값이면 기본값
+     * {@link #DEFAULT_SURFACE} 로 보정되어 "잘못된 채널 이름에도 일단 무언가 돌려주는"
+     * graceful 동작을 한다.</p>
+     */
+    public List<ChatSuggestionResponse> getActivePool(String surface, int limit) {
         // limit 클램프: [1, 10]
         int clampedLimit = Math.max(LIMIT_MIN, Math.min(LIMIT_MAX, limit));
+        String normalizedSurface = normalizeSurface(surface);
 
-        List<ChatSuggestion> pool = chatSuggestionRepository.findActiveAt(LocalDateTime.now());
+        List<ChatSuggestion> pool = chatSuggestionRepository
+                .findActiveBySurfaceAt(normalizedSurface, LocalDateTime.now());
 
         if (pool.isEmpty()) {
-            log.debug("[ChatSuggestionService] 활성 추천 칩 풀이 비어 있음");
+            log.debug("[ChatSuggestionService] surface={} 활성 풀이 비어 있음", normalizedSurface);
             return List.of();
         }
 
@@ -123,8 +169,25 @@ public class ChatSuggestionService {
             LocalDateTime toDate,
             Pageable pageable
     ) {
+        return getList(null, isActive, fromDate, toDate, pageable);
+    }
+
+    /**
+     * 관리자용 추천 칩 목록 페이징 조회 — surface 필터 버전 (2026-04-23 추가).
+     *
+     * @param surface  채널 필터 (null/빈 문자열이면 전체). 화이트리스트 외 값도 그대로
+     *                 Repository 에 전달되어 빈 결과가 나오므로 안전. 관리자 UI 의
+     *                 "모두" 옵션은 null/"" 로 보냄.
+     */
+    public Page<AdminChatSuggestionResponse> getList(
+            String surface,
+            Boolean isActive,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Pageable pageable
+    ) {
         return chatSuggestionRepository
-                .findAdminFiltered(isActive, fromDate, toDate, pageable)
+                .findAdminFiltered(surface, isActive, fromDate, toDate, pageable)
                 .map(AdminChatSuggestionResponse::from);
     }
 
@@ -140,6 +203,8 @@ public class ChatSuggestionService {
     @Transactional
     public AdminChatSuggestionResponse create(ChatSuggestionRequest request) {
         String adminId = resolveCurrentAdminId();
+        // surface 는 허용 외 값이면 기본값(user_chat)으로 보정 — 관리자 실수 방지
+        String surface = normalizeSurface(request.surface());
 
         ChatSuggestion entity = ChatSuggestion.builder()
                 .text(request.text())
@@ -148,11 +213,15 @@ public class ChatSuggestionService {
                 .startAt(request.startAt())
                 .endAt(request.endAt())
                 .displayOrder(request.displayOrder() != null ? request.displayOrder() : 0)
+                .surface(surface)
                 .adminId(adminId)
                 .build();
 
         ChatSuggestion saved = chatSuggestionRepository.save(entity);
-        log.info("[ChatSuggestionService] 추천 칩 생성 — id={}, text={}", saved.getSuggestionId(), saved.getText());
+        log.info(
+                "[ChatSuggestionService] 추천 칩 생성 — id={}, surface={}, text={}",
+                saved.getSuggestionId(), saved.getSurface(), saved.getText()
+        );
         return AdminChatSuggestionResponse.from(saved);
     }
 
@@ -167,12 +236,22 @@ public class ChatSuggestionService {
     @Transactional
     public AdminChatSuggestionResponse update(Long id, ChatSuggestionRequest request) {
         ChatSuggestion entity = findByIdOrThrow(id);
+        // surface 는 허용 외 값이 들어오면 엔티티 update() 쪽에서 null 처리된다 —
+        // 허용 값만 통과시켜 "잘못된 채널 이름으로 기존 칩이 엉뚱한 surface 로 이동" 차단.
+        String safeSurface = null;
+        if (request.surface() != null && !request.surface().isBlank()) {
+            String candidate = request.surface().trim();
+            if (ALLOWED_SURFACES.contains(candidate)) {
+                safeSurface = candidate;
+            }
+        }
         entity.update(
                 request.text(),
                 request.category(),
                 request.startAt(),
                 request.endAt(),
-                request.displayOrder()
+                request.displayOrder(),
+                safeSurface
         );
         // isActive 는 update() 도메인 메서드 범위 밖이므로 별도 처리
         if (request.isActive() != null) {

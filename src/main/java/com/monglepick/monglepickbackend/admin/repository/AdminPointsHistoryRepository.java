@@ -54,6 +54,39 @@ public interface AdminPointsHistoryRepository extends JpaRepository<PointsHistor
      */
     Page<PointsHistory> findByUserIdOrderByCreatedAtDesc(String userId, Pageable pageable);
 
+    /**
+     * 관리자 포인트 이력 탭의 복합 필터 검색 (2026-04-23 추가).
+     *
+     * <p>사용자 ID / 생성일 범위(fromDate~toDate)를 선택적으로 조합해 검색한다.
+     * null 파라미터는 WHERE 조건에서 자동 제외되므로, 사용자·기간 어떤 조합이든 지원한다.</p>
+     *
+     * <p>날짜 필터 의미론 — {@code fromDate} 는 inclusive(이상), {@code toDate} 는 exclusive(미만).
+     * 프로젝트 전 Admin Repository 의 날짜 범위 규약과 일치.</p>
+     *
+     * @param userId    사용자 ID (nullable — 생략 시 전체 사용자)
+     * @param fromDate  포인트 변동일 시작 inclusive (nullable)
+     * @param toDate    포인트 변동일 종료 exclusive (nullable)
+     * @param pageable  페이지 정보
+     * @return 조건에 매칭되는 포인트 이력 페이지 (최신순)
+     */
+    @Query(
+            value = "SELECT h FROM PointsHistory h " +
+                    "WHERE (:userId   IS NULL OR h.userId = :userId) " +
+                    "  AND (:fromDate IS NULL OR h.createdAt >= :fromDate) " +
+                    "  AND (:toDate   IS NULL OR h.createdAt <  :toDate) " +
+                    "ORDER BY h.createdAt DESC",
+            countQuery = "SELECT COUNT(h) FROM PointsHistory h " +
+                    "WHERE (:userId   IS NULL OR h.userId = :userId) " +
+                    "  AND (:fromDate IS NULL OR h.createdAt >= :fromDate) " +
+                    "  AND (:toDate   IS NULL OR h.createdAt <  :toDate)"
+    )
+    Page<PointsHistory> searchByFilters(
+            @Param("userId") String userId,
+            @Param("fromDate") LocalDateTime fromDate,
+            @Param("toDate") LocalDateTime toDate,
+            Pageable pageable
+    );
+
     // ═══ 포인트 경제 통계 집계 쿼리 ═══
 
     /**

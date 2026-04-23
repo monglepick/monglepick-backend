@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,6 +39,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -101,11 +103,19 @@ public class AdminPaymentController {
             @RequestParam(required = false) String orderType,
             @Parameter(description = "특정 사용자 ID 필터 (생략 시 전체)")
             @RequestParam(required = false) String userId,
+            @Parameter(description = "생성일 시작 inclusive (ISO-8601 datetime, 생략 시 무제한)")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
+            @Parameter(description = "생성일 종료 exclusive (ISO-8601 datetime, 생략 시 무제한)")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @PageableDefault(size = 20) Pageable pageable
     ) {
-        log.debug("[AdminPayment] 결제 내역 조회 요청 — status={}, orderType={}, userId={}, page={}",
-                status, orderType, userId, pageable.getPageNumber());
-        Page<PaymentOrderSummary> result = adminPaymentService.getOrders(status, orderType, userId, pageable);
+        log.debug("[AdminPayment] 결제 내역 조회 요청 — status={}, orderType={}, userId={}, from={}, to={}, page={}",
+                status, orderType, userId, fromDate, toDate, pageable.getPageNumber());
+        Page<PaymentOrderSummary> result = adminPaymentService.getOrders(
+                status, orderType, userId, fromDate, toDate, pageable
+        );
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 
@@ -173,12 +183,18 @@ public class AdminPaymentController {
             @RequestParam(required = false) String planCode,
             @Parameter(description = "특정 사용자 ID 필터 (생략 시 전체)")
             @RequestParam(required = false) String userId,
+            @Parameter(description = "구독 생성일 시작 inclusive (ISO-8601 datetime, 생략 시 무제한)")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
+            @Parameter(description = "구독 생성일 종료 exclusive (ISO-8601 datetime, 생략 시 무제한)")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @PageableDefault(size = 20) Pageable pageable
     ) {
-        log.debug("[AdminPayment] 구독 목록 조회 요청 — status={}, planCode={}, userId={}, page={}",
-                status, planCode, userId, pageable.getPageNumber());
+        log.debug("[AdminPayment] 구독 목록 조회 요청 — status={}, planCode={}, userId={}, from={}, to={}, page={}",
+                status, planCode, userId, fromDate, toDate, pageable.getPageNumber());
         Page<SubscriptionSummary> result =
-                adminPaymentService.getSubscriptions(status, planCode, userId, pageable);
+                adminPaymentService.getSubscriptions(status, planCode, userId, fromDate, toDate, pageable);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 
@@ -270,11 +286,19 @@ public class AdminPaymentController {
     public ResponseEntity<ApiResponse<Page<PointHistoryItem>>> getPointHistories(
             @Parameter(description = "사용자 ID 필터 (생략 시 전체)")
             @RequestParam(required = false) String userId,
+            @Parameter(description = "변동일 시작 inclusive (ISO-8601 datetime, 생략 시 무제한)")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
+            @Parameter(description = "변동일 종료 exclusive (ISO-8601 datetime, 생략 시 무제한)")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @PageableDefault(size = 20) Pageable pageable
     ) {
-        log.debug("[AdminPayment] 포인트 이력 조회 요청 — userId={}, page={}",
-                userId, pageable.getPageNumber());
-        Page<PointHistoryItem> result = adminPaymentService.getPointHistories(userId, pageable);
+        log.debug("[AdminPayment] 포인트 이력 조회 요청 — userId={}, from={}, to={}, page={}",
+                userId, fromDate, toDate, pageable.getPageNumber());
+        Page<PointHistoryItem> result = adminPaymentService.getPointHistories(
+                userId, fromDate, toDate, pageable
+        );
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 

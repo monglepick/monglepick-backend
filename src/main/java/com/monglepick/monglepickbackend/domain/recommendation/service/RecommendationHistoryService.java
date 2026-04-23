@@ -82,13 +82,28 @@ public class RecommendationHistoryService {
      * @return 추천 이력 응답 DTO 페이지
      */
     public Page<RecommendationHistoryDto.RecommendationHistoryResponse> getRecommendationHistory(
-            String userId, Pageable pageable) {
+            String userId, String status, Pageable pageable) {
 
-        log.debug("추천 이력 조회: userId={}, page={}", userId, pageable.getPageNumber());
+        log.debug("추천 이력 조회: userId={}, page={}, status={}",
+                userId, pageable.getPageNumber(), status);
+
+        // QA 후속 (2026-04-23): status 필터 지원.
+        //   - null/"ALL" → 기존 전체 목록
+        //   - "WISHLIST" → Impact.wishlisted=true 만
+        //   - "WATCHED"  → Impact.watched=true 만
+        // 그 외 임의 값은 전체로 폴백 (대소문자 무시).
+        final String normalized = status == null ? "ALL" : status.trim().toUpperCase();
 
         // 사용자별 추천 로그 페이징 조회 (movie JOIN FETCH — N+1 방지)
-        Page<RecommendationLog> logPage =
-                recommendationLogRepository.findByUserIdWithMovie(userId, pageable);
+        final Page<RecommendationLog> logPage;
+        switch (normalized) {
+            case "WISHLIST" -> logPage =
+                    recommendationLogRepository.findByUserIdWishlistedWithMovie(userId, pageable);
+            case "WATCHED" -> logPage =
+                    recommendationLogRepository.findByUserIdWatchedWithMovie(userId, pageable);
+            default -> logPage =
+                    recommendationLogRepository.findByUserIdWithMovie(userId, pageable);
+        }
 
         // QA #172 (2026-04-23): 현재 페이지의 모든 로그 ID 를 모아 한 번의 쿼리로 피드백을 배치 조회.
         // 루프 안에서 feedback 단건 조회를 돌리면 페이지당 최대 20회 추가 쿼리가 발생하므로

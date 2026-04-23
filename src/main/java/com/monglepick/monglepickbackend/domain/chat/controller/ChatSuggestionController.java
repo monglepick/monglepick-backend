@@ -52,7 +52,8 @@ public class ChatSuggestionController {
      */
     @Operation(
             summary = "활성 추천 칩 조회",
-            description = "채팅 환영 화면에 표시할 추천 질문 칩을 활성 풀에서 랜덤으로 반환한다. "
+            description = "AI 에이전트 채널(surface) 별 활성 추천 질문 칩을 랜덤으로 반환한다. "
+                    + "surface 미지정 시 기본값 'user_chat' (유저 채팅 환영 화면)."
                     + "limit 범위는 [1, 10]으로 클램프된다."
     )
     @ApiResponses({
@@ -60,10 +61,18 @@ public class ChatSuggestionController {
     })
     @GetMapping
     public List<ChatSuggestionResponse> getActive(
+            @Parameter(
+                    description = "AI 에이전트 채널 (user_chat / admin_assistant / faq_chatbot). "
+                            + "허용 외 값이면 user_chat 으로 보정됨.",
+                    example = "user_chat"
+            )
+            @RequestParam(defaultValue = "user_chat") String surface,
             @Parameter(description = "반환할 칩 수 (기본값 4, 범위 [1, 10])")
             @RequestParam(defaultValue = "4") int limit
     ) {
-        return chatSuggestionService.getActivePool(limit);
+        // 2026-04-23: surface 파라미터 추가. 기존 호출부(limit 만 전달)는 surface 기본값
+        // 'user_chat' 으로 동작하므로 하위 호환 완전 유지.
+        return chatSuggestionService.getActivePool(surface, limit);
     }
 
     /**
