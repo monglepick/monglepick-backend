@@ -372,8 +372,32 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET,  "/api/v1/chat/suggestions").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/chat/suggestions/*/click").permitAll()
 
-                /* OCR 이미지 분석 — 비로그인 허용 (영수증 텍스트 추출, Python OCR 위임) */
-                .requestMatchers(HttpMethod.POST, "/api/v1/ocr-events/analyze").permitAll()
+                /*
+                 * OCR 미리보기 분석은 로그인 필수 (2026-04-23 보안 수정).
+                 * PaddleOCR 호출 자체가 비용 큰 연산이라 비로그인 허용 시 DoS 벡터가
+                 * 되고, 이벤트 참여 플로우도 JWT 사용자 전제이므로 public 노출 이점이
+                 * 없다. 실제 제출 EP ({eventId}/verify) 와 동일하게 authenticated() 로
+                 * 기본 정책에 위임한다 — 별도 requestMatchers 선언을 의도적으로 두지 않음.
+                 */
+
+                /*
+                 * 관리자 API — ADMIN role 전용 (2026-04-23, Step 2A).
+                 *
+                 * 이전에는 .anyRequest().authenticated() 만 있어 JWT 존재 여부만 확인했다.
+                 * 이 상태에서는 USER role 의 일반 사용자도 본인 토큰으로 /api/v1/admin/**
+                 * 을 호출할 수 있는 구조적 허점이 있었다. Agent(FastAPI) 쪽에서는 role 을
+                 * 별도 검증하지만 Backend 직접 호출 경로는 막히지 않았다.
+                 *
+                 * hasRole("ADMIN") 은 JwtAuthenticationFilter 가 세팅하는 "ROLE_ADMIN"
+                 * authority 와 매칭된다(JwtAuthenticationFilter 의 `ROLE_` 접두사). 관리자
+                 * 전용 로그인 EP(/api/v1/admin/auth/login)는 상단에서 이미 permitAll 처리
+                 * 되므로 이 가드의 영향을 받지 않는다 (Spring Security 는 먼저 매칭된
+                 * 규칙을 적용).
+                 *
+                 * 세분화된 @PreAuthorize (FINANCE_ADMIN · MODERATOR 등 8종 role 매트릭스)
+                 * 부착은 Step 2B 에서 별도 이슈로 이어진다.
+                 */
+                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
 
                 /* 나머지 모든 요청: 인증 필요 */
                 .anyRequest().authenticated()
