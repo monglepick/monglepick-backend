@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.global.exception;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -234,6 +235,31 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity
                 .status(errorCode.getHttpStatus())
+                .body(response);
+    }
+
+    /**
+     * 존재하지 않는 정적 리소스/매핑 경로 요청 처리.
+     *
+     * <p>Spring Framework 6에서는 핸들러가 없는 경로가
+     * {@link NoResourceFoundException}으로 들어올 수 있다.
+     * 이 경우 500 catch-all로 떨어뜨리지 않고 404로 응답한다.</p>
+     *
+     * @param ex NoResourceFoundException
+     * @return 404 응답
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    protected ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {
+        log.warn("요청 경로를 찾을 수 없음: {}", ex.getResourcePath());
+
+        ErrorResponse response = new ErrorResponse(
+                ErrorCode.INVALID_INPUT.getCode(),
+                "요청한 경로를 찾을 수 없습니다.",
+                Map.of("path", ex.getResourcePath())
+        );
+
+        return ResponseEntity
+                .status(org.springframework.http.HttpStatus.NOT_FOUND)
                 .body(response);
     }
 

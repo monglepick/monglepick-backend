@@ -36,6 +36,71 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserVerificationController {
 
     private final UserVerificationService userVerificationService;
+    private final OcrAnalysisClient ocrAnalysisClient;
+
+    /**
+     * OCR 미리보기 분석 — 이미지에서 영화명/관람일/인원 추출 결과를 반환한다.
+     *
+     * <p>프론트엔드 OcrVerificationModal 이 이미지 업로드 직후 호출하여
+     * 유저에게 자동 추출 결과를 미리 보여주기 위한 읽기 전용 엔드포인트.
+     * DB 에 저장하지 않으며 인증 제출과 무관하게 항상 200 을 반환한다.</p>
+     */
+    @Operation(
+            summary = "OCR 영수증 미리보기 분석",
+            description = "이미지 URL 을 전달하면 Python OCR 서버가 영화명/관람일/인원을 추출해 반환한다. DB 저장 없음."
+    )
+    @PostMapping("/analyze")
+    public ResponseEntity<ApiResponse<UserVerificationDto.AnalyzeResponse>> analyze(
+            @Valid @RequestBody UserVerificationDto.AnalyzeRequest request
+    ) {
+        OcrAnalysisClient.OcrResponse ocr = ocrAnalysisClient.analyze(
+                request.imageUrl(),
+                request.eventId() != null ? request.eventId() : ""
+        );
+
+        UserVerificationDto.AnalyzeResponse response;
+        if (ocr != null && ocr.success()) {
+            response = new UserVerificationDto.AnalyzeResponse(
+                    true,
+                    ocr.status(),
+                    UserVerificationDto.OcrField.of(ocr.movieName()),
+                    UserVerificationDto.OcrField.of(ocr.watchDate()),
+                    UserVerificationDto.OcrField.of(ocr.headcount()),
+                    UserVerificationDto.OcrField.of(ocr.seat()),
+                    UserVerificationDto.OcrField.of(ocr.screeningTime()),
+                    UserVerificationDto.OcrField.of(ocr.theater()),
+                    UserVerificationDto.OcrField.of(ocr.venue()),
+                    UserVerificationDto.OcrField.of(ocr.watchedAt()),
+                    ocr.confidence(),
+                    ocr.parsedText(),
+                    null
+            );
+        } else {
+            String errorMsg = (ocr != null) ? ocr.errorMessage() : "OCR 서버에 연결할 수 없습니다.";
+            response = new UserVerificationDto.AnalyzeResponse(
+                    false, "FAILED",
+                    UserVerificationDto.OcrField.failed(),
+                    UserVerificationDto.OcrField.failed(),
+                    UserVerificationDto.OcrField.failed(),
+                    UserVerificationDto.OcrField.failed(),
+                    UserVerificationDto.OcrField.failed(),
+                    UserVerificationDto.OcrField.failed(),
+                    UserVerificationDto.OcrField.failed(),
+                    UserVerificationDto.OcrField.failed(),
+                    null, null, errorMsg
+            );
+        }
+
+        log.info("[OCR 미리보기] imageUrl={} status={} movie={} date={} headcount={} seat={} time={} theater={} venue={} watchedAt={} confidence={}",
+                request.imageUrl(), response.status(),
+                response.movieName().value(), response.watchDate().value(),
+                response.headcount().value(), response.seat().value(),
+                response.screeningTime().value(), response.theater().value(),
+                response.venue().value(), response.watchedAt().value(),
+                response.ocrConfidence());
+
+        return ResponseEntity.ok(ApiResponse.ok(response));
+    }
 
     /**
      * 영수증 이미지 URL 기반 OCR 인증 제출.

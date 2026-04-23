@@ -592,13 +592,18 @@ public class AdminContentService {
      */
     @Transactional
     public void deleteReview(Long reviewId) {
-        Review review = reviewMapper.findById(reviewId);
-        if (review == null) {
+        // 관리자 삭제는 존재 여부만 확인하면 되므로 엔티티 전체 매핑을 피한다.
+        // 일부 환경에서 Review resultMap 불일치가 있더라도 soft-delete 자체는 수행 가능해야 한다.
+        if (!reviewMapper.existsById(reviewId)) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
                     "리뷰 ID " + reviewId + "를 찾을 수 없습니다");
         }
 
-        // MyBatis softDelete 쿼리 직접 호출
+        Boolean deleted = reviewMapper.isDeletedById(reviewId);
+        if (Boolean.TRUE.equals(deleted)) {
+            throw new BusinessException(ErrorCode.REVIEW_ALREADY_DELETED);
+        }
+
         reviewMapper.softDelete(reviewId);
 
         log.info("[관리자] 리뷰 소프트 삭제 — reviewId={}", reviewId);

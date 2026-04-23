@@ -68,10 +68,54 @@ public class UserVerification extends BaseAuditEntity {
     @Column(name = "parsed_text", columnDefinition = "TEXT")
     private String parsedText;
 
+    /** OCR로 추출된 관람 인원 수 */
+    @Column(name = "extracted_headcount")
+    private Integer extractedHeadcount;
+
+    /** OCR로 추출된 좌석 정보 (예: A열 5번, A10) */
+    @Column(name = "extracted_seat", length = 100)
+    private String extractedSeat;
+
+    /** OCR로 추출된 상영관 번호 (예: 3관) */
+    @Column(name = "extracted_theater", length = 50)
+    private String extractedTheater;
+
+    /** OCR로 추출된 영화관 지점명 (예: CGV 홍대) */
+    @Column(name = "extracted_venue", length = 100)
+    private String extractedVenue;
+
+    /** OCR로 추출된 상영 시각 (HH:MM) */
+    @Column(name = "extracted_screening_time", length = 20)
+    private String extractedScreeningTime;
+
+    /** OCR 날짜+시각 조합 (YYYY-MM-DD HH:MM) */
+    @Column(name = "extracted_watched_at", length = 30)
+    private String extractedWatchedAt;
+
+    /** OCR 추출 신뢰도 (0.0 ~ 1.0) */
+    @Column(name = "ocr_confidence")
+    private Double ocrConfidence;
+
+    /** 관리자 검토 상태 — PENDING(미검토) / APPROVED(승인) / REJECTED(반려) */
+    @Column(name = "status", length = 20, nullable = false)
+    private String status = "PENDING";
+
+    /** 승인/반려한 관리자 ID */
+    @Column(name = "reviewed_by", length = 50)
+    private String reviewedBy;
+
+    /** 승인/반려 처리 시각 */
+    @Column(name = "reviewed_at")
+    private java.time.LocalDateTime reviewedAt;
+
     @Builder
     public UserVerification(String userId, String movieId, String eventId,
                             String imageId, String extractedMovieName,
-                            String extractedWatchDate, String parsedText) {
+                            String extractedWatchDate, String parsedText,
+                            Integer extractedHeadcount, Double ocrConfidence,
+                            String extractedSeat, String extractedTheater,
+                            String extractedVenue, String extractedScreeningTime,
+                            String extractedWatchedAt) {
         this.userId = userId;
         this.movieId = movieId;
         this.eventId = eventId;
@@ -79,5 +123,41 @@ public class UserVerification extends BaseAuditEntity {
         this.extractedMovieName = extractedMovieName;
         this.extractedWatchDate = extractedWatchDate;
         this.parsedText = parsedText;
+        this.extractedHeadcount = extractedHeadcount;
+        this.ocrConfidence = ocrConfidence;
+        this.extractedSeat = extractedSeat;
+        this.extractedTheater = extractedTheater;
+        this.extractedVenue = extractedVenue;
+        this.extractedScreeningTime = extractedScreeningTime;
+        this.extractedWatchedAt = extractedWatchedAt;
+        this.status = "PENDING";
+    }
+
+    public void applyOcrResult(String movieName, String watchDate,
+                               Integer headcount, String parsedText, Double confidence,
+                               String seat, String theater, String venue,
+                               String screeningTime, String watchedAt) {
+        this.extractedMovieName = movieName;
+        this.extractedWatchDate = watchDate;
+        this.extractedHeadcount = headcount;
+        this.parsedText = parsedText;
+        this.ocrConfidence = confidence;
+        this.extractedSeat = seat;
+        this.extractedTheater = theater;
+        this.extractedVenue = venue;
+        this.extractedScreeningTime = screeningTime;
+        this.extractedWatchedAt = watchedAt;
+    }
+
+    public void approve(String adminId) {
+        this.status = "APPROVED";
+        this.reviewedBy = adminId;
+        this.reviewedAt = java.time.LocalDateTime.now();
+    }
+
+    public void reject(String adminId) {
+        this.status = "REJECTED";
+        this.reviewedBy = adminId;
+        this.reviewedAt = java.time.LocalDateTime.now();
     }
 }

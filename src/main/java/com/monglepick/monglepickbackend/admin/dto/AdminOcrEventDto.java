@@ -85,8 +85,6 @@ public class AdminOcrEventDto {
 
     /**
      * OCR 이벤트 단일 항목 응답.
-     *
-     * <p>2026-04-14: title/memo 필드 추가. 관리자 목록/단건 조회 응답에도 포함된다.</p>
      */
     public record OcrEventResponse(
             Long eventId,
@@ -99,5 +97,38 @@ public class AdminOcrEventDto {
             String status,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
+    ) {}
+
+    /**
+     * 유저 실관람 인증 단일 항목 응답 (관리자 검토용).
+     *
+     * <p>OCR 분석 결과 전 필드 + 영수증 원문 이미지 URL + 관리자 처리 상태를 반환한다.</p>
+     */
+    public record VerificationResponse(
+            Long verificationId,
+            String userId,
+            String movieId,
+            String eventId,
+            String imageUrl,
+            String extractedMovieName,
+            String extractedWatchDate,
+            Integer extractedHeadcount,
+            String extractedSeat,
+            String extractedTheater,
+            String extractedVenue,
+            String extractedScreeningTime,
+            String extractedWatchedAt,
+            Double ocrConfidence,
+            String parsedText,
+            String status,           // PENDING / APPROVED / REJECTED
+            String reviewedBy,
+            LocalDateTime reviewedAt,
+            LocalDateTime createdAt
+    ) {}
+
+    /** 관리자 승인/반려 요청 */
+    public record ReviewRequest(
+            @NotBlank(message = "action은 APPROVE 또는 REJECT 여야 합니다.")
+            String action   // "APPROVE" | "REJECT"
     ) {}
 }

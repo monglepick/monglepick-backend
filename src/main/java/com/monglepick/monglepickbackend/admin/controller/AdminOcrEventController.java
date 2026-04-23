@@ -2,9 +2,12 @@ package com.monglepick.monglepickbackend.admin.controller;
 
 import com.monglepick.monglepickbackend.admin.dto.AdminOcrEventDto.CreateOcrEventRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminOcrEventDto.OcrEventResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminOcrEventDto.ReviewRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminOcrEventDto.UpdateOcrEventRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminOcrEventDto.UpdateStatusRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminOcrEventDto.VerificationResponse;
 import com.monglepick.monglepickbackend.admin.service.AdminOcrEventService;
+import com.monglepick.monglepickbackend.admin.service.AdminVerificationService;
 import com.monglepick.monglepickbackend.global.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -15,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -55,6 +59,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminOcrEventController {
 
     private final AdminOcrEventService adminOcrEventService;
+    private final AdminVerificationService adminVerificationService;
 
     /** 이벤트 목록 조회 */
     @Operation(
@@ -130,5 +135,57 @@ public class AdminOcrEventController {
         log.warn("[관리자] OCR 이벤트 삭제 요청 — eventId={}", eventId);
         adminOcrEventService.deleteEvent(eventId);
         return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+    }
+
+    // ──────────────────────────────────────────────
+    // 유저 인증(UserVerification) 검토
+    // ──────────────────────────────────────────────
+
+    /** 이벤트별 인증 목록 조회 */
+    @Operation(
+            summary = "인증 목록 조회",
+            description = "이벤트에 제출된 유저 인증 목록. status=PENDING/APPROVED/REJECTED 필터 가능."
+    )
+    @GetMapping("/{eventId}/verifications")
+    public ResponseEntity<ApiResponse<Page<VerificationResponse>>> getVerifications(
+            @PathVariable Long eventId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<VerificationResponse> result = adminVerificationService.getVerifications(eventId, status, pageable);
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    /** 인증 단건 조회 */
+    @Operation(summary = "인증 단건 조회", description = "verificationId로 인증 상세 + OCR 분석 결과 조회")
+    @GetMapping("/verifications/{verificationId}")
+    public ResponseEntity<ApiResponse<VerificationResponse>> getVerification(
+            @PathVariable Long verificationId
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(adminVerificationService.getVerification(verificationId)));
+    }
+
+    /** 인증 승인/반려 */
+    @Operation(
+            summary = "인증 승인/반려",
+            description = "action = APPROVE(승인) 또는 REJECT(반려). OCR 결과가 맞으면 APPROVE."
+    )
+    @PatchMapping("/verifications/{verificationId}/review")
+    public ResponseEntity<ApiResponse<VerificationResponse>> review(
+            @PathVariable Long verificationId,
+            @Valid @RequestBody ReviewRequest request
+    ) {
+        VerificationResponse result = switch (request.action().toUpperCase()) {
+            case "APPROVE" -> adminVerificationService.approve(verificationId);
+            case "REJECT"  -> adminVerificationService.reject(verificationId);
+            default -> throw new com.monglepick.monglepickbackend.global.exception.BusinessException(
+                    com.monglepick.monglepickbackend.global.exception.ErrorCode.INVALID_INPUT,
+                    "action은 APPROVE 또는 REJECT 여야 합니다."
+            );
+        };
+        log.info("[관리자] 인증 검토 완료 — verificationId={}, action={}", verificationId, request.action());
+        return ResponseEntity.ok(ApiResponse.ok(result));
     }
 }

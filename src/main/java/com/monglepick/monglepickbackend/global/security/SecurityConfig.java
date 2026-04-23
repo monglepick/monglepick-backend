@@ -372,6 +372,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET,  "/api/v1/chat/suggestions").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/chat/suggestions/*/click").permitAll()
 
+                /* OCR 이미지 분석 — 비로그인 허용 (영수증 텍스트 추출, Python OCR 위임) */
+                .requestMatchers(HttpMethod.POST, "/api/v1/ocr-events/analyze").permitAll()
+
                 /* 나머지 모든 요청: 인증 필요 */
                 .anyRequest().authenticated()
             )
