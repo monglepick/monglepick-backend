@@ -207,24 +207,27 @@ public class PaymentController extends BaseController {
     // ──────────────────────────────────────────────
 
     /**
-     * Toss Payments 웹훅을 수신한다.
+     * Toss Payments 웹훅을 수신한다 (2026-04-24 재설계).
      *
-     * @param rawBody   Toss 웹훅 페이로드 원문
-     * @param signature TossPayments-Signature 헤더
-     * @return 200 OK
+     * <p>Toss Payments 공식 문서에 따르면 {@code PAYMENT_STATUS_CHANGED} 이벤트에는 HMAC 서명
+     * 헤더나 별도 시크릿이 제공되지 않는다. 위변조 방어는 body 의 status 를 신뢰하는 대신 body 에서
+     * {@code orderId} 만 추출해 Toss {@code getPayment} 로 재조회하는 방식으로 구현된다.
+     * 상세 설계는 {@link com.monglepick.monglepickbackend.domain.payment.service.PaymentService#processWebhook} Javadoc 참조.</p>
+     *
+     * <p>내부 처리 실패 여부와 무관하게 항상 200 을 반환해 Toss 재시도 폭주를 방지한다.
+     * 복구가 필요한 주문은 관리자 페이지의 "PG 재조회" 버튼으로 수동 처리할 수 있다.</p>
+     *
+     * @param rawBody Toss 웹훅 페이로드 원문
+     * @return 200 OK (항상)
      */
-    @Operation(summary = "Toss 웹훅", description = "Toss Payments 결제 상태 변경 웹훅 수신 + 서명 검증")
+    @Operation(summary = "Toss 웹훅", description = "Toss Payments 결제 상태 변경 웹훅 수신 — orderId 로 getPayment 재조회하여 DB 동기화")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "웹훅 수신 성공"),
-            @ApiResponse(responseCode = "403", description = "서명 검증 실패")
+            @ApiResponse(responseCode = "200", description = "웹훅 수신 성공 (처리 결과와 무관)")
     })
     @SecurityRequirement(name = "")
     @PostMapping("/webhook")
-    public ResponseEntity<Void> handleWebhook(
-            @RequestBody String rawBody,
-            @RequestHeader(value = "TossPayments-Signature", required = false) String signature) {
-        // 웹훅 서명 검증 (운영 환경에서 위변조 방지)
-        paymentService.verifyAndProcessWebhook(rawBody, signature);
+    public ResponseEntity<Void> handleWebhook(@RequestBody String rawBody) {
+        paymentService.processWebhook(rawBody);
         return ResponseEntity.ok().build();
     }
 

@@ -141,6 +141,35 @@ public final class AdminPaymentDto {
             String message
     ) {}
 
+    /**
+     * 관리자 PG 재조회 동기화 응답 DTO (2026-04-24 추가).
+     *
+     * <p>Toss 콘솔에서 직접 취소하거나 웹훅이 유실되어 PG 만 취소되고 우리 DB 는
+     * COMPLETED 로 남은 주문을, 관리자가 "PG 재조회" 버튼으로 Toss 의 현재 상태를 조회해
+     * DB 에 맞춰 동기화한 결과를 표현한다. Toss 재호출(cancelPayment) 은 수행하지 않고
+     * 조회(getPayment) 만 하며, 불일치 시 포인트 회수 + DB REFUNDED 마킹을 수행한다.</p>
+     *
+     * @param result          동기화 결과 구분자
+     *                        <ul>
+     *                          <li>{@code SYNCED}     — Toss 가 CANCELED/PARTIAL_CANCELED 이고 DB 가 COMPLETED 였음 →
+     *                                                    포인트 회수 후 DB REFUNDED 로 갱신 완료</li>
+     *                          <li>{@code NO_CHANGE}  — DB/PG 상태가 이미 일치함 (변경 없음)</li>
+     *                          <li>{@code MISMATCH}   — 일치하지 않으나 자동 동기화 규칙에 해당하지 않음
+     *                                                    (예: PG DONE, DB REFUNDED — 수동 검토 필요)</li>
+     *                        </ul>
+     * @param dbStatus        DB 주문 현재 상태 (동기화 후 최종 상태)
+     * @param pgStatus        Toss 결제 현재 상태 (조회 결과 그대로)
+     * @param pointsRecovered 회수된 포인트 금액 (SYNCED 이고 POINT_PACK 인 경우에만 양수, 그 외 0)
+     * @param message         관리자 UI 노출용 처리 요약 메시지
+     */
+    public record AdminPgSyncResponse(
+            String result,
+            String dbStatus,
+            String pgStatus,
+            Integer pointsRecovered,
+            String message
+    ) {}
+
     // ======================== 구독 ========================
 
     /**

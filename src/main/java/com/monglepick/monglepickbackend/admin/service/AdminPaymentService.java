@@ -7,6 +7,7 @@ import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminExtendSub
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminExtendSubscriptionResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminManualPointRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminManualPointResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminPgSyncResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminRefundRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminRefundResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PaymentOrderDetail;
@@ -258,6 +259,75 @@ public class AdminPaymentService {
                 response.orderId(),
                 response.refundAmount(),
                 response.message()
+        );
+    }
+
+    /**
+     * 결제 주문의 PG(Toss) 현재 상태를 조회하여 DB 와 동기화한다 (2026-04-24 추가).
+     *
+     * <p><b>사용 시점</b>: Toss 콘솔에서 직접 취소하거나 웹훅이 유실되어 PG 는 취소됐으나
+     * DB 는 COMPLETED 로 남은 주문. 일반 {@link #refundOrder} 는 cancelPayment 를 재호출해
+     * ALREADY_CANCELED 에러 → 500 → 트랜잭션 롤백 → 포인트 회수 실패 를 유발하므로 이 메서드를 대신 사용한다.</p>
+     *
+     * <p>실제 동기화 로직은 {@link PaymentService#syncFromPg(String)} 이 수행한다.
+     * 본 메서드는 결과에 따라 감사 로그를 기록하고 관리자용 응답 DTO 를 조립할 뿐이다.</p>
+     *
+     * <p><b>감사 로그</b>: SYNCED/NO_CHANGE/MISMATCH 모두 기록한다. MISMATCH 케이스는 관리자의
+     * 수동 검토가 필요한 의심스러운 상태이므로 오히려 추적이 더 중요하다.</p>
+     *
+     * @param orderId 동기화 대상 주문 UUID
+     * @return 관리자 UI 용 PG 동기화 결과 응답
+     */
+    public AdminPgSyncResponse syncFromPg(String orderId) {
+        log.info("[AdminPayment] PG 재조회 요청 — orderId={}", orderId);
+
+        // 도메인 레이어에 위임 — FOR UPDATE 잠금 + Toss 조회 + 상태 분기 + 포인트 회수
+        PaymentService.PgSyncResult result = paymentService.syncFromPg(orderId);
+
+        // 감사 로그 기록 — 모든 결과 타입을 남겨 운영 추적성 확보
+        String afterSnapshot = String.format(
+                "{\"result\":\"%s\",\"dbStatus\":\"%s\",\"pgStatus\":\"%s\",\"pointsRecovered\":%d,\"orderType\":\"%s\"}",
+                result.result(),
+                result.dbStatus(),
+                result.pgStatus(),
+                result.pointsRecovered(),
+                result.orderType()
+        );
+        adminAuditService.log(
+                AdminAuditService.ACTION_PAYMENT_PG_SYNC,
+                AdminAuditService.TARGET_PAYMENT,
+                orderId,
+                String.format("주문 %s PG 재조회 — result=%s, pgStatus=%s, dbStatus=%s, pointsRecovered=%d, ownerUserId=%s",
+                        orderId,
+                        result.result(),
+                        result.pgStatus(),
+                        result.dbStatus(),
+                        result.pointsRecovered(),
+                        result.userId()),
+                null,
+                afterSnapshot
+        );
+
+        // 관리자 UI 노출 메시지 — 결과 타입별 안내문 구성
+        String message = switch (result.result()) {
+            case "SYNCED" -> (result.pointsRecovered() > 0)
+                    ? String.format("PG 상태(%s)로 동기화 완료. 포인트 %dP 회수됨.",
+                            result.pgStatus(), result.pointsRecovered())
+                    : String.format("PG 상태(%s)로 동기화 완료. (회수 대상 포인트 없음)",
+                            result.pgStatus());
+            case "NO_CHANGE" -> String.format("DB(%s) 와 PG(%s) 상태가 일치합니다. 변경 사항 없음.",
+                    result.dbStatus(), result.pgStatus());
+            case "MISMATCH" -> String.format("상태 불일치 — DB=%s, PG=%s. 자동 동기화 규칙에 해당하지 않으므로 수동 검토가 필요합니다.",
+                    result.dbStatus(), result.pgStatus());
+            default -> "처리 결과: " + result.result();
+        };
+
+        return new AdminPgSyncResponse(
+                result.result(),
+                result.dbStatus(),
+                result.pgStatus(),
+                result.pointsRecovered(),
+                message
         );
     }
 

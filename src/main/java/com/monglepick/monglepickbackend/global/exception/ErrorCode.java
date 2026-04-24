@@ -172,8 +172,10 @@ public enum ErrorCode {
     /** 동일 멱등키로 다른 요청 파라미터를 전송한 경우. */
     IDEMPOTENCY_KEY_REUSE(HttpStatus.UNPROCESSABLE_ENTITY, "PAY004", "동일한 멱등키로 다른 요청을 보낼 수 없습니다"),
 
-    /** Toss 웹훅 서명 검증 실패. */
-    INVALID_WEBHOOK_SIGNATURE(HttpStatus.FORBIDDEN, "PAY005", "웹훅 서명이 유효하지 않습니다"),
+    /* PAY005 INVALID_WEBHOOK_SIGNATURE 는 2026-04-24 제거됨 —
+     * Toss Payments 는 PAYMENT_STATUS_CHANGED 웹훅에 서명 헤더를 제공하지 않으며,
+     * 위변조 방어는 orderId 기반 getPayment() 재조회로 대체되었다.
+     * (payout.changed / seller.changed 에만 tosspayments-webhook-signature 가 존재하나 본 서비스 미구독) */
 
     // ─────────────────────────────────────────────
     // 구독 (SUB0xx)

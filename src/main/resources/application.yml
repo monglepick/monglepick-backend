@@ -390,17 +390,19 @@ ocr:
 ## - secret-key: 서버 전용 시크릿 키 (외부 노출 금지, Basic Auth에 사용)
 ## - client-key: 클라이언트 전용 키 (Toss JS SDK 결제창 호출에 사용, 노출 가능)
 ## - base-url: Toss Payments REST API 베이스 URL
-## - webhook-secret: 웹훅 서명 검증용 HMAC-SHA256 시크릿 (운영 환경 필수)
-##                   미설정 시 검증이 비활성화되어 위변조된 웹훅을 차단할 수 없으므로,
-##                   운영 환경에서는 반드시 환경변수로 설정해야 한다.
-## 운영 환경에서는 환경변수로 오버라이드: TOSS_SECRET_KEY, TOSS_CLIENT_KEY, TOSS_BASE_URL, TOSS_WEBHOOK_SECRET
+##
+## 웹훅 시크릿 관련 (2026-04-24 제거):
+##   Toss Payments 공식 문서에 따르면 PAYMENT_STATUS_CHANGED 이벤트에는 HMAC 서명 헤더나
+##   별도 웹훅 시크릿이 존재하지 않는다. 위변조 방어는 webhook 핸들러가 body 대신 orderId 로
+##   getPayment()를 재조회하는 방식으로 구현되므로 webhook-secret 설정은 불필요하다.
+##   (tosspayments-webhook-signature 헤더는 payout.changed / seller.changed 에만 해당 — 본 서비스 미구독)
+##
+## 운영 환경에서는 환경변수로 오버라이드: TOSS_SECRET_KEY, TOSS_CLIENT_KEY, TOSS_BASE_URL
 toss:
   payments:
     ## ⚠ 운영 환경에서는 반드시 TOSS_SECRET_KEY, TOSS_CLIENT_KEY 환경변수를 설정해야 합니다
     secret-key: ${TOSS_SECRET_KEY:REPLACE_WITH_TOSS_SECRET_KEY}
     client-key: ${TOSS_CLIENT_KEY:REPLACE_WITH_TOSS_CLIENT_KEY}
     base-url: ${TOSS_BASE_URL:https://api.tosspayments.com/v1}
-    ## ⚠ 운영 환경 필수 — 빈 문자열이면 웹훅 서명 검증이 비활성화된다 (Phase 9)
-    webhook-secret: ${TOSS_WEBHOOK_SECRET:}
 
 

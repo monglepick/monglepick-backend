@@ -77,6 +77,16 @@ public class AdminAuditService {
     public static final String ACTION_PAYMENT_REFUND       = "PAYMENT_REFUND";
     /** 결제 주문 보상 복구 (COMPENSATION_FAILED → COMPLETED) */
     public static final String ACTION_PAYMENT_COMPENSATE   = "PAYMENT_COMPENSATE";
+    /**
+     * 결제 주문 PG 재조회 동기화 (2026-04-24 추가).
+     *
+     * <p>Toss 콘솔에서 직접 취소하거나 웹훅이 유실되어 PG 만 취소되고 우리 DB 는
+     * COMPLETED 로 남은 주문을 관리자가 "PG 재조회" 버튼으로 동기화한 이벤트를 기록한다.
+     * description 에는 {@code {"tossStatus":"...","prevStatus":"...","newStatus":"...","pointsRecovered":N}}
+     * JSON 을 담는다. Toss 재호출 없이 DB 상태만 PG 에 맞추므로 일반 {@link #ACTION_PAYMENT_REFUND}
+     * 와 구분 기록한다.</p>
+     */
+    public static final String ACTION_PAYMENT_PG_SYNC      = "PAYMENT_PG_SYNC";
     /** 구독 관리자 강제 취소 */
     public static final String ACTION_SUBSCRIPTION_CANCEL  = "SUBSCRIPTION_CANCEL";
     /** 구독 관리자 연장 */

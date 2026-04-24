@@ -7,6 +7,7 @@ import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminExtendSub
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminExtendSubscriptionResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminManualPointRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminManualPointResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminPgSyncResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminRefundRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.AdminRefundResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PaymentOrderDetail;
@@ -162,6 +163,35 @@ public class AdminPaymentController {
     ) {
         log.info("[AdminPayment] 환불 처리 요청 — orderId={}", orderId);
         AdminRefundResponse result = adminPaymentService.refundOrder(orderId, request);
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    /**
+     * 결제 주문의 PG(Toss) 상태를 재조회하여 DB 와 동기화한다 (2026-04-24 추가).
+     *
+     * <p><b>사용 시점</b>: Toss 콘솔에서 직접 취소하거나 웹훅이 유실되어 PG 는 CANCELED 인데
+     * DB 가 COMPLETED 로 남은 주문. 일반 {@link #refundOrder} 는 cancelPayment 를 재호출해
+     * ALREADY_CANCELED 500 에러를 유발하므로 이 엔드포인트를 대신 사용한다.
+     * Toss {@code getPayment} (read-only) 만 호출하며 {@code cancelPayment} 는 절대 호출하지 않는다.</p>
+     *
+     * <p>동기화 결과는 {@code SYNCED}/{@code NO_CHANGE}/{@code MISMATCH} 세 가지이며
+     * 각각의 의미는 {@link AdminPgSyncResponse} 의 javadoc 참조.</p>
+     *
+     * @param orderId 동기화 대상 주문 UUID
+     * @return 동기화 결과 응답 (result / dbStatus / pgStatus / pointsRecovered / message)
+     */
+    @Operation(
+            summary = "결제 주문 PG 재조회 동기화",
+            description = "Toss 측 결제 상태를 조회하여 DB 와 다르면 동기화한다. Toss 재취소 호출은 하지 않는다 (ALREADY_CANCELED 에러 회피)."
+    )
+    /* 환불과 동일 Tier — 금전 이동 결과를 초래할 수 있으므로 ADMIN 권한 필요 */
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/payment/orders/{orderId}/sync-from-pg")
+    public ResponseEntity<ApiResponse<AdminPgSyncResponse>> syncOrderFromPg(
+            @Parameter(description = "PG 재조회할 주문 UUID") @PathVariable String orderId
+    ) {
+        log.info("[AdminPayment] PG 재조회 요청 — orderId={}", orderId);
+        AdminPgSyncResponse result = adminPaymentService.syncFromPg(orderId);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 

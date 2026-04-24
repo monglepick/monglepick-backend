@@ -543,109 +543,82 @@ public class PaymentService {
     }
 
     // ──────────────────────────────────────────────
-    // 웹훅 처리
+    // 웹훅 처리 (2026-04-24 재설계 — Part B)
     // ──────────────────────────────────────────────
 
-    /**
-     * Toss 웹훅 서명을 검증하고 이벤트를 처리한다.
-     *
-     * <p>서명 검증 실패 시 INVALID_WEBHOOK_SIGNATURE 에러를 던진다.
-     * 검증 통과 후 이벤트 로깅을 수행한다 (향후 결제 확인 자동화 확장).</p>
-     *
-     * @param rawBody   웹훅 요청 Body 원문
-     * @param signature TossPayments-Signature 헤더 값
-     * @throws BusinessException 서명 검증 실패 시 (INVALID_WEBHOOK_SIGNATURE)
-     */
+    /** 웹훅 JSON 파싱 전용 ObjectMapper (Jackson 3 tools.jackson). */
     private static final ObjectMapper WEBHOOK_MAPPER = new ObjectMapper();
 
-    @Transactional
-    public void verifyAndProcessWebhook(String rawBody, String signature) {
-        /* 1. 서명 검증 */
-        if (!tossClient.verifyWebhookSignature(rawBody, signature)) {
-            log.error("Toss 웹훅 서명 검증 실패");
-            throw new BusinessException(ErrorCode.INVALID_WEBHOOK_SIGNATURE);
-        }
-        log.info("Toss 웹훅 수신 (서명 검증 통과)");
+    /**
+     * Toss Payments 웹훅 이벤트를 처리한다 (Part B — 2026-04-24 재설계).
+     *
+     * <h3>설계 배경</h3>
+     * <p>이전 구현은 {@code TossPayments-Signature} 헤더와 HMAC-SHA256 시크릿으로 서명 검증을
+     * 시도했으나, Toss Payments 공식 문서에 따르면 {@code PAYMENT_STATUS_CHANGED} 이벤트에는
+     * <b>서명 헤더가 존재하지 않고 별도 웹훅 시크릿 키 자체가 발급되지 않는다</b>.
+     * ({@code tosspayments-webhook-signature} 는 {@code payout.changed}/{@code seller.changed}
+     * 에만 해당하며 본 서비스는 이 이벤트를 구독하지 않는다.)</p>
+     *
+     * <p>그 결과 기존 구현은 {@code TOSS_WEBHOOK_SECRET} 을 어떻게 설정하든 모든 결제 웹훅이
+     * 403 으로 거부되는 구조적 결함을 가지고 있었다. 본 재설계는 공식 문서가 권장하는 방식으로
+     * 전환한다 — <b>웹훅 body 는 신뢰하지 않고, {@code orderId} 만 추출해 Toss 에 재조회</b>.</p>
+     *
+     * <h3>동작</h3>
+     * <ol>
+     *   <li>이벤트 타입 추출 → {@code PAYMENT_STATUS_CHANGED} 가 아니면 무시</li>
+     *   <li>{@code data.orderId} 추출</li>
+     *   <li>{@link #syncFromPg(String)} 위임 — Toss {@code getPayment} 재조회 + DB 동기화</li>
+     * </ol>
+     *
+     * <p>이 설계로 얻는 것:</p>
+     * <ul>
+     *   <li><b>위변조 방어</b>: body 의 status 를 믿지 않고 Toss 에 직접 재조회</li>
+     *   <li><b>시크릿 불필요</b>: Toss 가 발급하지 않는 키를 더 이상 요구하지 않음</li>
+     *   <li><b>단일 진실 원본</b>: 관리자 "PG 재조회" 버튼과 웹훅 처리가 같은 로직을 공유</li>
+     *   <li><b>멱등성</b>: {@code syncFromPg} 는 이미 REFUNDED 인 건을 NO_CHANGE 로 건너뛰므로
+     *                     Toss 가 동일 웹훅을 재전송해도 안전</li>
+     * </ul>
+     *
+     * <h3>트랜잭션 전략</h3>
+     * <p>본 메서드에는 {@code @Transactional} 을 부여하지 않는다. {@code syncFromPg} 가 자체
+     * 트랜잭션을 갖기 때문이며, 외부에서 랩핑된 트랜잭션 안에서 또 다른 트랜잭션을 시작하지 않아야
+     * FOR UPDATE 잠금 경합을 최소화할 수 있다.</p>
+     *
+     * <h3>예외 처리</h3>
+     * <p>내부에서 발생하는 모든 예외는 로그로만 남기고 삼킨다. 웹훅 엔드포인트는 항상 200 을
+     * 반환해야 Toss 가 재시도 폭주를 유발하지 않는다. 처리 실패한 주문은 관리자 페이지 "PG 재조회"
+     * 버튼으로 수동 복구할 수 있다.</p>
+     *
+     * @param rawBody Toss 웹훅 요청 Body 원문 (JSON)
+     */
+    public void processWebhook(String rawBody) {
+        log.info("Toss 웹훅 수신");
 
-        /* 2. 이벤트 파싱 및 처리 */
         try {
             JsonNode root = WEBHOOK_MAPPER.readTree(rawBody);
             String eventType = root.path("eventType").asText("");
-            JsonNode data = root.path("data");
 
-            switch (eventType) {
-                case "PAYMENT_STATUS_CHANGED" -> {
-                    String orderId = data.path("orderId").asText(null);
-                    String status = data.path("status").asText("");
-
-                    if (orderId == null) {
-                        log.warn("웹훅 orderId 누락: eventType={}", eventType);
-                        return;
-                    }
-
-                    /* 취소/환불 처리 */
-                    if ("CANCELED".equals(status) || "PARTIAL_CANCELED".equals(status)) {
-                        orderRepository.findByPaymentOrderId(orderId).ifPresent(order -> {
-
-                            // ── 멱등성 방어: 이미 REFUNDED 상태이면 웹훅 재수신으로 판단하고 무시 ──
-                            // Toss 웹훅은 네트워크 오류 등으로 동일 이벤트를 2회 이상 전송할 수 있다.
-                            // 이미 REFUNDED 처리된 주문에 대해 포인트 회수를 중복 실행하면
-                            // 사용자 잔액이 부당하게 추가 차감되므로 반드시 상태를 먼저 확인한다.
-                            if (order.getStatus() == PaymentOrder.OrderStatus.REFUNDED) {
-                                log.info("웹훅 중복 수신 무시 (이미 REFUNDED): orderId={}", orderId);
-                                return;
-                            }
-
-                            // COMPLETED 상태에서만 환불 처리 진행
-                            if (order.getStatus() == PaymentOrder.OrderStatus.COMPLETED) {
-
-                                // ── 포인트 회수 (POINT_PACK인 경우) ──
-                                // 구독(SUBSCRIPTION)은 포인트가 서비스 이용 혜택이므로 회수하지 않는다.
-                                // 포인트팩은 현금으로 구매한 포인트이므로 환불 시 반드시 회수해야 한다.
-                                // 회수 실패 시에도 order.refund()는 계속 진행하여 PG 환불과 DB 상태를 맞춘다.
-                                // (포인트 회수 실패는 별도 운영 알람 대상 — 수동 조치 필요)
-                                if (order.getOrderType() == PaymentOrder.OrderType.POINT_PACK
-                                        && order.getPointsAmount() != null
-                                        && order.getPointsAmount() > 0) {
-                                    try {
-                                        // sessionId에 "_refund" 접미사를 붙여 일반 차감과 이력 구분
-                                        pointService.deductPoint(
-                                                order.getUserId(),
-                                                order.getPointsAmount(),
-                                                order.getPaymentOrderId() + "_refund",
-                                                "결제 환불 포인트 회수"
-                                        );
-                                        log.info("웹훅 환불 포인트 회수 완료: orderId={}, userId={}, amount={}P",
-                                                orderId, order.getUserId(), order.getPointsAmount());
-                                    } catch (Exception e) {
-                                        // ── 포인트 회수 실패 시 REFUNDED로 변경하지 않는다 ──
-                                        // PG는 환불됐으나 포인트가 미회수된 상태로 REFUNDED를 기록하면
-                                        // 사용자가 포인트를 공짜로 획득하는 문제가 발생한다.
-                                        // failedReason에 사유를 기록하고 관리자 수동 조치를 유도한다.
-                                        log.error("[CRITICAL] 웹훅 환불 포인트 회수 실패 — REFUNDED 전환 차단. " +
-                                                        "관리자 수동 조치 필요: orderId={}, userId={}, amount={}P, error={}",
-                                                orderId, order.getUserId(), order.getPointsAmount(),
-                                                e.getMessage(), e);
-                                        // 주문 상태는 COMPLETED 유지, failedReason에 포인트 회수 실패 사유 기록
-                                        order.setRefundPointFailed(
-                                                "웹훅 환불 포인트 회수 실패: " + e.getMessage());
-                                        return; // REFUNDED로 전환하지 않고 종료
-                                    }
-                                }
-
-                                // ── 주문 상태 REFUNDED로 변경 (포인트 회수 성공 후에만 도달) ──
-                                order.refund();
-                                log.info("웹훅 환불 처리 완료: orderId={}, orderType={}",
-                                        orderId, order.getOrderType());
-                            }
-                        });
-                    }
-                }
-                default -> log.debug("미처리 웹훅 이벤트: eventType={}", eventType);
+            if (!"PAYMENT_STATUS_CHANGED".equals(eventType)) {
+                log.debug("미처리 웹훅 이벤트: eventType={}", eventType);
+                return;
             }
+
+            String orderId = root.path("data").path("orderId").asText(null);
+            if (orderId == null || orderId.isBlank()) {
+                log.warn("웹훅 orderId 누락: eventType={}", eventType);
+                return;
+            }
+
+            /* Toss 재조회 기반 DB 동기화 — 관리자 "PG 재조회" 와 동일 로직 재사용.
+             * NOT_FOUND(다른 가맹점 주문 등) / Toss 장애 등은 내부에서 BusinessException 으로 전파되지만
+             * 아래 catch 에서 삼켜서 200 반환 → Toss 재시도 폭주 방지. */
+            PgSyncResult result = syncFromPg(orderId);
+            log.info("웹훅 처리 완료: orderId={}, result={}, dbStatus={}, pgStatus={}, pointsRecovered={}",
+                    orderId, result.result(), result.dbStatus(), result.pgStatus(), result.pointsRecovered());
         } catch (Exception e) {
-            /* 웹훅 파싱 실패 시에도 200 반환해야 Toss 재시도를 방지함 — 로그만 기록 */
-            log.error("웹훅 이벤트 처리 실패 (파싱 오류): error={}", e.getMessage(), e);
+            /* 웹훅 처리 실패는 로그로만 남기고 200 반환 — Toss 재시도 폭주 방지.
+             * 복구가 필요한 주문은 관리자 페이지 "PG 재조회" 버튼으로 수동 처리 가능. */
+            log.error("웹훅 이벤트 처리 실패: error={}", e.getMessage(), e);
         }
     }
 
@@ -833,15 +806,52 @@ public class PaymentService {
         //
         // 멱등키: cancelPayment 내부에서 paymentKey + "_cancel_all" 형식으로 자동 생성되므로
         // 동일 환불 요청이 중복 도달해도 Toss 서버에서 1회만 처리된다.
-        tossClient.cancelPayment(
-                order.getPgTransactionId() != null ? order.getPgTransactionId() : orderId,
-                reason != null ? reason : "사용자 환불 요청"
-        );
-        log.info("Toss 결제 취소 API 호출 완료: orderId={}", orderId);
+        //
+        // ── PG 상태 선조회 (2026-04-24 추가) ──
+        //
+        // Toss 콘솔에서 직접 취소했거나 웹훅이 유실되어 Toss 측만 CANCELED 상태인
+        // 주문에 refund() 가 호출되면, cancelPayment() 가 ALREADY_CANCELED_PAYMENT 에러를
+        // 반환해 예외가 전파되고 트랜잭션 전체가 롤백되어 포인트 회수마저 되돌려진다.
+        // 그 결과 유저는 Toss 측에서 환불을 받고도 포인트는 그대로 보유하는 불일치 상태가 발생한다.
+        //
+        // 근본 해결: cancelPayment() 호출 전에 Toss 의 현재 상태를 조회하여
+        // 이미 CANCELED / PARTIAL_CANCELED 인 경우 PG 취소 호출을 건너뛰고 DB 동기화만 진행한다.
+        //
+        // 선조회 자체가 실패한 경우(Toss 일시장애 등)에는 스킵하지 않고 일반 플로우로
+        // 진행한다. 정상 케이스에서 cancelPayment() 는 성공할 것이고, 진짜 이미 취소된 건이라면
+        // 여전히 종래대로 500 이 나지만 "데이터 유실" 은 이미 이번 변경으로 차단되었으므로 보수적이다.
+        String paymentKey = order.getPgTransactionId() != null ? order.getPgTransactionId() : orderId;
+        boolean tossAlreadyCanceled = false;
+        try {
+            TossPaymentsClient.TossConfirmResponse pgStatus = tossClient.getPayment(paymentKey);
+            String pgStatusValue = pgStatus.status();
+            if ("CANCELED".equals(pgStatusValue) || "PARTIAL_CANCELED".equals(pgStatusValue)) {
+                tossAlreadyCanceled = true;
+                log.warn("Toss 측 이미 취소됨 — PG 취소 호출 생략, DB 동기화만 진행: " +
+                                "orderId={}, paymentKey={}, tossStatus={}",
+                        orderId, paymentKey, pgStatusValue);
+            }
+        } catch (Exception e) {
+            // 선조회 실패는 비치명적 — 일반 플로우로 진행 (Toss 일시장애 대응)
+            log.warn("Toss 상태 선조회 실패 — 일반 환불 플로우로 진행: orderId={}, error={}",
+                    orderId, e.getMessage());
+        }
+
+        if (!tossAlreadyCanceled) {
+            tossClient.cancelPayment(
+                    paymentKey,
+                    reason != null ? reason : "사용자 환불 요청"
+            );
+            log.info("Toss 결제 취소 API 호출 완료: orderId={}", orderId);
+        }
 
         // ── 7. 주문 상태 REFUNDED로 변경 ──
         // 전체 환불이므로 refundAmount = order.getAmount() (원래 결제 금액 전액)
         String refundReason = reason != null ? reason : "사용자 환불 요청";
+        if (tossAlreadyCanceled) {
+            // PG 선취소 케이스임을 환불 사유에 명시 (감사 추적 용이성)
+            refundReason = "[PG 선취소] " + refundReason;
+        }
         order.refund(refundReason, order.getAmount());
 
         log.info("환불 처리 완료: orderId={}, userId={}, refundAmount={}원, orderType={}",
@@ -854,6 +864,163 @@ public class PaymentService {
                 "환불이 완료되었습니다. 카드사 정책에 따라 영업일 기준 3~5일 내 취소됩니다."
         );
     }
+
+    // ──────────────────────────────────────────────
+    // PG 재조회 동기화 (2026-04-24 추가)
+    // ──────────────────────────────────────────────
+
+    /**
+     * Toss 측 현재 결제 상태를 조회하여 DB 상태가 PG 와 어긋난 경우 동기화한다.
+     *
+     * <p><b>배경</b>: Toss 콘솔에서 직접 취소하거나 웹훅이 유실되면
+     * Toss 측은 CANCELED 인데 우리 DB 는 COMPLETED 로 남는다. 웹훅 재전송을 보장할 수 없고
+     * 관리자가 일반 환불 버튼을 누르면 {@code cancelPayment()} 가 ALREADY_CANCELED 에러를
+     * 반환해 트랜잭션이 롤백되며 포인트 회수도 취소되어 불일치가 고착된다.
+     * 본 메서드는 {@link TossPaymentsClient#getPayment} 로 PG 현재 상태를 읽어오기만 하고
+     * PG 취소 API({@code cancelPayment})는 절대 호출하지 않는다. 즉 웹훅을 "재실행" 하는 효과만 낸다.</p>
+     *
+     * <h3>동작 규칙</h3>
+     * <ul>
+     *   <li>Toss {@code CANCELED}/{@code PARTIAL_CANCELED} + DB {@code COMPLETED}
+     *       → 포인트 회수({@code POINT_PACK}인 경우) + DB {@code REFUNDED} 마킹 → result={@code SYNCED}</li>
+     *   <li>Toss {@code CANCELED} + DB {@code REFUNDED} → 이미 일치 → result={@code NO_CHANGE}</li>
+     *   <li>Toss {@code DONE} + DB {@code COMPLETED} → 이미 일치 → result={@code NO_CHANGE}</li>
+     *   <li>그 외 조합(예: PG {@code DONE} + DB {@code REFUNDED}) → result={@code MISMATCH},
+     *       자동 동기화하지 않고 수동 검토 유도</li>
+     * </ul>
+     *
+     * <h3>트랜잭션 전략</h3>
+     * <p>{@code FOR UPDATE} 로 잠금을 걸어 관리자 환불 또는 웹훅 처리와의 경쟁 조건을 차단한다.
+     * 포인트 회수는 같은 트랜잭션에 합류하므로 전체가 원자적으로 커밋/롤백된다.
+     * Toss 호출은 외부 API 지만 readonly(getPayment) 이므로 장시간 보유해도 부작용이 없다.</p>
+     *
+     * <h3>멱등성</h3>
+     * <p>포인트 회수 sessionId 는 기존 환불 로직과 동일한 {@code orderId + "_refund"} 규약을 사용하므로,
+     * 이미 환불 흐름에서 한 번 회수된 주문은 {@code PointService.deductPoint} 중복 방지에 의해 2차 회수되지 않는다.
+     * 또한 DB 상태가 COMPLETED 가 아니면 포인트 회수 자체를 건너뛴다.</p>
+     *
+     * @param orderId 동기화 대상 주문 UUID
+     * @return 동기화 결과 ({@link PgSyncResult})
+     * @throws BusinessException 주문 미발견({@link ErrorCode#ORDER_NOT_FOUND}) 또는 Toss 조회 실패
+     */
+    @Transactional
+    public PgSyncResult syncFromPg(String orderId) {
+        log.info("PG 재조회 동기화 요청: orderId={}", orderId);
+
+        // ── 1. 주문 조회 (FOR UPDATE — 관리자 환불/웹훅 처리와의 경쟁 조건 차단) ──
+        PaymentOrder order = orderRepository.findByPaymentOrderIdForUpdate(orderId)
+                .orElseThrow(() -> {
+                    log.warn("PG 재조회 실패 — 주문 미발견: orderId={}", orderId);
+                    return new BusinessException(ErrorCode.ORDER_NOT_FOUND);
+                });
+
+        PaymentOrder.OrderStatus dbStatus = order.getStatus();
+
+        // ── 2. Toss 측 상태 조회 ──
+        // pgTransactionId 가 null 이면 아직 승인되지 않은 주문 — orderId 로 조회 시도 (Toss 가 지원)
+        String paymentKey = order.getPgTransactionId() != null ? order.getPgTransactionId() : orderId;
+        TossPaymentsClient.TossConfirmResponse pgStatus;
+        try {
+            pgStatus = tossClient.getPayment(paymentKey);
+        } catch (Exception e) {
+            log.error("PG 재조회 실패 — Toss 조회 오류: orderId={}, paymentKey={}, error={}",
+                    orderId, paymentKey, e.getMessage());
+            throw new BusinessException(
+                    ErrorCode.PAYMENT_FAILED,
+                    "Toss 결제 조회에 실패했습니다: " + e.getMessage()
+            );
+        }
+        String pgStatusValue = pgStatus.status();
+        boolean pgCanceled = "CANCELED".equals(pgStatusValue) || "PARTIAL_CANCELED".equals(pgStatusValue);
+
+        log.info("PG 재조회 결과: orderId={}, dbStatus={}, pgStatus={}", orderId, dbStatus, pgStatusValue);
+
+        // ── 3. 상태 분기 ──
+        // Case A: PG 는 CANCELED 인데 DB 는 COMPLETED — 동기화 수행
+        if (pgCanceled && dbStatus == PaymentOrder.OrderStatus.COMPLETED) {
+            int pointsRecovered = 0;
+
+            // POINT_PACK 은 포인트 회수 필요
+            if (order.getOrderType() == PaymentOrder.OrderType.POINT_PACK
+                    && order.getPointsAmount() != null
+                    && order.getPointsAmount() > 0) {
+                try {
+                    // sessionId: 기존 환불 규약(orderId + "_refund") 유지 — PointService 중복 방지 동작
+                    pointService.deductPoint(
+                            order.getUserId(),
+                            order.getPointsAmount(),
+                            orderId + "_refund",
+                            "PG 재조회 동기화 - 포인트 회수"
+                    );
+                    pointsRecovered = order.getPointsAmount();
+                    log.info("PG 재조회 포인트 회수 완료: orderId={}, userId={}, amount={}P",
+                            orderId, order.getUserId(), pointsRecovered);
+                } catch (Exception e) {
+                    // 환불 플로우와 동일하게 잔액 부족 등 전파 → 전체 롤백
+                    log.error("PG 재조회 포인트 회수 실패 (동기화 중단): orderId={}, userId={}, error={}",
+                            orderId, order.getUserId(), e.getMessage());
+                    throw new BusinessException(
+                            ErrorCode.INSUFFICIENT_POINT,
+                            "포인트 잔액이 부족하여 PG 상태 동기화를 처리할 수 없습니다. 수동 조치가 필요합니다."
+                    );
+                }
+            }
+
+            // DB 상태를 REFUNDED 로 마킹 (Toss 재호출 없음 — getPayment 는 이미 취소 확인만)
+            order.refund("[PG 재조회] Toss " + pgStatusValue + " 동기화", order.getAmount());
+            log.info("PG 재조회 DB 동기화 완료: orderId={}, newStatus=REFUNDED", orderId);
+
+            return new PgSyncResult(
+                    "SYNCED",
+                    "REFUNDED",
+                    pgStatusValue,
+                    pointsRecovered,
+                    order.getUserId(),
+                    order.getOrderType().name()
+            );
+        }
+
+        // Case B: PG 와 DB 가 이미 일치 — 변경 없음
+        if (pgCanceled && dbStatus == PaymentOrder.OrderStatus.REFUNDED) {
+            return new PgSyncResult(
+                    "NO_CHANGE", dbStatus.name(), pgStatusValue, 0,
+                    order.getUserId(), order.getOrderType().name()
+            );
+        }
+        if (!pgCanceled && dbStatus == PaymentOrder.OrderStatus.COMPLETED) {
+            return new PgSyncResult(
+                    "NO_CHANGE", dbStatus.name(), pgStatusValue, 0,
+                    order.getUserId(), order.getOrderType().name()
+            );
+        }
+
+        // Case C: 그 외 조합은 자동 규칙 외 — MISMATCH 로 보고하고 관리자 수동 검토 유도
+        log.warn("PG 재조회 MISMATCH: orderId={}, dbStatus={}, pgStatus={} — 자동 동기화 규칙 외",
+                orderId, dbStatus, pgStatusValue);
+        return new PgSyncResult(
+                "MISMATCH", dbStatus.name(), pgStatusValue, 0,
+                order.getUserId(), order.getOrderType().name()
+        );
+    }
+
+    /**
+     * PG 재조회 동기화 결과 DTO.
+     *
+     * @param result          동기화 결과 (SYNCED / NO_CHANGE / MISMATCH)
+     * @param dbStatus        DB 주문 현재 상태 (동기화 후 최종)
+     * @param pgStatus        Toss 결제 현재 상태
+     * @param pointsRecovered 회수된 포인트 금액 (SYNCED & POINT_PACK 인 경우에만 양수)
+     * @param userId          주문 소유자 ID (감사 로그용)
+     * @param orderType       주문 유형 (감사 로그 스냅샷용)
+     */
+    public record PgSyncResult(
+            String result,
+            String dbStatus,
+            String pgStatus,
+            int pointsRecovered,
+            String userId,
+            String orderType
+    ) {}
 
     // ──────────────────────────────────────────────
     // 운영 안정성 스케줄러 (설계서 §13.7)

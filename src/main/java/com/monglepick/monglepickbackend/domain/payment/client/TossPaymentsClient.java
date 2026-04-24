@@ -11,8 +11,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -35,8 +33,14 @@ import java.util.Map;
  * <ul>
  *   <li>{@code toss.payments.secret-key} — Toss Payments 시크릿 키 (서버용, 외부 노출 금지)</li>
  *   <li>{@code toss.payments.base-url} — Toss API 베이스 URL (기본: https://api.tosspayments.com/v1)</li>
- *   <li>{@code toss.payments.webhook-secret} — 웹훅 서명 검증 시크릿 (운영 환경 필수)</li>
  * </ul>
+ *
+ * <h3>웹훅 서명 검증 정책 (2026-04-24 재설계)</h3>
+ * <p>Toss Payments 공식 문서에 따르면 {@code PAYMENT_STATUS_CHANGED} 이벤트에는 서명 헤더가
+ * 존재하지 않고 별도 웹훅 시크릿도 발급되지 않는다. ({@code tosspayments-webhook-signature}
+ * 헤더는 {@code payout.changed}/{@code seller.changed} 에만 해당 — 본 서비스 미구독)
+ * 따라서 이 클라이언트에서는 HMAC 서명 검증 기능을 제공하지 않는다. 위변조 방어는 웹훅 핸들러가
+ * body 대신 {@code paymentKey} 로 {@link #getPayment}를 재조회하는 방식으로 구현된다.</p>
  *
  * <h3>에러 처리 (2026-04-08 Phase 9 개선)</h3>
  * <ul>
@@ -60,9 +64,6 @@ public class TossPaymentsClient {
     /** Toss Payments REST API 호출용 HTTP 클라이언트 (Basic 인증 헤더 포함) */
     private final RestClient restClient;
 
-    /** Toss 웹훅 서명 검증용 시크릿 키 (빈 문자열이면 서명 검증 비활성화) */
-    private final String webhookSecret;
-
     /** Toss 에러 응답 파싱용 Jackson ObjectMapper (싱글턴) */
     private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
 
@@ -72,16 +73,12 @@ public class TossPaymentsClient {
      * <p>시크릿 키를 Base64 인코딩하여 RestClient의 기본 Authorization 헤더에 설정한다.
      * Toss Payments 규격: {@code Base64(secretKey + ":")} → Basic 인증 헤더.</p>
      *
-     * @param secretKey     Toss Payments 시크릿 키 (application.yml의 toss.payments.secret-key)
-     * @param baseUrl       Toss Payments API 베이스 URL (application.yml의 toss.payments.base-url)
-     * @param webhookSecret Toss 웹훅 서명 검증 시크릿 (빈 문자열이면 검증 비활성화)
+     * @param secretKey Toss Payments 시크릿 키 (application.yml의 toss.payments.secret-key)
+     * @param baseUrl   Toss Payments API 베이스 URL (application.yml의 toss.payments.base-url)
      */
     public TossPaymentsClient(
             @Value("${toss.payments.secret-key}") String secretKey,
-            @Value("${toss.payments.base-url:https://api.tosspayments.com/v1}") String baseUrl,
-            @Value("${toss.payments.webhook-secret:}") String webhookSecret) {
-        this.webhookSecret = webhookSecret;
-
+            @Value("${toss.payments.base-url:https://api.tosspayments.com/v1}") String baseUrl) {
         // Toss Payments Basic 인증: secretKey + ":" 를 Base64 인코딩
         String encodedKey = Base64.getEncoder().encodeToString((secretKey + ":").getBytes(StandardCharsets.UTF_8));
 
@@ -109,8 +106,7 @@ public class TossPaymentsClient {
                 })
                 .build();
 
-        log.info("TossPaymentsClient 초기화 완료: baseUrl={}, webhookSignatureEnabled={}",
-                baseUrl, !webhookSecret.isBlank());
+        log.info("TossPaymentsClient 초기화 완료: baseUrl={}", baseUrl);
     }
 
     // ──────────────────────────────────────────────
@@ -319,47 +315,6 @@ public class TossPaymentsClient {
                     ErrorCode.PAYMENT_FAILED,
                     "결제 조회 중 네트워크 오류가 발생했습니다: " + e.getMessage()
             );
-        }
-    }
-
-    // ──────────────────────────────────────────────
-    // 웹훅 서명 검증
-    // ──────────────────────────────────────────────
-
-    /**
-     * Toss 웹훅 서명을 검증한다 (HMAC-SHA256).
-     *
-     * <p>webhookSecret이 설정되지 않으면 검증을 건너뛴다 (개발 환경).
-     * 운영 환경에서는 반드시 toss.payments.webhook-secret을 설정해야 한다.</p>
-     *
-     * @param rawBody   웹훅 요청 Body 원문
-     * @param signature TossPayments-Signature 헤더 값
-     * @return true면 검증 통과 또는 검증 비활성화
-     */
-    public boolean verifyWebhookSignature(String rawBody, String signature) {
-        // 웹훅 시크릿 미설정 → 운영환경에서는 보안 취약점이므로 거부, 개발환경에서만 경고 허용
-        if (webhookSecret == null || webhookSecret.isBlank()) {
-            // 운영환경 여부는 로그 레벨로 판단하지 않고 항상 거부한다.
-            // 개발/테스트에서 웹훅을 테스트하려면 반드시 TOSS_WEBHOOK_SECRET을 설정해야 한다.
-            log.error("[보안] 웹훅 서명 검증 실패 — TOSS_WEBHOOK_SECRET 미설정. " +
-                    "운영환경에서는 모든 웹훅이 거부됩니다. 환경변수를 설정하세요.");
-            return false;
-        }
-
-        if (signature == null || signature.isBlank()) {
-            log.warn("웹훅 서명 헤더(TossPayments-Signature) 누락");
-            return false;
-        }
-
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] hash = mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8));
-            String computed = Base64.getEncoder().encodeToString(hash);
-            return computed.equals(signature);
-        } catch (Exception e) {
-            log.error("웹훅 서명 검증 중 오류: {}", e.getMessage(), e);
-            return false;
         }
     }
 
