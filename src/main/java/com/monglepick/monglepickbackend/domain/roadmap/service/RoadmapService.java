@@ -12,11 +12,14 @@ import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.Course
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseStartResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.MovieInfo;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseReviewResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.FinalReviewResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseFinalMovie;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseVerification;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.RoadmapCourse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
+import com.monglepick.monglepickbackend.domain.roadmap.repository.CourseFinalMovieRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.CourseReviewRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.CourseVerificationRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.RoadmapCourseRepository;
@@ -89,6 +92,9 @@ public class RoadmapService {
     /** AI 리뷰 검증 에이전트 HTTP 클라이언트 */
     private final ReviewVerificationAgentClient agentClient;
 
+    /** 도장깨기 최종 감상평 레포지토리 — course_final_movie 테이블 */
+    private final CourseFinalMovieRepository finalMovieRepository;
+
     /**
      * JSON 파싱용 ObjectMapper (스레드 안전, 클래스 로딩 시 1회 초기화).
      * movieIds JSON 컬럼(예: ["12345","67890"])을 List&lt;String&gt;으로 역직렬화할 때 사용한다.
@@ -158,10 +164,11 @@ public class RoadmapService {
                     return progressRepo.save(newProgress);
                 });
 
-        // ② 이미 완주한 코스이면 추가 인증 불가
-        if (progress.getStatus() == CourseProgressStatus.COMPLETED) {
+        // ② 이미 완주했거나 최종 감상평 대기 중인 코스이면 추가 인증 불가
+        if (progress.getStatus() == CourseProgressStatus.COMPLETED
+                || progress.getStatus() == CourseProgressStatus.FINAL_REVIEW_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "이미 완주한 코스입니다: courseId=" + courseId);
+                    "이미 모든 영화를 완료한 코스입니다: courseId=" + courseId);
         }
 
         // ③ 영화 인증 처리 — verifiedMovies++, progressPercent 재계산
@@ -169,9 +176,11 @@ public class RoadmapService {
         log.debug("영화 인증: userId={}, courseId={}, verifiedMovies={}/{}",
                 userId, courseId, progress.getVerifiedMovies(), progress.getTotalMovies());
 
-        // ④ 완주 판정 — totalMovies > 0 보장 후 비교 (0이면 완주 조건 미충족으로 처리)
+        // ④ 완주 판정 — 모든 영화 완료 시 최종 감상평 대기 상태로 전환
+        // 리워드 및 COMPLETED 처리는 최종 감상평 제출(submitFinalReview) 시점에 수행한다.
         if (progress.getTotalMovies() > 0 && progress.getVerifiedMovies() >= progress.getTotalMovies()) {
-            handleCourseComplete(userId, courseId, rewardPoints, progress);
+            progress.enterFinalReviewPending();
+            log.info("모든 영화 인증 완료 → 최종 감상평 대기 상태: userId={}, courseId={}", userId, courseId);
         }
 
         return CourseProgressResponse.from(progress);
@@ -628,6 +637,88 @@ public class RoadmapService {
                     movieIdsJson, e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * 도장깨기 최종 감상평을 제출하고 코스 완주를 확정한다.
+     *
+     * <h4>처리 흐름</h4>
+     * <ol>
+     *   <li>코스 존재 확인</li>
+     *   <li>진행 상태가 FINAL_REVIEW_PENDING 인지 검증</li>
+     *   <li>중복 감상평 방지 (이미 제출했으면 409)</li>
+     *   <li>CourseFinalMovie 저장 (isCompleted=true)</li>
+     *   <li>handleCourseComplete() — COMPLETED 전환 + 리워드 지급 + 업적</li>
+     * </ol>
+     *
+     * @param userId     사용자 ID
+     * @param courseId   코스 슬러그
+     * @param reviewText 최종 감상평 본문
+     * @return 감상평 + 완주 상태 응답
+     */
+    @Transactional
+    public FinalReviewResponse submitFinalReview(String userId, String courseId, String reviewText) {
+        // 1. 코스 존재 확인 및 리워드 포인트 조회
+        RoadmapCourse course = courseRepo.findByCourseId(courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
+                        "존재하지 않는 코스입니다: courseId=" + courseId));
+        int rewardPoints = 100; // 기본값; 코스 엔티티에 reward_points 필드 추가 시 교체
+
+        // 2. 진행 상태 검증 — FINAL_REVIEW_PENDING 이어야만 감상평 제출 가능
+        UserCourseProgress progress = progressRepo.findByUserIdAndCourseId(userId, courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
+                        "코스를 시작하지 않았습니다: courseId=" + courseId));
+
+        if (progress.getStatus() == CourseProgressStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "이미 완주 처리된 코스입니다.");
+        }
+        if (progress.getStatus() != CourseProgressStatus.FINAL_REVIEW_PENDING) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "아직 모든 영화를 완료하지 않았습니다. 모든 영화 시청 인증 후 감상평을 작성할 수 있습니다.");
+        }
+
+        // 3. 중복 감상평 방지
+        if (finalMovieRepository.existsByCourseIdAndUserId(courseId, userId)) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "이미 최종 감상평을 제출했습니다.");
+        }
+
+        // 4. 최종 감상평 저장
+        CourseFinalMovie finalReview = CourseFinalMovie.builder()
+                .courseId(courseId)
+                .userId(userId)
+                .finalReviewText(reviewText != null ? reviewText.strip() : "")
+                .build();
+        finalReview.complete();
+        CourseFinalMovie saved = finalMovieRepository.save(finalReview);
+        log.info("최종 감상평 저장 완료: userId={}, courseId={}", userId, courseId);
+
+        // 5. 코스 완주 처리 + 리워드 지급 + 업적
+        handleCourseComplete(userId, courseId, rewardPoints, progress);
+        progressRepo.save(progress);
+
+        return FinalReviewResponse.from(saved, progress);
+    }
+
+    /**
+     * 도장깨기 최종 감상평을 조회한다.
+     *
+     * <p>감상평이 아직 제출되지 않았으면 미제출 상태 응답을 반환한다.
+     * 프론트엔드에서 감상평 화면 재진입 시 기존 감상평 여부를 확인하는 데 사용한다.</p>
+     *
+     * @param userId   사용자 ID
+     * @param courseId 코스 슬러그
+     * @return 감상평 조회 응답 (미제출이면 isCompleted=false)
+     */
+    public FinalReviewResponse getFinalReview(String userId, String courseId) {
+        UserCourseProgress progress = progressRepo.findByUserIdAndCourseId(userId, courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
+                        "코스를 시작하지 않았습니다: courseId=" + courseId));
+
+        return finalMovieRepository.findByCourseIdAndUserId(courseId, userId)
+                .map(finalReview -> FinalReviewResponse.from(finalReview, progress))
+                .orElse(FinalReviewResponse.notSubmitted(courseId, userId, progress));
     }
 
     /**

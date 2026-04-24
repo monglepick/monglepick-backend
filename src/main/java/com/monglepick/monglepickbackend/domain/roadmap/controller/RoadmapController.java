@@ -6,6 +6,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.Course
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseListResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseResponse.CourseStartResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.CourseReviewResponse;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.FinalReviewResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
 import com.monglepick.monglepickbackend.domain.roadmap.service.RoadmapService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
@@ -252,6 +253,81 @@ public class RoadmapController extends BaseController {
     ) {
         String userId = resolveUserId(principal);
         CourseReviewResponse response = roadmapService.getMovieReview(courseId, movieId, userId);
+        return ResponseEntity.ok(response);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 최종 감상평 (course_final_movie)
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * 도장깨기 최종 감상평을 제출한다.
+     *
+     * <p>모든 영화 시청 인증이 완료된 후(status=FINAL_REVIEW_PENDING) 호출 가능하다.
+     * 감상평 제출과 동시에 코스가 COMPLETED로 전환되고 완주 리워드가 지급된다.
+     * AI 검증 없이 즉시 처리된다.</p>
+     *
+     * <h4>처리 흐름</h4>
+     * <ol>
+     *   <li>FINAL_REVIEW_PENDING 상태 확인</li>
+     *   <li>CourseFinalMovie 저장</li>
+     *   <li>COMPLETED 전환 + 완주 리워드 지급 + 업적 달성</li>
+     * </ol>
+     */
+    @Operation(
+            summary = "도장깨기 최종 감상평 제출",
+            description = "모든 영화 시청 인증 완료 후 코스 전체에 대한 최종 감상평을 제출합니다. " +
+                    "제출 즉시 코스가 COMPLETED로 전환되고 완주 리워드가 지급됩니다. AI 검증 없이 즉시 처리됩니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "감상평 제출 완료 + 코스 완주 처리"),
+            @ApiResponse(responseCode = "400", description = "아직 모든 영화 인증 미완료 또는 이미 제출한 감상평"),
+            @ApiResponse(responseCode = "401", description = "인증 필요"),
+            @ApiResponse(responseCode = "404", description = "존재하지 않는 코스")
+    })
+    @PostMapping("/{courseId}/final-review")
+    public ResponseEntity<FinalReviewResponse> submitFinalReview(
+            @Parameter(description = "코스 슬러그", required = true, example = "nolan-filmography")
+            @PathVariable String courseId,
+
+            @RequestBody Map<String, String> body,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        String reviewText = body != null ? body.get("reviewText") : null;
+        log.info("최종 감상평 제출 요청: userId={}, courseId={}", userId, courseId);
+
+        FinalReviewResponse response = roadmapService.submitFinalReview(userId, courseId, reviewText);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 도장깨기 최종 감상평을 조회한다.
+     *
+     * <p>이미 제출한 감상평이 있으면 본문을 반환하고,
+     * 아직 제출하지 않았으면 isCompleted=false로 반환한다.</p>
+     */
+    @Operation(
+            summary = "도장깨기 최종 감상평 조회",
+            description = "해당 코스에 제출한 최종 감상평을 반환합니다. 미제출 시 isCompleted=false.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "감상평 조회 성공 (미제출이면 isCompleted=false)"),
+            @ApiResponse(responseCode = "401", description = "인증 필요"),
+            @ApiResponse(responseCode = "404", description = "코스를 시작하지 않은 경우")
+    })
+    @GetMapping("/{courseId}/final-review")
+    public ResponseEntity<FinalReviewResponse> getFinalReview(
+            @Parameter(description = "코스 슬러그", required = true, example = "nolan-filmography")
+            @PathVariable String courseId,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        FinalReviewResponse response = roadmapService.getFinalReview(userId, courseId);
         return ResponseEntity.ok(response);
     }
 

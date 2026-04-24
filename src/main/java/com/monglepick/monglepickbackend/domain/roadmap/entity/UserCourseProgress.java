@@ -186,11 +186,23 @@ public class UserCourseProgress extends BaseAuditEntity {
     }
 
     /**
+     * 모든 영화 인증 완료 후 최종 감상평 대기 상태로 전환한다.
+     *
+     * <p>verifiedMovies == totalMovies 달성 직후 호출된다.
+     * 이 상태에서 프론트엔드는 최종 감상평 작성 화면을 표시한다.
+     * 최종 감상평 제출 후 {@link #complete(LocalDateTime)}으로 이어진다.</p>
+     */
+    public void enterFinalReviewPending() {
+        this.status = CourseProgressStatus.FINAL_REVIEW_PENDING;
+        this.progressPercent = new BigDecimal("100.00");
+    }
+
+    /**
      * 코스를 완주 처리한다.
      *
      * <p>status를 COMPLETED로 전환하고 완주 시각을 기록한다.
      * progressPercent를 100.00으로 고정하여 UI에서 100%로 표시되게 한다.
-     * 서비스 레이어에서 verifiedMovies == totalMovies 판정 후 호출한다.</p>
+     * 최종 감상평 제출 후 서비스 레이어에서 호출한다.</p>
      *
      * @param now 완주 시각 (일반적으로 LocalDateTime.now())
      */
