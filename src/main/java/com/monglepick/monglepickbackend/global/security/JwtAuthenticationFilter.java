@@ -1,5 +1,7 @@
 package com.monglepick.monglepickbackend.global.security;
 
+import com.monglepick.monglepickbackend.domain.user.entity.User;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -50,6 +52,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     /** JWT 토큰 생성/검증을 담당하는 프로바이더 */
     private final JwtTokenProvider jwtTokenProvider;
 
+    /** 계정 상태(정지/잠금) 확인을 위한 사용자 Mapper */
+    private final UserMapper userMapper;
+
     /**
      * 매 요청마다 실행되는 JWT 인증 필터 로직.
      *
@@ -99,6 +104,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // ── 5단계: 유효한 Access Token → SecurityContext에 인증 정보 설정 ──
         String userId = parsed.userId();
         String role = parsed.role();
+
+        // ── 6단계: 계정 상태 확인 — 정지된 계정은 유효한 토큰이어도 즉시 차단 ──
+        // 관리자가 계정을 정지하면 DB status=SUSPENDED로 변경되며, Access Token이 아직
+        // 만료되지 않았더라도 이 단계에서 차단하여 즉각적인 로그아웃 효과를 낸다.
+        User user = userMapper.findById(userId);
+        if (user == null || user.getStatus() == User.UserStatus.SUSPENDED) {
+            log.warn("정지된 계정의 API 접근 차단 — userId: {}", userId);
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write(
+                    "{\"code\":\"A011\",\"message\":\"정지된 계정입니다. 관리자에게 문의하세요.\"}"
+            );
+            return;
+        }
 
         // role이 null이면 기본값 "USER" 사용
         String authority = "ROLE_" + (role != null ? role : "USER");

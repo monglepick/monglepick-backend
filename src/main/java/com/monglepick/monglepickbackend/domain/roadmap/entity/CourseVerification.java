@@ -303,10 +303,12 @@ public class CourseVerification extends BaseAuditEntity {
         this.reviewedBy = null;                       // AI 자동 판정이므로 관리자 기록 없음
         this.reviewedAt = LocalDateTime.now();
 
-        // AUTO_VERIFIED 일 때만 isVerified 전환 (코스 진행률 반영)
         if ("AUTO_VERIFIED".equals(reviewStatus)) {
             this.isVerified = true;
             this.verifiedAt = LocalDateTime.now();
+        } else {
+            // AUTO_REJECTED / NEEDS_REVIEW: 기존 승인 상태를 취소
+            this.isVerified = false;
         }
     }
 

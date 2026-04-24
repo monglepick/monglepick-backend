@@ -14,6 +14,7 @@ import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.UserDetailRe
 import com.monglepick.monglepickbackend.admin.dto.UserManagementDto.UserListResponse;
 import com.monglepick.monglepickbackend.admin.mapper.AdminUserMapper;
 import com.monglepick.monglepickbackend.admin.repository.AdminUserStatusRepository;
+import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
 import com.monglepick.monglepickbackend.domain.community.entity.PostComment;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
 import com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder;
@@ -98,6 +99,12 @@ public class AdminUserService {
 
     /** AI 쿼터(이용권) 레포지토리 — 관리자 수동 이용권 발급에서 사용 */
     private final UserAiQuotaRepository userAiQuotaRepository;
+
+    /**
+     * JWT 서비스 — 계정 정지 시 해당 사용자의 Refresh Token을 전체 삭제하여
+     * 진행 중인 세션을 즉시 무효화한다.
+     */
+    private final JwtService jwtService;
 
     /**
      * 관리자 감사 로그 서비스 — 역할 변경/정지/복구/수동 포인트/이용권 발급 5개
@@ -205,12 +212,19 @@ public class AdminUserService {
                     "이미 탈퇴한 사용자입니다: " + userId);
         }
 
-        // 포인트 정보 조회 — 레코드 없으면 balance=0, grade="NORMAL" fallback
-        UserPoint userPoint = userPointRepository.findByUserId(userId).orElse(null);
+        // 포인트 + 등급 정보 조회 — JOIN FETCH로 grade를 즉시 로딩하여 LazyInitializationException 방지
+        // open-in-view=false 환경에서 LAZY grade 프록시 접근 시 발생하는 오류를 근본적으로 차단한다.
+        UserPoint userPoint = userPointRepository.findByUserIdWithGrade(userId).orElse(null);
         Integer balance    = (userPoint != null) ? userPoint.getBalance()    : 0;
         Integer totalEarned = (userPoint != null) ? userPoint.getTotalEarned() : 0;
-        // grade가 null이면 getGradeCode()가 "NORMAL"을 반환하므로 안전
-        String gradeName   = (userPoint != null) ? userPoint.getGradeCode() : "NORMAL";
+
+        // gradeCode: 내부 코드(NORMAL/BRONZE/...), gradeName: 한글 표시명(알갱이/강냉이/...)
+        com.monglepick.monglepickbackend.domain.reward.entity.Grade grade =
+                (userPoint != null) ? userPoint.getGrade() : null;
+        String gradeCode = (grade != null) ? grade.getGradeCode() : "NORMAL";
+        String gradeName = (grade != null && grade.getGradeName() != null)
+                ? grade.getGradeName()
+                : gradeCode; // 한글명 없으면 코드로 fallback
 
         // 활동 카운트 집계 — 게시글·리뷰는 전체, 댓글은 소프트 삭제 제외 (MyBatis §15.4)
         long postCount    = postMapper.countByUserId(userId);
@@ -230,6 +244,7 @@ public class AdminUserService {
                 user.getProfileImage(),
                 balance,
                 totalEarned,
+                gradeCode,
                 gradeName,
                 postCount,
                 reviewCount,
@@ -346,6 +361,12 @@ public class AdminUserService {
             throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR,
                     "계정 정지 처리 중 DB 갱신에 실패했습니다: " + userId);
         }
+
+        // Refresh Token 전체 삭제 — 정지 즉시 세션 무효화
+        // Access Token은 남은 유효기간(최대 1시간) 동안 살아있으나, JwtAuthenticationFilter가
+        // 매 요청마다 DB status를 확인하므로 Access Token이 있어도 403이 반환된다.
+        jwtService.removeAllRefreshByUser(userId);
+        log.info("[AdminUserService] 계정 정지로 인한 Refresh Token 전체 삭제 — userId={}", userId);
 
         // user_status 이력 테이블에 정지 레코드 INSERT-ONLY 기록
         String adminId = resolveCurrentAdminId();

@@ -22,8 +22,6 @@
         <result property="provider" column="provider"/>
         <result property="providerId" column="provider_id"/>
         <result property="userRole" column="user_role"/>
-        <result property="userBirth" column="user_birth"/>
-        <result property="name" column="name"/>
         <result property="requiredTerm" column="required_term"/>
         <result property="optionTerm" column="option_term"/>
         <result property="marketingAgreed" column="marketing_agreed"/>
@@ -43,7 +41,7 @@
     <!-- ═══ 공통 SELECT 컬럼 ═══ -->
     <sql id="allColumns">
         user_id, email, nickname, password_hash, profile_image,
-        provider, provider_id, user_role, user_birth, name,
+        provider, provider_id, user_role,
         required_term, option_term, marketing_agreed,
         status, suspended_at, suspended_until, suspend_reason,
         is_deleted, deleted_at, last_login_at,
@@ -178,12 +176,12 @@
     <insert id="insert">
         INSERT INTO users (
             user_id, email, nickname, password_hash, profile_image,
-            provider, provider_id, user_role, user_birth, name,
+            provider, provider_id, user_role,
             required_term, option_term, marketing_agreed,
             status, is_deleted, created_at, updated_at, created_by, updated_by
         ) VALUES (
             #{userId}, #{email}, #{nickname}, #{passwordHash}, #{profileImage},
-            #{provider}, #{providerId}, #{userRole}, #{userBirth}, #{name},
+            #{provider}, #{providerId}, #{userRole},
             #{requiredTerm}, #{optionTerm}, #{marketingAgreed},
             #{status}, #{isDeleted}, NOW(), NOW(), #{createdBy}, #{updatedBy}
         )

@@ -9,6 +9,7 @@ import com.monglepick.monglepickbackend.domain.auth.handler.RefreshTokenLogoutHa
 import com.monglepick.monglepickbackend.domain.auth.handler.SocialFailureHandler;
 import com.monglepick.monglepickbackend.domain.auth.handler.SocialSuccessHandler;
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.constants.AppConstants;
 import com.monglepick.monglepickbackend.global.exception.ErrorResponse;
 import jakarta.servlet.http.HttpServletResponse;
@@ -102,6 +103,9 @@ public class SecurityConfig {
      * RefreshTokenLogoutHandler 생성 시 전달하여 로그아웃 시 쿠키 삭제에 사용한다.
      */
     private final CookieUtil cookieUtil;
+
+    /** 계정 정지/잠금 상태 확인 — JwtAuthenticationFilter에 전달하여 요청별 상태 체크에 사용 */
+    private final UserMapper userMapper;
 
     @Value("${app.service.key:dev-service-key-change-me}")
     private String serviceKey;
@@ -425,7 +429,7 @@ public class SecurityConfig {
              * RefreshTokenLogoutHandler에서 userId를 올바르게 참조할 수 있다.
              */
             .addFilterBefore(
-                new JwtAuthenticationFilter(jwtTokenProvider),
+                new JwtAuthenticationFilter(jwtTokenProvider, userMapper),
                 LogoutFilter.class
             )
 

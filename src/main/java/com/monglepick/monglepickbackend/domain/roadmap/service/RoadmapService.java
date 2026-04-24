@@ -304,9 +304,9 @@ public class RoadmapService {
         // 완료된 영화 ID — ADMIN_REJECTED · PENDING · NEEDS_REVIEW 제외, AI 검증 완료(AUTO_VERIFIED/ADMIN_APPROVED)만 포함
         List<String> completedMovieIds = (userId != null)
                 ? courseReviewRepository.findAllByCourseIdAndUserId(courseId, userId).stream()
-                        .map(com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview::getMovieId)
-                        .filter(id -> !rejectedSet.contains(id) && !pendingSet.contains(id))
-                        .toList()
+                .map(com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview::getMovieId)
+                .filter(id -> !rejectedSet.contains(id) && !pendingSet.contains(id))
+                .toList()
                 : Collections.emptyList();
 
         List<String> pendingMovieIds = new java.util.ArrayList<>(pendingSet);
@@ -446,7 +446,7 @@ public class RoadmapService {
      */
     @Transactional
     public CourseCompleteResponse completeMovie(String courseId, String movieId,
-                                                 String userId, String reviewText) {
+                                                String userId, String reviewText) {
         // 1. 코스 존재 확인
         RoadmapCourse course = courseRepo.findByCourseId(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
@@ -643,7 +643,7 @@ public class RoadmapService {
      * @param progress     완주 처리할 진행 엔티티
      */
     private void handleCourseComplete(String userId, String courseId,
-                                       int rewardPoints, UserCourseProgress progress) {
+                                      int rewardPoints, UserCourseProgress progress) {
         // 완주 상태 전환
         progress.complete(LocalDateTime.now());
         progress.markRewardGranted();

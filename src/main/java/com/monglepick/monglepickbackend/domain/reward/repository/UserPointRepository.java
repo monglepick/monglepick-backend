@@ -43,6 +43,18 @@ public interface UserPointRepository extends JpaRepository<UserPoint, Long> {
     Optional<UserPoint> findByUserId(String userId);
 
     /**
+     * 사용자 ID로 포인트 레코드를 등급(Grade)과 함께 즉시 로딩하여 조회한다.
+     *
+     * <p>open-in-view=false 환경에서 LAZY 로딩으로 인한 LazyInitializationException을 방지한다.
+     * 관리자 상세 조회 등 grade 정보를 즉시 필요로 하는 경우 이 메서드를 사용한다.</p>
+     *
+     * @param userId 사용자 ID (VARCHAR(50))
+     * @return grade가 즉시 로딩된 포인트 레코드 (없으면 Optional.empty)
+     */
+    @Query("SELECT p FROM UserPoint p LEFT JOIN FETCH p.grade WHERE p.userId = :userId")
+    Optional<UserPoint> findByUserIdWithGrade(@Param("userId") String userId);
+
+    /**
      * 사용자 ID로 포인트 레코드를 비관적 쓰기 락과 함께 조회한다.
      *
      * <p>SELECT ... FOR UPDATE를 실행하여 트랜잭션 종료 시까지 해당 행을 잠근다.

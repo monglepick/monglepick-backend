@@ -68,7 +68,8 @@ public class UserManagementDto {
      * @param profileImageUrl  프로필 이미지 URL (없으면 null)
      * @param pointBalance     현재 포인트 잔액 (user_points.balance)
      * @param totalEarned      누적 획득 포인트 (user_points.total_earned)
-     * @param gradeName        등급 이름 (NORMAL, BRONZE, SILVER, GOLD, PLATINUM; 포인트 미생성 시 "NORMAL")
+     * @param gradeCode        등급 코드 (NORMAL, BRONZE, SILVER, GOLD, PLATINUM, DIAMOND)
+     * @param gradeName        등급 한글 표시명 (알갱이, 강냉이, 팝콘, 카라멜팝콘, 몽글팝콘, 몽아일체)
      * @param postCount        작성 게시글 수
      * @param reviewCount      작성 리뷰 수
      * @param commentCount     작성 댓글 수 (소프트 삭제 제외)
@@ -87,6 +88,7 @@ public class UserManagementDto {
             String profileImageUrl,
             Integer pointBalance,
             Integer totalEarned,
+            String gradeCode,
             String gradeName,
             long postCount,
             long reviewCount,

@@ -23,13 +23,17 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
+
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
+import com.monglepick.monglepickbackend.domain.community.service.ImageService;
+import java.util.List;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -46,8 +50,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class UserController {
 
-    private final UserService userService;
+        private final UserService userService;
     private final PostService postService;
+        private final ImageService imageService;
 
     /**
      * 프로필 조회 API
@@ -76,7 +81,7 @@ public class UserController {
      * @param request 수정 요청 (nickname, profileImageUrl)
      * @return 200 OK + 수정된 프로필 정보
      */
-    @Operation(summary = "프로필 수정", description = "닉네임, 프로필 이미지 URL, 비밀번호 변경. null 필드는 수정하지 않음. 비밀번호 변경 시 currentPassword + newPassword 함께 전달")
+    @Operation(summary = "프로필 수정 (JSON)", description = "닉네임, 프로필 이미지 URL, 비밀번호 변경. JSON 바디로 전달. null 필드는 수정하지 않음.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "프로필 수정 성공"),
             @ApiResponse(responseCode = "400", description = "현재 비밀번호 불일치"),
@@ -84,12 +89,47 @@ public class UserController {
             @ApiResponse(responseCode = "409", description = "이미 사용 중인 닉네임")
     })
     @SecurityRequirement(name = "BearerAuth")
-    @PatchMapping("/profile")
-    public ResponseEntity<UserResponse> updateProfile(
+    @PatchMapping(value = "/profile", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<UserResponse> updateProfileJson(
             @AuthenticationPrincipal String userId,
-            @Valid @RequestBody UpdateProfileRequest request) {
+            @org.springframework.web.bind.annotation.RequestBody UpdateProfileRequest request) {
 
-        log.info("프로필 수정 요청 - userId: {}", userId);
+        log.info("프로필 수정 요청 (JSON) - userId: {}", userId);
+
+        UserResponse updated = userService.updateProfile(userId, request);
+        return ResponseEntity.ok(updated);
+    }
+
+    @Operation(summary = "프로필 수정 (multipart)", description = "프로필 이미지 업로드 포함 수정. multipart/form-data 로 파일 전송 시 사용")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "프로필 수정 성공"),
+            @ApiResponse(responseCode = "400", description = "잘못된 입력 또는 파일 형식"),
+            @ApiResponse(responseCode = "403", description = "소셜 로그인 사용자는 비밀번호 변경 불가"),
+            @ApiResponse(responseCode = "409", description = "이미 사용 중인 닉네임")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PatchMapping(value = "/profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<UserResponse> updateProfileMultipart(
+            @AuthenticationPrincipal String userId,
+            @RequestPart(value = "profileImage", required = false) MultipartFile profileImage,
+            @RequestPart(value = "nickname", required = false) String nickname,
+            @RequestPart(value = "profileImageUrl", required = false) String profileImageUrl,
+            @RequestPart(value = "currentPassword", required = false) String currentPassword,
+            @RequestPart(value = "newPassword", required = false) String newPassword) {
+
+        log.info("프로필 수정 요청 (multipart) - userId: {}", userId);
+
+        // multipart 로 파일 업로드가 있으면 ImageService에 위임하여 업로드 후 URL을 profileImageUrl에 대입
+        if (profileImage != null && !profileImage.isEmpty()) {
+            List<String> urls = imageService.uploadImages(List.of(profileImage), userId);
+            if (urls != null && !urls.isEmpty()) {
+                profileImageUrl = urls.get(0);
+            }
+        }
+
+        // UpdateProfileRequest 는 record 이므로 새로 생성하여 서비스에 전달
+        UpdateProfileRequest request = new UpdateProfileRequest(nickname, profileImageUrl, currentPassword, newPassword);
+
         UserResponse updated = userService.updateProfile(userId, request);
         return ResponseEntity.ok(updated);
     }

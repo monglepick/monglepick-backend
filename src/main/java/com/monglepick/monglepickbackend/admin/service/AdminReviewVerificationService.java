@@ -14,6 +14,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress
 import com.monglepick.monglepickbackend.domain.roadmap.repository.CourseReviewRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.CourseVerificationRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.service.ReviewVerificationAgentClient;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -76,6 +77,9 @@ public class AdminReviewVerificationService {
 
     /** 관리자 판정 결과를 사용자 코스 진행률에 동기화 */
     private final UserCourseProgressRepository userCourseProgressRepository;
+
+    /** AI 리뷰 검증 에이전트(FastAPI) 호출 클라이언트 */
+    private final ReviewVerificationAgentClient agentClient;
 
     /**
      * AI 자동 승인 임계값 — application.yml {@code app.ai.review-verification.threshold}.
@@ -310,11 +314,13 @@ public class AdminReviewVerificationService {
     }
 
     /**
-     * AI 에이전트에 재검증을 요청한다 (현재는 상태만 PENDING 으로 복귀).
+     * AI 에이전트에 재검증을 요청하고 판정 결과를 즉시 반영한다.
      *
-     * <p>에이전트가 실제로 호출 가능해질 때까지는 {@link CourseVerification#requestReverify()} 로
-     * 상태만 리셋하고 {@code agentAvailable=false} 를 응답해 UI 가 "에이전트 준비 중" 배너를 띄우도록 한다.
-     * 에이전트 구현 이후 이 메서드에서 FastAPI 호출을 추가하면 된다(호출 시그니처만 확장).</p>
+     * <p>리뷰 본문 + 영화 줄거리를 수집한 뒤 FastAPI 에이전트
+     * ({@code POST /api/v1/admin/ai/review-verification/verify})를 호출한다.
+     * 에이전트 호출 성공 시 {@link CourseVerification#applyAiDecision()} 으로 결과를 반영하고
+     * {@code agentAvailable=true} 로 응답한다. 에이전트 연결 실패 시 PENDING 으로만 복귀하고
+     * {@code agentAvailable=false} 로 응답한다.</p>
      *
      * @param verificationId 대상 인증 PK
      * @return 재검증 응답 DTO
@@ -322,28 +328,96 @@ public class AdminReviewVerificationService {
     @Transactional
     public ReverifyResponse reverify(Long verificationId) {
         CourseVerification v = loadReviewVerification(verificationId);
-        String prevStatus = v.getReviewStatus();
-        log.info("[AdminReviewVerify] 재검증 요청 — id={} (에이전트 미구현, PENDING 으로만 복귀)", verificationId);
+        boolean wasVerified = Boolean.TRUE.equals(v.getIsVerified());
 
-        v.requestReverify();
+        // 리뷰 본문 수집
+        String reviewText = reviewVerificationRepository
+                .findCourseReviewText(v.getUserId(), v.getCourseId(), v.getMovieId());
 
-        // ADMIN_REJECTED였다면 낙관적으로 카운트 복원 (재검증 대기 중에도 진행률 반영)
-        if ("ADMIN_REJECTED".equals(prevStatus)) {
-            userCourseProgressRepository.findByUserIdAndCourseId(v.getUserId(), v.getCourseId())
-                    .ifPresent(progress -> {
-                        progress.verify();
-                        userCourseProgressRepository.save(progress);
-                        log.info("[AdminReviewVerify] 재검증 → 진행률 복원: userId={}, courseId={}, verifiedMovies={}",
-                                v.getUserId(), v.getCourseId(), progress.getVerifiedMovies());
-                    });
+        // 영화 줄거리 수집
+        String moviePlot = null;
+        Movie movie = movieRepository.findById(v.getMovieId()).orElse(null);
+        if (movie != null) {
+            moviePlot = movie.getOverview();
         }
 
-        return new ReverifyResponse(
-                verificationId,
-                v.getReviewStatus(),
-                false,                                     // 에이전트 호출 가능해지면 true 로 전환
-                "AI 리뷰 검증 에이전트가 아직 구현되지 않았습니다. 상태만 PENDING 으로 복귀했습니다."
-        );
+        // course_review PK (에이전트 로깅용, 없으면 null)
+        Long reviewId = courseReviewRepository
+                .findByCourseIdAndMovieIdAndUserId(v.getCourseId(), v.getMovieId(), v.getUserId())
+                .map(CourseReview::getCourseReviewId)
+                .orElse(null);
+
+        // 에이전트 호출
+        try {
+            log.info("[AdminReviewVerify] AI 재검증 에이전트 호출 — id={}, movieId={}",
+                    verificationId, v.getMovieId());
+
+            ReviewVerificationAgentClient.VerifyResponse agentResult = agentClient.verify(
+                    verificationId,
+                    v.getUserId(),
+                    v.getCourseId(),
+                    v.getMovieId(),
+                    reviewId,
+                    reviewText != null ? reviewText : "",
+                    moviePlot != null ? moviePlot : ""
+            );
+
+            // 판정 결과 반영
+            v.applyAiDecision(
+                    agentResult.similarity_score(),
+                    toJsonArray(agentResult.matched_keywords()),
+                    agentResult.confidence(),
+                    agentResult.review_status(),
+                    agentResult.rationale()
+            );
+
+            // UserCourseProgress 동기화 — isVerified 변화에 따라 verifiedMovies 증감
+            boolean isNowVerified = Boolean.TRUE.equals(v.getIsVerified());
+            syncCourseProgress(v.getUserId(), v.getCourseId(), wasVerified, isNowVerified);
+
+            log.info("[AdminReviewVerify] AI 재검증 완료 — id={}, status={}, confidence={}",
+                    verificationId, agentResult.review_status(), agentResult.confidence());
+
+            return new ReverifyResponse(
+                    verificationId,
+                    agentResult.review_status(),
+                    true,
+                    String.format("AI 재검증 완료: %s (신뢰도 %.2f)", agentResult.review_status(), agentResult.confidence())
+            );
+
+        } catch (ReviewVerificationAgentClient.AgentUnavailableException e) {
+            // 에이전트 호출 실패 → PENDING 으로만 복귀
+            log.warn("[AdminReviewVerify] 에이전트 호출 실패, PENDING 복귀 — id={}, error={}",
+                    verificationId, e.getMessage());
+            v.requestReverify();
+            return new ReverifyResponse(
+                    verificationId,
+                    v.getReviewStatus(),
+                    false,
+                    "AI 에이전트 호출에 실패했습니다. 상태만 PENDING 으로 복귀했습니다."
+            );
+        }
+    }
+
+    /**
+     * AI 판정 결과 변화에 따라 UserCourseProgress.verifiedMovies 를 동기화한다.
+     *
+     * <p>미인증 → 인증: verifiedMovies++. 인증 → 미인증: verifiedMovies--.</p>
+     */
+    private void syncCourseProgress(String userId, String courseId,
+                                     boolean wasVerified, boolean isNowVerified) {
+        if (wasVerified == isNowVerified) return;
+        userCourseProgressRepository.findByUserIdAndCourseId(userId, courseId)
+                .ifPresent(progress -> {
+                    if (!wasVerified) {
+                        progress.verify();
+                        log.info("[AdminReviewVerify] 진행률 증가 — userId={}, courseId={}", userId, courseId);
+                    } else {
+                        progress.unverify();
+                        log.info("[AdminReviewVerify] 진행률 감소 — userId={}, courseId={}", userId, courseId);
+                    }
+                    userCourseProgressRepository.save(progress);
+                });
     }
 
     // ─────────────────────────────────────────────
@@ -410,6 +484,20 @@ public class AdminReviewVerificationService {
             return raw.substring(0, DECISION_REASON_MAX_LENGTH - 3) + "...";
         }
         return raw;
+    }
+
+    /** List<String> → JSON 배열 문자열 변환. null/빈 리스트 → "[]". */
+    private String toJsonArray(java.util.List<String> list) {
+        if (list == null || list.isEmpty()) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append('"');
+            sb.append(list.get(i).replace("\\", "\\\\").replace("\"", "\\\""));
+            sb.append('"');
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     /** 문자열을 maxLen 기준으로 자르고 "..." 접미 추가. null 은 그대로 null 반환. */
