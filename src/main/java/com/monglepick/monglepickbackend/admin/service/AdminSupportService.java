@@ -30,6 +30,7 @@ import com.monglepick.monglepickbackend.domain.support.entity.SupportNotice;
 import com.monglepick.monglepickbackend.domain.support.entity.SupportTicket;
 import com.monglepick.monglepickbackend.domain.support.entity.TicketReply;
 import com.monglepick.monglepickbackend.domain.support.entity.TicketStatus;
+import com.monglepick.monglepickbackend.domain.support.infra.SupportFaqElasticsearchIndexer;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -78,6 +79,18 @@ public class AdminSupportService {
 
     /** 티켓 답변 리포지토리 */
     private final AdminTicketReplyRepository adminTicketReplyRepository;
+
+    /**
+     * FAQ Elasticsearch 색인 컴포넌트.
+     * FAQ CRUD 이후 ES 에 실시간 반영한다. 실패해도 DB 트랜잭션에 영향 없음.
+     */
+    private final SupportFaqElasticsearchIndexer faqEsIndexer;
+
+    /**
+     * 관리자 감사 로그 서비스.
+     * FAQ 등록/수정/삭제 이벤트를 admin_audit_log 테이블에 기록한다.
+     */
+    private final AdminAuditService auditService;
 
     // ======================== 공지사항 ========================
     // 2026-04-08: 구 AppNotice 통합 — displayType/linkUrl/imageUrl/startAt/endAt/
@@ -322,21 +335,35 @@ public class AdminSupportService {
         return result.map(this::toFaqResponse);
     }
 
-    /** FAQ 등록. */
+    /** FAQ 등록. DB 저장 후 ES 색인 + 감사 로그 기록. */
     @Transactional
     public FaqResponse createFaq(FaqCreateRequest request) {
-        log.info("[AdminSupport] FAQ 등록 — category={}", request.category());
+        log.info("[AdminSupport] FAQ 등록 — category={}, keywords={}", request.category(), request.keywords());
         SupportFaq faq = SupportFaq.builder()
                 .category(parseSupportCategory(request.category()))
                 .question(request.question())
                 .answer(request.answer())
                 .sortOrder(request.sortOrder())
+                .keywords(request.keywords())
                 .build();
         SupportFaq saved = adminFaqRepository.save(faq);
+
+        // ES 색인 — 실패해도 DB 트랜잭션 롤백 없음 (Indexer 내부 try/catch 처리)
+        faqEsIndexer.index(saved);
+
+        // 감사 로그 — REQUIRES_NEW 트랜잭션 격리 (AuditService 내부 처리)
+        auditService.log(
+                AdminAuditService.ACTION_SUPPORT_FAQ_CREATE,
+                AdminAuditService.TARGET_SUPPORT_FAQ,
+                String.valueOf(saved.getFaqId()),
+                "FAQ 등록: category=" + saved.getCategory().name()
+                        + ", question=" + saved.getQuestion()
+        );
+
         return toFaqResponse(saved);
     }
 
-    /** FAQ 수정. */
+    /** FAQ 수정. DB 저장 후 ES 재색인 + 감사 로그 기록. */
     @Transactional
     public FaqResponse updateFaq(Long id, FaqUpdateRequest request) {
         log.info("[AdminSupport] FAQ 수정 — faqId={}", id);
@@ -351,10 +378,25 @@ public class AdminSupportService {
         if (request.isPublished() != null) {
             faq.setPublished(request.isPublished());
         }
+        // keywords 는 null 포함 항상 업데이트 (null 이면 ES 키워드 필드 제거)
+        faq.updateKeywords(request.keywords());
+
+        // ES 재색인 — dirty checking 으로 이미 DB 반영 예정인 상태를 색인
+        faqEsIndexer.index(faq);
+
+        // 감사 로그
+        auditService.log(
+                AdminAuditService.ACTION_SUPPORT_FAQ_UPDATE,
+                AdminAuditService.TARGET_SUPPORT_FAQ,
+                String.valueOf(faq.getFaqId()),
+                "FAQ 수정: category=" + faq.getCategory().name()
+                        + ", question=" + faq.getQuestion()
+        );
+
         return toFaqResponse(faq);
     }
 
-    /** FAQ 삭제. */
+    /** FAQ 삭제. DB 삭제 후 ES 인덱스에서도 제거 + 감사 로그 기록. */
     @Transactional
     public void deleteFaq(Long id) {
         log.info("[AdminSupport] FAQ 삭제 — faqId={}", id);
@@ -363,9 +405,20 @@ public class AdminSupportService {
                     "FAQ를 찾을 수 없습니다: id=" + id);
         }
         adminFaqRepository.deleteById(id);
+
+        // ES 삭제 — DB 삭제 후 수행 (실패해도 앱 동작에 영향 없음)
+        faqEsIndexer.delete(id);
+
+        // 감사 로그
+        auditService.log(
+                AdminAuditService.ACTION_SUPPORT_FAQ_DELETE,
+                AdminAuditService.TARGET_SUPPORT_FAQ,
+                String.valueOf(id),
+                "FAQ 삭제: faqId=" + id
+        );
     }
 
-    /** FAQ 순서 변경 (orderedIds 인덱스 기반). */
+    /** FAQ 순서 변경 (orderedIds 인덱스 기반). 변경 후 전체 ES 재색인. */
     @Transactional
     public void reorderFaqs(FaqReorderRequest request) {
         log.info("[AdminSupport] FAQ 순서 변경 — count={}", request.orderedIds().size());
@@ -376,6 +429,10 @@ public class AdminSupportService {
             adminFaqRepository.findById(id)
                     .ifPresent(faq -> faq.updateSortOrder(sortOrder));
         }
+
+        // 순서 변경 후 ES 전체 재색인 — sort_order 필드 동기화
+        List<SupportFaq> all = adminFaqRepository.findAll();
+        faqEsIndexer.reindexAll(all);
     }
 
     // ======================== 도움말 ========================
@@ -591,6 +648,7 @@ public class AdminSupportService {
                 faq.getCategory().name(),
                 faq.getQuestion(),
                 faq.getAnswer(),
+                faq.getKeywords(),       // ES 검색 키워드 힌트 (nullable)
                 faq.getHelpfulCount(),
                 faq.getNotHelpfulCount(),
                 faq.getSortOrder(),

@@ -57,6 +57,11 @@ dependencies {
     implementation 'me.paulschwarz:spring-dotenv:4.0.0'
     // CI 환경 테스트용 인메모리 DB (MySQL 없이 테스트 가능)
     testRuntimeOnly 'com.h2database:h2'
+    // Elasticsearch Java Client (고객센터 FAQ support_faq 인덱스 색인 전용)
+    // Spring Data Elasticsearch 는 사용하지 않는다 — 저장소 패턴 오버헤드 불필요.
+    // RestClient → RestClientTransport(JacksonJsonpMapper) → ElasticsearchClient 동기 API 사용.
+    // 버전은 운영 ES 8.17 과 맞춘다 (minor 버전 불일치 허용, 8.x 클라이언트-서버 호환 보장).
+    implementation 'co.elastic.clients:elasticsearch-java:8.17.0'
 }
 
 tasks.named('test') {

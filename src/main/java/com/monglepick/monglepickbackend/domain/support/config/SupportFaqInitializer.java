@@ -81,7 +81,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
     private List<SupportFaq> buildSeedData() {
         return List.of(
                 // ─────────────────────────────────────────────
-                // 일반 (GENERAL) — 4건
+                // 일반 (GENERAL) — 7건
                 // ─────────────────────────────────────────────
                 SupportFaq.builder()
                         .category(SupportCategory.GENERAL)
@@ -90,6 +90,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "다만 AI 추천에는 등급별 일일 무료 한도가 있으며, 한도를 초과하면 이용권(쿠폰)을 구매하거나 구독 상품으로 보너스 쿼터를 받으실 수 있습니다.\n\n"
                                 + "매일 출석 체크로 포인트를 모아 이용권을 저렴하게 구매할 수도 있어요!")
                         .sortOrder(10)
+                        .keywords("무료,유료,요금,가격,비용,서비스,이용,기본")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.GENERAL)
@@ -98,6 +99,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "한국 영화, 해외 영화, 독립 영화, 고전까지 폭넓게 포함되어 있으며, 포스터/줄거리/출연진/감독/장르/평점 등 풍부한 메타데이터와 함께 제공됩니다.\n\n"
                                 + "AI 추천 시 이 모든 데이터를 벡터 검색(Qdrant) + 텍스트 검색(Elasticsearch) + 그래프 검색(Neo4j) 기술로 하이브리드 결합하여 최적의 영화를 찾아드려요.")
                         .sortOrder(20)
+                        .keywords("영화데이터,데이터베이스,DB,영화정보,보유영화,편수,콘텐츠")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.GENERAL)
@@ -106,6 +108,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "다만 정기 점검이나 긴급 장애 대응이 필요한 경우 일시적으로 서비스가 중단될 수 있으며, 사전 공지는 고객센터 공지사항과 앱 내 배너를 통해 안내드립니다.\n\n"
                                 + "점검 시간은 보통 야간 시간대(새벽 2~5시)에 이뤄지며, 작업 완료까지의 예상 시간을 함께 공지하니 참고해 주세요.")
                         .sortOrder(30)
+                        .keywords("이용시간,운영시간,점검,서비스중단,24시간,장애,공지")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.GENERAL)
@@ -114,11 +117,11 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "별도의 iOS/Android 네이티브 앱은 아직 출시되지 않았으며, 모바일 앱 출시 계획은 향후 공지사항을 통해 안내드릴 예정입니다.\n\n"
                                 + "홈 화면에 추가하면 앱처럼 사용하실 수 있으니, 브라우저 메뉴의 '홈 화면에 추가' 기능을 활용해 보세요.")
                         .sortOrder(40)
+                        .keywords("앱,모바일앱,iOS,Android,스마트폰,아이폰,갤럭시,다운로드,설치")
                         .build(),
                 /*
                  * 연락처/전화/콜센터 문의에 대응하는 FAQ (sortOrder=50).
                  * AI 챗봇이 "전화번호 알려줘", "고객센터 연락처" 같은 질의에 근거 문서로 사용한다.
-                 * 전화 상담은 현재 미운영이므로 이메일/티켓 창구로 자연스럽게 유도한다.
                  */
                 SupportFaq.builder()
                         .category(SupportCategory.GENERAL)
@@ -130,10 +133,10 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "빠른 처리를 위해 결제 문의는 주문번호, 기술 문의는 스크린샷을 함께 첨부해 주세요.\n"
                                 + "긴급한 장애/결제 문제는 '문의하기' 티켓 본문 상단에 '긴급' 이라고 적어주시면 우선 확인합니다.")
                         .sortOrder(50)
+                        .keywords("전화번호,연락처,고객센터,콜센터,전화,문의,상담,연락,이메일")
                         .build(),
                 /*
                  * 이메일/문의 접수 경로를 별도 FAQ로 분리.
-                 * "이메일 알려줘", "어디로 메일 보내요" 등의 짧은 질의에 단독 매칭되도록 한다.
                  */
                 SupportFaq.builder()
                         .category(SupportCategory.GENERAL)
@@ -144,10 +147,10 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "• 이메일 문의 시 포함할 정보: 가입 이메일, 발생 일시, 문제 현상, 스크린샷\n\n"
                                 + "스팸 필터 오차단을 방지하려면 수신처를 주소록에 등록하신 뒤 답변을 기다려 주세요.")
                         .sortOrder(51)
+                        .keywords("이메일,메일,email,mail,문의,접수,보내기,연락처")
                         .build(),
                 /*
                  * 응답 시간/운영 시간 문의 FAQ.
-                 * "고객센터 운영시간", "언제 답변 와요" 같은 질의 대응.
                  */
                 SupportFaq.builder()
                         .category(SupportCategory.GENERAL)
@@ -159,6 +162,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "서비스 자체는 24시간 365일 이용 가능하며, 정기 점검은 보통 새벽 2~5시 사이에 공지와 함께 진행됩니다.\n"
                                 + "긴급한 결제 오류/계정 접근 문제는 티켓 제목에 '긴급' 을 표시하시면 우선 확인합니다.")
                         .sortOrder(52)
+                        .keywords("응답시간,운영시간,답변,처리시간,영업일,주말,공휴일,얼마나,언제")
                         .build(),
 
                 // ─────────────────────────────────────────────
@@ -172,6 +176,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "2. 소셜 로그인: 카카오, 네이버, 구글 계정으로 한 번의 클릭으로 간편 가입\n\n"
                                 + "가입 완료 후 온보딩 단계에서 선호 장르를 설정하시면, 첫 추천부터 맞춤형 영화를 받아보실 수 있어요.")
                         .sortOrder(10)
+                        .keywords("회원가입,가입,signup,계정생성,등록,가입방법,신규")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.ACCOUNT)
@@ -181,6 +186,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "메일이 도착하지 않으면 스팸함을 확인해 주시고, 5분 이상 기다려도 수신되지 않으면 고객센터에 문의 부탁드립니다.\n\n"
                                 + "보안을 위해 비밀번호는 영문/숫자/특수문자를 조합해 8자 이상으로 설정해 주세요.")
                         .sortOrder(20)
+                        .keywords("비밀번호,패스워드,암호,변경,재설정,초기화,수정,바꾸기,찾기,잊어버림,분실")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.ACCOUNT)
@@ -190,6 +196,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "이미 이메일 가입한 계정과 동일한 이메일로 소셜 가입을 시도하면 기존 계정에 소셜 로그인 방식이 추가됩니다.\n\n"
                                 + "연동을 해제하고 싶으신 경우 마이페이지 → 계정 설정에서 개별 해제가 가능합니다.")
                         .sortOrder(30)
+                        .keywords("소셜로그인,카카오,네이버,구글,간편로그인,SNS,연동,OAuth")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.ACCOUNT)
@@ -201,6 +208,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "• 동일 이메일로 30일 내 재가입은 제한될 수 있습니다.\n\n"
                                 + "진행 중인 구독이 있는 경우 먼저 구독을 해지한 후 탈퇴해 주세요. 탈퇴 전 마지막으로 한 번 더 생각해 보시길 권해드려요!")
                         .sortOrder(40)
+                        .keywords("탈퇴,회원탈퇴,계정삭제,그만두기,해지,탈퇴방법,삭제")
                         .build(),
 
                 // ─────────────────────────────────────────────
@@ -216,6 +224,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "3. 몇 차례 대화 후 맞춤 영화 카드가 답변에 포함되어 보여집니다.\n\n"
                                 + "대화가 길어질수록 추천 정확도가 높아지니, AI의 질문에 구체적으로 답해주시는 걸 추천해요.")
                         .sortOrder(10)
+                        .keywords("AI채팅,채팅,대화,사용법,어떻게,시작,봇,챗봇,영화추천")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.CHAT)
@@ -227,6 +236,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "• 이미지와 함께 텍스트를 입력하면 더 정확한 추천이 가능해요\n\n"
                                 + "예: 영화 포스터를 올리면서 '이런 느낌의 스릴러 추천해줘'라고 적으시면 시각적 분위기 + 장르 조건을 모두 고려합니다.")
                         .sortOrder(20)
+                        .keywords("이미지,사진,업로드,포스터,첨부,이미지분석,사진올리기,파일")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.CHAT)
@@ -237,6 +247,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "• 대화 제목은 첫 메시지를 기반으로 자동 생성되며, 수정도 가능합니다.\n\n"
                                 + "로그인 사용자의 채팅 이력은 안전하게 암호화되어 저장되며, 마이페이지 → AI 추천 내역에서도 확인하실 수 있습니다.")
                         .sortOrder(30)
+                        .keywords("채팅이력,대화기록,이어서,저장,히스토리,세션,이전대화,복원")
                         .build(),
 
                 // ─────────────────────────────────────────────
@@ -253,6 +264,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "5. MMR 다양성: 비슷한 영화만 몰리지 않게 다양한 장르/분위기 포함\n\n"
                                 + "대화가 길어질수록, 리뷰/위시리스트 데이터가 쌓일수록 추천이 정교해집니다.")
                         .sortOrder(10)
+                        .keywords("AI추천,추천알고리즘,작동원리,AI,추천방식,머신러닝,협업필터링")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.RECOMMENDATION)
@@ -263,6 +275,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "• 마이페이지 → AI 추천 내역에서 과거 추천에 대한 피드백도 남길 수 있어요\n\n"
                                 + "또한 온보딩 단계에서 설정한 선호 장르를 마이페이지에서 수정하시면 기본 추천 경향 자체가 달라집니다.")
                         .sortOrder(20)
+                        .keywords("추천불만,재추천,피드백,별로,마음에안들어,다시,취향수정,개선")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.RECOMMENDATION)
@@ -275,6 +288,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "내부적으로는 두 영화의 특성 벡터를 결합한 센트로이드 검색 + '두 영화를 모두 높게 평가한 사용자들의 또 다른 선호작' 협업 필터링 + LLM 리랭커를 조합합니다.\n\n"
                                 + "로그인 없이도 사용 가능하니 친구/연인/가족과 함께 편하게 즐겨보세요!")
                         .sortOrder(30)
+                        .keywords("둘이,커플,영화고르기,MovieMatch,함께볼영화,같이,매칭,공동추천")
                         .build(),
 
                 // ─────────────────────────────────────────────
@@ -291,6 +305,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "• 정보 공유 — 개봉 소식, 이벤트 등\n\n"
                                 + "제목과 본문을 작성하고 필요 시 영화 태그/이미지를 추가할 수 있습니다. 작성 후에는 댓글을 통해 다른 사용자들과 소통하실 수 있어요.")
                         .sortOrder(10)
+                        .keywords("게시글,글쓰기,작성,커뮤니티,포스팅,글,올리기,토론,게시판")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.COMMUNITY)
@@ -306,6 +321,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "신고된 콘텐츠는 관리자가 24시간 이내에 검토합니다. 검토 결과에 따라 경고/게시글 삭제/계정 제재 등의 조치가 이뤄집니다.\n\n"
                                 + "허위 신고가 반복되면 신고 기능이 제한될 수 있으니 신중히 이용해 주세요.")
                         .sortOrder(20)
+                        .keywords("신고,불법,욕설,혐오,스팸,부적절,광고,도배,신고방법,차단")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.COMMUNITY)
@@ -317,6 +333,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "4. 도장깨기 코스 완주 시: 코스 내 영화 각각에 리뷰 작성 유도\n\n"
                                 + "리뷰 작성 시 별점(1~5점) + 본문을 입력하시면 되며, 작성한 리뷰는 커뮤니티의 '리뷰' 탭에서 다른 사용자들과 공유됩니다. 좋은 리뷰는 활동 리워드 포인트로도 보상받을 수 있어요!")
                         .sortOrder(30)
+                        .keywords("리뷰,후기,평점,별점,감상,의견,작성,영화평,코멘트")
                         .build(),
 
                 // ─────────────────────────────────────────────
@@ -333,6 +350,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "1포인트 = 10원으로 통일되며, 구독 상품을 이용하시면 매달 포인트가 자동 지급되어 더 저렴한 단가로 포인트를 획득하실 수 있습니다.\n\n"
                                 + "매일 출석 체크로도 10P~60P를 무료로 받으실 수 있으니 꼭 챙겨주세요!")
                         .sortOrder(10)
+                        .keywords("포인트,충전,포인트충전,결제,캐시,리워드,구매,크레딧,적립")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.PAYMENT)
@@ -348,6 +366,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "• 7일 경과 또는 전자상거래법상 환불 예외 사유에 해당하면 환불 불가\n\n"
                                 + "환불 관련 문의는 '문의하기' 탭에서 결제 번호와 함께 남겨주시면 빠르게 처리해 드릴게요.")
                         .sortOrder(20)
+                        .keywords("환불,반환,취소,회수,돈,결제취소,돌려받기,환급,반품")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.PAYMENT)
@@ -360,6 +379,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "해지 후 언제든 다시 구독하실 수 있으며, 재구독 시 혜택이 즉시 재개됩니다.\n\n"
                                 + "연간 구독의 경우 중도 해지 시 남은 기간에 대한 환불 정책이 별도 적용되니 결제·구독 페이지의 약관을 꼭 확인해 주세요.")
                         .sortOrder(30)
+                        .keywords("구독해지,멤버십해지,정기결제취소,구독취소,해지방법,해지,중단,자동결제")
                         .build(),
                 SupportFaq.builder()
                         .category(SupportCategory.PAYMENT)
@@ -373,6 +393,7 @@ public class SupportFaqInitializer implements ApplicationRunner {
                                 + "모든 결제는 PCI-DSS 인증을 받은 Toss Payments의 보안 결제창에서 처리되며, 몽글픽은 카드 번호 등의 민감 정보를 저장하지 않습니다.\n\n"
                                 + "결제에 문제가 있으시다면 '문의하기' 탭에서 주문번호와 함께 말씀해 주세요!")
                         .sortOrder(40)
+                        .keywords("결제수단,카드,신용카드,체크카드,간편결제,토스,카카오페이,계좌이체,휴대폰결제")
                         .build()
         );
     }

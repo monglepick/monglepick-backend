@@ -162,6 +162,7 @@ public final class AdminSupportDto {
      * @param category        카테고리 (GENERAL/ACCOUNT/CHAT/RECOMMENDATION/COMMUNITY/PAYMENT)
      * @param question        질문
      * @param answer          답변
+     * @param keywords        ES 검색 키워드 힌트 (쉼표 구분 동의어, nullable)
      * @param helpfulCount    도움됨 카운트
      * @param notHelpfulCount 도움 안됨 카운트
      * @param sortOrder       표시 순서 (nullable)
@@ -174,6 +175,7 @@ public final class AdminSupportDto {
             String category,
             String question,
             String answer,
+            String keywords,
             int helpfulCount,
             int notHelpfulCount,
             Integer sortOrder,
@@ -194,7 +196,10 @@ public final class AdminSupportDto {
             @NotBlank(message = "답변은 필수입니다.")
             String answer,
 
-            Integer sortOrder
+            Integer sortOrder,
+
+            /** ES 검색 키워드 힌트 (쉼표 구분 동의어, nullable). 예: "환불,반환,취소,돈" */
+            String keywords
     ) {}
 
     /** FAQ 수정 요청 DTO. */
@@ -211,7 +216,10 @@ public final class AdminSupportDto {
 
             Integer sortOrder,
 
-            Boolean isPublished
+            Boolean isPublished,
+
+            /** ES 검색 키워드 힌트 (쉼표 구분 동의어, nullable). 예: "비밀번호,패스워드,암호,재설정" */
+            String keywords
     ) {}
 
     /** FAQ 순서 변경 요청 DTO. */

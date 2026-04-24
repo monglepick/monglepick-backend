@@ -106,6 +106,19 @@ spring:
     ## Open Session In View 비활성화 (성능 + LazyInitializationException 명시적 처리)
     open-in-view: false
 
+  ## -------------------------------------------------------------------------
+  ## Elasticsearch 연결 설정
+  ## -------------------------------------------------------------------------
+  ## 고객센터 FAQ support_faq 인덱스 색인 전용.
+  ## Spring Data Elasticsearch 자동 구성은 사용하지 않으며 (spring-boot-starter-data-elasticsearch
+  ## 미포함), ElasticsearchConfig 에서 RestClient → ElasticsearchClient 를 수동 Bean 등록한다.
+  ## 이 값은 ElasticsearchConfig 의 @Value("${spring.elasticsearch.uris}") 로 주입된다.
+  ##
+  ## 로컬 개발: http://localhost:9200 (docker-compose ES 컨테이너)
+  ## VM4 운영 : ELASTICSEARCH_URL=http://10.20.0.10:9200 (.env.prod)
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URL:http://localhost:9200}
+
   sql:
     init:
       ## C-7: 운영 환경에서 매번 data.sql을 실행하면 중복 삽입 위험이 있으므로
@@ -156,6 +169,13 @@ cors:
 ## -------------------------------------------------------------------------
 server:
   port: ${SERVER_PORT:8080}
+  ## 리버스 프록시(Nginx) 뒤에서 X-Forwarded-Host / X-Forwarded-Proto /
+  ## X-Forwarded-Port 를 신뢰하도록 강제. Spring Security OAuth2 가
+  ## {baseUrl} 을 합성할 때 이 헤더를 참고해 redirect_uri 를
+  ## 외부 도메인(http://210.109.15.187/...) 으로 생성한다.
+  ## 미설정 시 내부 주소(http://10.20.0.11:8080/...) 로 합성되어
+  ## OAuth Provider 가 redirect_uri_mismatch 로 거부한다.
+  forward-headers-strategy: framework
   servlet:
     encoding:
       charset: UTF-8

@@ -139,6 +139,27 @@ public class AdminAuditService {
      * §7.1)이 가능하다. description 에는 tool_name + 관리자 발화 원문이 담긴다.</p>
      */
     public static final String ACTION_AGENT_EXECUTED       = "AGENT_EXECUTED";
+    /**
+     * 고객센터 FAQ 등록 (2026-04-24 추가).
+     *
+     * <p>관리자가 새 FAQ 를 등록한 이벤트. targetId = faqId(Long → String),
+     * targetType = {@link #TARGET_SUPPORT_FAQ}.</p>
+     */
+    public static final String ACTION_SUPPORT_FAQ_CREATE   = "SUPPORT_FAQ_CREATE";
+    /**
+     * 고객센터 FAQ 수정 (2026-04-24 추가).
+     *
+     * <p>질문/답변/카테고리/키워드/공개여부/순서 변경을 포함한 모든 FAQ 갱신 이벤트.
+     * targetId = faqId(Long → String), targetType = {@link #TARGET_SUPPORT_FAQ}.</p>
+     */
+    public static final String ACTION_SUPPORT_FAQ_UPDATE   = "SUPPORT_FAQ_UPDATE";
+    /**
+     * 고객센터 FAQ 삭제 (2026-04-24 추가).
+     *
+     * <p>관리자가 FAQ 를 삭제한 이벤트. ES 인덱스에서도 동시에 제거된다.
+     * targetId = faqId(Long → String), targetType = {@link #TARGET_SUPPORT_FAQ}.</p>
+     */
+    public static final String ACTION_SUPPORT_FAQ_DELETE   = "SUPPORT_FAQ_DELETE";
 
     // ──────────────────────────────────────────────────────────
     // targetType 상수
@@ -162,6 +183,13 @@ public class AdminAuditService {
      * 로그인·계정 생성·역할 변경 등 admin 레코드 자체를 대상으로 하는 이벤트에 사용.</p>
      */
     public static final String TARGET_ADMIN         = "ADMIN";
+    /**
+     * 고객센터 FAQ 엔티티 (2026-04-24 추가).
+     *
+     * <p>support_faq 테이블의 faqId 를 targetId 로 기록한다.
+     * FAQ 등록/수정/삭제 이벤트에 사용.</p>
+     */
+    public static final String TARGET_SUPPORT_FAQ   = "SUPPORT_FAQ";
 
     // ──────────────────────────────────────────────────────────
     // Public API

@@ -95,6 +95,20 @@ public class SupportFaq extends BaseAuditEntity {
     private boolean isPublished = true;
 
     /**
+     * ES 검색 키워드 힌트 (TEXT, nullable).
+     *
+     * <p>질문/답변 본문 외에 검색 품질을 높이기 위한 쉼표 구분 동의어 태그.
+     * 예: "환불,반환,취소,회수,돈,결제,돌려받기".
+     * Elasticsearch {@code keywords} 필드로 색인되어 Agent 측 multi_match 부스트 ^2 가 적용된다.
+     * null 이면 ES 색인 시 해당 필드를 누락으로 처리한다.</p>
+     *
+     * <p>Agent 팀 합의 스펙(인덱스 매핑 {@code keywords: text, analyzer=nori_analyzer})
+     * 과 연동되므로 컬럼명·타입 변경 시 반드시 양측 동기화 필요.</p>
+     */
+    @Column(name = "keywords", columnDefinition = "TEXT")
+    private String keywords;
+
+    /**
      * 생성자 (빌더 패턴).
      *
      * <p>helpfulCount / notHelpfulCount는 항상 0으로 초기화된다.
@@ -104,10 +118,11 @@ public class SupportFaq extends BaseAuditEntity {
      * @param question  질문 내용
      * @param answer    답변 내용
      * @param sortOrder 표시 순서 (nullable)
+     * @param keywords  ES 검색 키워드 힌트 (쉼표 구분 동의어, nullable)
      */
     @Builder
     public SupportFaq(SupportCategory category, String question, String answer,
-                      Integer sortOrder) {
+                      Integer sortOrder, String keywords) {
         this.category = category;
         this.question = question;
         this.answer = answer;
@@ -115,6 +130,7 @@ public class SupportFaq extends BaseAuditEntity {
         this.notHelpfulCount = 0;
         this.sortOrder = sortOrder;
         this.isPublished = true; // 생성 시 기본 공개 상태
+        this.keywords = keywords;
     }
 
     // ─────────────────────────────────────────────
@@ -122,7 +138,7 @@ public class SupportFaq extends BaseAuditEntity {
     // ─────────────────────────────────────────────
 
     /**
-     * 질문/답변/카테고리 수정.
+     * 질문/답변/카테고리/키워드 수정.
      *
      * @param category 변경할 카테고리
      * @param question 변경할 질문
@@ -132,6 +148,18 @@ public class SupportFaq extends BaseAuditEntity {
         this.category = category;
         this.question = question;
         this.answer = answer;
+    }
+
+    /**
+     * ES 검색 키워드 힌트 수정.
+     *
+     * <p>쉼표 구분 동의어 태그를 갱신한다.
+     * null 로 설정하면 ES 색인 시 keywords 필드가 누락 처리된다.</p>
+     *
+     * @param keywords 쉼표 구분 키워드 문자열 (nullable)
+     */
+    public void updateKeywords(String keywords) {
+        this.keywords = keywords;
     }
 
     /**
