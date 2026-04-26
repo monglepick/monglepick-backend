@@ -89,9 +89,6 @@ public class RoadmapService {
     /** 업적 서비스 — 코스 완주 업적 달성 연동 */
     private final AchievementService achievementService;
 
-    /** AI 리뷰 검증 에이전트 HTTP 클라이언트 */
-    private final ReviewVerificationAgentClient agentClient;
-
     /** 도장깨기 최종 감상평 레포지토리 — course_final_movie 테이블 */
     private final CourseFinalMovieRepository finalMovieRepository;
 
@@ -428,30 +425,26 @@ public class RoadmapService {
      * @throws BusinessException {@link ErrorCode#NOT_FOUND} 코스가 존재하지 않을 때
      */
     /**
-     * 도장깨기 영화 시청 인증 리뷰를 저장하고 AI 검증 결과까지 한 번에 반환한다.
+     * 도장깨기 영화 시청 인증 리뷰를 저장하고 verificationId + moviePlot을 반환한다.
      *
-     * <p>보안 재설계(2026-04-22): 기존 3-step(Client→Backend→Agent→Backend) 플로우에서
-     * AI 우회 취약점이 발견되어 Backend 가 단일 트랜잭션으로 Agent 를 직접 호출하는 구조로 전환.
-     * Client 는 단 한 번의 호출로 최종 판정을 받는다.</p>
+     * <p>2026-04-24 구조 변경: 프론트엔드 직접 에이전트 호출 방식으로 전환.
+     * Backend는 리뷰/인증 레코드를 PENDING으로 저장하고 verificationId와 moviePlot만 반환한다.
+     * 프론트엔드가 이 값으로 에이전트를 직접 호출하고, 판정 결과를
+     * applyAiVerificationResult()로 Backend에 업데이트한다.</p>
      *
      * <h4>처리 흐름</h4>
      * <ol>
      *   <li>코스 존재 확인 + 이미 인증된 영화는 기존 상태 그대로 반환</li>
      *   <li>CourseReview 저장 + CourseVerification(PENDING) 생성 (신규/재인증)</li>
-     *   <li>ReviewVerificationAgentClient 로 Agent 동기 호출 (X-Service-Key 헤더)</li>
-     *   <li>Agent 응답을 CourseVerification 에 적용 — AUTO_VERIFIED/NEEDS_REVIEW/AUTO_REJECTED</li>
-     *   <li>AUTO_VERIFIED 시 {@link #verifyMovie} 위임 — 진행률 ++ / 리워드 지급 / 완주 판정</li>
-     *   <li>Agent 호출 실패 시 PENDING 유지 (agentAvailable=false) — 관리자가 나중에 재검증 가능</li>
+     *   <li>영화 줄거리(moviePlot) 조회</li>
+     *   <li>verificationId + moviePlot을 포함한 PENDING 상태 응답 반환</li>
      * </ol>
-     *
-     * <p>Agent 호출은 트랜잭션 내부에서 수행되지만, Agent 실패 시 {@link AgentUnavailableException}
-     * 을 삼키고 PENDING 으로 커밋한다 — 리뷰 저장 자체는 유실되면 안 되기 때문.</p>
      *
      * @param courseId   코스 슬러그
      * @param movieId    영화 ID
      * @param userId     사용자 ID
      * @param reviewText 리뷰 본문 (nullable)
-     * @return AI 판정까지 반영된 최종 진행 현황
+     * @return PENDING 상태 + verificationId + moviePlot 포함 응답
      */
     @Transactional
     public CourseCompleteResponse completeMovie(String courseId, String movieId,
@@ -515,7 +508,7 @@ public class RoadmapService {
             log.info("도장깨기 리뷰 저장 완료 — courseId={}, movieId={}, userId={}", courseId, movieId, userId);
         }
 
-        // 5. 영화 줄거리 조회 (Agent 검증 시 필요)
+        // 5. 영화 줄거리 조회 — 프론트엔드가 에이전트 직접 호출 시 movie_plot으로 전달할 값
         String moviePlot = movieRepository.findById(movieId)
                 .map(m -> m.getOverview() != null ? m.getOverview() : "")
                 .orElse("");
@@ -526,70 +519,28 @@ public class RoadmapService {
                         .userId(userId).courseId(courseId).totalMovies(totalMovies)
                         .startedAt(LocalDateTime.now()).build()));
 
-        // 7. Agent 호출 — AI 판정
-        String reviewStatus = "PENDING";
-        String rationale = null;
-        Float similarityScore = null;
-        boolean agentAvailable = true;
+        log.info("리뷰 저장 완료 — 프론트엔드가 에이전트를 직접 호출할 예정. verificationId={}, movieId={}",
+                verification.getVerificationId(), movieId);
 
-        try {
-            ReviewVerificationAgentClient.VerifyResponse aiResult = agentClient.verify(
-                    verification.getVerificationId(),
-                    userId,
-                    courseId,
-                    movieId,
-                    null,
-                    reviewText != null ? reviewText : "",
-                    moviePlot
-            );
-
-            if (aiResult != null && aiResult.review_status() != null) {
-                reviewStatus = aiResult.review_status();
-                rationale = aiResult.rationale();
-                similarityScore = aiResult.similarity_score();
-
-                // matched_keywords JSON 직렬화
-                String matchedKeywordsJson = null;
-                if (aiResult.matched_keywords() != null && !aiResult.matched_keywords().isEmpty()) {
-                    try {
-                        matchedKeywordsJson = OBJECT_MAPPER.writeValueAsString(aiResult.matched_keywords());
-                    } catch (Exception ex) {
-                        log.warn("matched_keywords 직렬화 실패: {}", ex.getMessage());
-                    }
-                }
-
-                verification.applyAiDecision(
-                        aiResult.similarity_score(),
-                        matchedKeywordsJson,
-                        aiResult.confidence(),
-                        reviewStatus,
-                        rationale
-                );
-                courseVerificationRepository.save(verification);
-
-                log.info("AI 검증 결과 적용 — verificationId={}, status={}, confidence={}",
-                        verification.getVerificationId(), reviewStatus, aiResult.confidence());
-
-                // 8. AUTO_VERIFIED 일 때만 진행률 반영
-                if ("AUTO_VERIFIED".equals(reviewStatus)) {
-                    verifyMovie(userId, courseId, totalMovies, rewardPoints);
-                }
-            }
-        } catch (ReviewVerificationAgentClient.AgentUnavailableException e) {
-            // Agent 장애 시 PENDING 유지 — 리뷰는 이미 저장됐으므로 롤백하지 않음.
-            // 관리자가 나중에 "AI 재검증" 으로 회복 가능하다.
-            log.warn("Agent 호출 실패 — PENDING 유지. verificationId={}, error={}",
-                    verification.getVerificationId(), e.getMessage());
-            agentAvailable = false;
-        }
-
-        // 9. 최종 응답 구성
+        // 7. 최종 응답 구성
+        // 2026-04-24 구조 변경: Backend 에이전트 직접 호출 → 프론트엔드 직접 호출 방식으로 전환.
+        // Backend 는 리뷰/인증 레코드를 PENDING 상태로 저장하고 verificationId + moviePlot 을 반환한다.
+        // 프론트엔드는 이 값으로 /api/v1/admin/ai/review-verification/verify 를 직접 호출하여
+        // AI 판정 결과를 받은 뒤, 별도 패치 API 로 Backend 에 결과를 업데이트한다.
         UserCourseProgress finalProgress = progressRepo
                 .findByUserIdAndCourseId(userId, courseId)
                 .orElseThrow(() -> new IllegalStateException(
                         "진행 레코드가 존재해야 합니다 — userId=" + userId + ", courseId=" + courseId));
 
-        return CourseCompleteResponse.from(finalProgress, reviewStatus, rationale, similarityScore, agentAvailable);
+        return CourseCompleteResponse.from(
+                finalProgress,
+                "PENDING",
+                null,
+                null,
+                true,
+                verification.getVerificationId(),
+                moviePlot
+        );
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -637,6 +588,99 @@ public class RoadmapService {
                     movieIdsJson, e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * 프론트엔드에서 에이전트 AI 판정 결과를 전달받아 CourseVerification 에 적용한다.
+     *
+     * <p>2026-04-24 클라이언트 직접 호출 구조:
+     * Frontend → complete API → PENDING 반환(verificationId 포함) → Agent 직접 호출 → 이 API 호출</p>
+     *
+     * <h4>처리 흐름</h4>
+     * <ol>
+     *   <li>verificationId + userId 로 소유권 검증 (타인의 인증 레코드 업데이트 방지)</li>
+     *   <li>AI 판정 결과를 CourseVerification 에 반영</li>
+     *   <li>AUTO_VERIFIED 시 verifyMovie() 위임 — 진행률 ++ / 완주 판정 / 리워드 지급</li>
+     * </ol>
+     *
+     * @param verificationId course_verification PK
+     * @param userId         소유권 검증용 사용자 ID
+     * @param reviewStatus   AI 판정 결과 (AUTO_VERIFIED / NEEDS_REVIEW / AUTO_REJECTED)
+     * @param similarityScore 줄거리 ↔ 리뷰 유사도 (0.0~1.0)
+     * @param matchedKeywords 매칭된 핵심 키워드 목록
+     * @param confidence     종합 신뢰도 점수 (0.0~1.0)
+     * @param rationale      AI 판정 근거 요약
+     * @return 업데이트된 코스 진행 현황 DTO
+     */
+    @Transactional
+    public CourseCompleteResponse applyAiVerificationResult(
+            Long verificationId,
+            String userId,
+            String reviewStatus,
+            Float similarityScore,
+            List<String> matchedKeywords,
+            Float confidence,
+            String rationale
+    ) {
+        // 1. 인증 레코드 조회 + 소유권 검증
+        CourseVerification verification = courseVerificationRepository.findById(verificationId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
+                        "인증 레코드를 찾을 수 없습니다: verificationId=" + verificationId));
+
+        if (!userId.equals(verification.getUserId())) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "해당 인증 레코드에 접근할 권한이 없습니다.");
+        }
+
+        // PENDING/AUTO_REJECTED 상태에서만 AI 결과 업데이트 가능
+        String currentStatus = verification.getReviewStatus();
+        if (!"PENDING".equals(currentStatus) && !"AUTO_REJECTED".equals(currentStatus)) {
+            log.info("AI 결과 업데이트 생략 — 이미 판정된 상태: verificationId={}, status={}",
+                    verificationId, currentStatus);
+            // 이미 처리된 상태면 현재 상태를 그대로 반환
+            UserCourseProgress existingProgress = progressRepo
+                    .findByUserIdAndCourseId(userId, verification.getCourseId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND));
+            return CourseCompleteResponse.from(
+                    existingProgress, currentStatus, verification.getDecisionReason(),
+                    verification.getSimilarityScore(), true, verificationId, null);
+        }
+
+        String courseId = verification.getCourseId();
+        String movieId = verification.getMovieId();
+
+        // 2. matched_keywords JSON 직렬화
+        String matchedKeywordsJson = null;
+        if (matchedKeywords != null && !matchedKeywords.isEmpty()) {
+            try {
+                matchedKeywordsJson = OBJECT_MAPPER.writeValueAsString(matchedKeywords);
+            } catch (Exception ex) {
+                log.warn("matched_keywords 직렬화 실패: {}", ex.getMessage());
+            }
+        }
+
+        // 3. AI 판정 결과 적용
+        verification.applyAiDecision(similarityScore, matchedKeywordsJson, confidence, reviewStatus, rationale);
+        courseVerificationRepository.save(verification);
+
+        log.info("AI 검증 결과 적용 완료 — verificationId={}, status={}", verificationId, reviewStatus);
+
+        // 4. AUTO_VERIFIED 시 진행률 반영
+        if ("AUTO_VERIFIED".equals(reviewStatus)) {
+            RoadmapCourse course = courseRepo.findByCourseId(courseId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
+                            "존재하지 않는 코스입니다: courseId=" + courseId));
+            int totalMovies = course.getMovieCount() != null ? course.getMovieCount() : 0;
+            verifyMovie(userId, courseId, totalMovies, 100);
+        }
+
+        // 5. 최종 응답 구성
+        UserCourseProgress finalProgress = progressRepo
+                .findByUserIdAndCourseId(userId, courseId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "진행 레코드가 존재해야 합니다 — userId=" + userId + ", courseId=" + courseId));
+
+        return CourseCompleteResponse.from(finalProgress, reviewStatus, rationale, similarityScore, true, verificationId, null);
     }
 
     /**

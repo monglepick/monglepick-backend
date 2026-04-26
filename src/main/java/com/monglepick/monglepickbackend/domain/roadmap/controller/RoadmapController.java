@@ -331,6 +331,60 @@ public class RoadmapController extends BaseController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * 프론트엔드가 에이전트에서 받은 AI 판정 결과를 Backend에 업데이트한다.
+     *
+     * <p>2026-04-24 클라이언트 직접 호출 구조:
+     * Frontend → completeMovie → PENDING + verificationId 반환 → Agent 직접 호출 → 이 API 호출</p>
+     *
+     * @param verificationId AI 판정 대상 course_verification PK
+     * @param body           AI 판정 결과 (reviewStatus, similarityScore, matchedKeywords, confidence, rationale)
+     * @param principal      JWT 인증 정보 (필수)
+     * @return 200 OK — 업데이트된 코스 진행 현황 DTO
+     */
+    @Operation(
+            summary = "AI 리뷰 검증 결과 업데이트",
+            description = "프론트엔드가 AI 에이전트에서 받은 리뷰 검증 결과를 Backend에 적용합니다. " +
+                    "AUTO_VERIFIED 시 코스 진행률이 자동으로 반영됩니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "AI 판정 결과 업데이트 성공"),
+            @ApiResponse(responseCode = "400", description = "유효하지 않은 verificationId 또는 소유권 불일치"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @PostMapping("/verifications/{verificationId}/ai-result")
+    public ResponseEntity<CourseCompleteResponse> applyAiVerificationResult(
+            @Parameter(description = "course_verification PK", required = true)
+            @PathVariable Long verificationId,
+
+            @RequestBody Map<String, Object> body,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+
+        String reviewStatus = (String) body.getOrDefault("reviewStatus", "NEEDS_REVIEW");
+        Float similarityScore = body.get("similarityScore") != null
+                ? ((Number) body.get("similarityScore")).floatValue() : null;
+        Float confidence = body.get("confidence") != null
+                ? ((Number) body.get("confidence")).floatValue() : null;
+        String rationale = (String) body.get("rationale");
+
+        @SuppressWarnings("unchecked")
+        java.util.List<String> matchedKeywords = body.get("matchedKeywords") instanceof java.util.List
+                ? (java.util.List<String>) body.get("matchedKeywords")
+                : java.util.Collections.emptyList();
+
+        log.info("AI 검증 결과 업데이트 요청: userId={}, verificationId={}, reviewStatus={}",
+                userId, verificationId, reviewStatus);
+
+        CourseCompleteResponse response = roadmapService.applyAiVerificationResult(
+                verificationId, userId, reviewStatus, similarityScore, matchedKeywords, confidence, rationale
+        );
+        return ResponseEntity.ok(response);
+    }
+
     // ────────────────────────────────────────────────────────────────
     // 기존 엔드포인트 — 영화 인증 / 전체 진행 현황
     // ────────────────────────────────────────────────────────────────
