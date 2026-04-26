@@ -55,6 +55,7 @@ public class PlaylistDto {
      * @param description   플레이리스트 설명 (선택)
      * @param isPublic      공개 여부 (선택, 기본값: false)
      * @param coverImageUrl 커버 이미지 URL (선택, 최대 500자)
+     * @param movieIds      생성과 동시에 추가할 영화 ID 목록 (선택, 중복 자동 제거, 순서 유지)
      */
     public record CreateRequest(
 
@@ -71,7 +72,10 @@ public class PlaylistDto {
 
             /** 커버 이미지 URL (null 허용, 최대 500자) */
             @Size(max = 500, message = "커버 이미지 URL은 최대 500자입니다")
-            String coverImageUrl
+            String coverImageUrl,
+
+            /** 생성과 동시에 추가할 영화 ID 목록 (선택, null 또는 빈 목록이면 아무것도 추가하지 않음) */
+            java.util.List<String> movieIds
 
     ) {}
 

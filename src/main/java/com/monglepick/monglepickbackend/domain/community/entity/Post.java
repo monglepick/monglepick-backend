@@ -127,17 +127,42 @@ public class Post extends BaseAuditEntity {
     @Column(name = "playlist_id")
     private Long playlistId;
 
-    // ─── PLAYLIST_SHARE 전용 @Transient JOIN 캐리어 ───
+    // ─── PLAYLIST_SHARE 전용 스냅샷 컬럼 (공유 시점 캡처, 이후 원본 수정과 무관) ───
 
-    /** 플레이리스트 이름 (JOIN playlist, PLAYLIST_SHARE 조회 시 세팅) */
+    /**
+     * 공유 시점 플레이리스트 이름 스냅샷.
+     * 원본 플레이리스트 이름이 변경되어도 커뮤니티 포스트는 공유 당시 이름을 유지한다.
+     */
+    @Setter
+    @Column(name = "pl_snapshot_name", length = 200)
+    private String playlistSnapshotName;
+
+    /** 공유 시점 플레이리스트 설명 스냅샷 */
+    @Setter
+    @Column(name = "pl_snapshot_desc", columnDefinition = "TEXT")
+    private String playlistSnapshotDesc;
+
+    /** 공유 시점 플레이리스트 커버 이미지 URL 스냅샷 */
+    @Setter
+    @Column(name = "pl_snapshot_cover_url", length = 500)
+    private String playlistSnapshotCoverUrl;
+
+    /** 공유 시점 플레이리스트 영화 수 스냅샷 */
+    @Setter
+    @Column(name = "pl_snapshot_movie_count")
+    private Integer playlistSnapshotMovieCount;
+
+    // ─── PLAYLIST_SHARE 전용 @Transient JOIN 캐리어 (조회용, 비영속) ───
+
+    /** 플레이리스트 이름 (스냅샷 우선, 없으면 JOIN playlist 값) */
     @Transient @Setter private String playlistName;
-    /** 플레이리스트 설명 (JOIN playlist) */
+    /** 플레이리스트 설명 (스냅샷 우선, 없으면 JOIN playlist 값) */
     @Transient @Setter private String playlistDescription;
-    /** 플레이리스트 커버 이미지 URL (JOIN playlist) */
+    /** 플레이리스트 커버 이미지 URL (스냅샷 우선, 없으면 JOIN playlist 값) */
     @Transient @Setter private String playlistCoverImageUrl;
-    /** 플레이리스트 좋아요 수 (JOIN playlist) */
+    /** 플레이리스트 좋아요 수 (항상 라이브 — 좋아요는 계속 누적됨) */
     @Transient @Setter private Integer playlistLikeCount;
-    /** 플레이리스트 영화 수 (서브쿼리 COUNT) */
+    /** 플레이리스트 영화 수 (스냅샷 우선) */
     @Transient @Setter private Integer playlistMovieCount;
 
     /**

@@ -67,6 +67,7 @@ public class PostService {
 
         // PLAYLIST_SHARE 전용 검증
         Long playlistId = null;
+        com.monglepick.monglepickbackend.domain.playlist.entity.Playlist sharedPlaylist = null;
         if (category == Post.Category.PLAYLIST_SHARE) {
             playlistId = validateAndGetPlaylistId(request.playlistId(), userId);
 
@@ -76,6 +77,9 @@ public class PostService {
                 log.info("PLAYLIST_SHARE 중복 공유 방지 — 기존 postId={} 반환", existing.getPostId());
                 return PostResponse.from(existing, null);
             }
+
+            // 공유 시점 플레이리스트 정보 조회 — 스냅샷 캡처용
+            sharedPlaylist = playlistMapper.findById(playlistId);
         }
 
         Post post = Post.builder()
@@ -86,6 +90,18 @@ public class PostService {
                 .status(PostStatus.PUBLISHED)
                 .playlistId(playlistId)
                 .build();
+
+        // PLAYLIST_SHARE: 공유 시점 플레이리스트 데이터 스냅샷 저장
+        // 이후 원본 플레이리스트가 수정되어도 커뮤니티 포스트는 공유 당시 정보를 유지한다.
+        if (sharedPlaylist != null) {
+            post.setPlaylistSnapshotName(sharedPlaylist.getPlaylistName());
+            post.setPlaylistSnapshotDesc(sharedPlaylist.getDescription());
+            post.setPlaylistSnapshotCoverUrl(sharedPlaylist.getCoverImageUrl());
+            int movieCount = playlistMapper.findItemsByPlaylistId(playlistId).size();
+            post.setPlaylistSnapshotMovieCount(movieCount);
+            log.info("플레이리스트 공유 스냅샷 저장: playlistId={}, name={}, movieCount={}",
+                    playlistId, sharedPlaylist.getPlaylistName(), movieCount);
+        }
         // ✅ 이미지 URL 저장
         // 프론트에서 이미지 업로드 후 받은 URL 목록을 콤마 구분 문자열로 변환하여 저장
         // 예: "http://localhost:8080/images/userId/a.jpg,http://localhost:8080/images/userId/b.jpg"

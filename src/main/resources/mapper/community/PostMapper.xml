@@ -234,13 +234,15 @@
             user_id, title, content, category, status,
             view_count, like_count, comment_count,
             is_deleted, is_blinded, playlist_id, image_urls,
+            pl_snapshot_name, pl_snapshot_desc, pl_snapshot_cover_url, pl_snapshot_movie_count,
             created_at, updated_at, created_by, updated_by
         ) VALUES (
-                     #{userId}, #{title}, #{content}, #{category}, #{status},
-                     0, 0, 0,
-                     false, false, #{playlistId}, #{imageUrls},
-                     NOW(), NOW(), #{createdBy}, #{updatedBy}
-                 )
+            #{userId}, #{title}, #{content}, #{category}, #{status},
+            0, 0, 0,
+            false, false, #{playlistId}, #{imageUrls},
+            #{playlistSnapshotName}, #{playlistSnapshotDesc}, #{playlistSnapshotCoverUrl}, #{playlistSnapshotMovieCount},
+            NOW(), NOW(), #{createdBy}, #{updatedBy}
+        )
     </insert>
 
 
@@ -359,21 +361,27 @@
         PLAYLIST_SHARE 카테고리, PUBLISHED 상태, 소프트 삭제 제외.
         alias 접두사 pl_ 로 playlist 컬럼과 posts 컬럼 충돌을 방지한다.
     -->
+    <!--
+        PLAYLIST_SHARE 피드 조회.
+        이름·설명·커버·영화수는 공유 시점 스냅샷(pl_snapshot_*)을 우선 사용.
+        스냅샷이 없는 레거시 포스트는 COALESCE로 라이브 JOIN 값을 fallback.
+        좋아요 수는 항상 라이브(공유 이후에도 계속 누적되는 값).
+    -->
     <select id="findPlaylistSharePostsWithDetail" resultMap="postWithPlaylistResultMap">
         SELECT p.post_id, p.user_id, p.title, p.content, p.category,
                p.view_count, p.status, p.like_count, p.comment_count,
                p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
                p.created_at, p.updated_at, p.created_by, p.updated_by,
                u.nickname AS nickname,
-               pl.playlist_name     AS pl_playlist_name,
-               pl.description       AS pl_description,
-               pl.cover_image_url   AS pl_cover_image_url,
-               pl.like_count        AS pl_like_count,
-               (SELECT COUNT(*)
-                FROM playlist_item pi2
-                WHERE pi2.playlist_id = p.playlist_id) AS pl_movie_count
+               COALESCE(p.pl_snapshot_name,      pl.playlist_name)   AS pl_playlist_name,
+               COALESCE(p.pl_snapshot_desc,      pl.description)      AS pl_description,
+               COALESCE(p.pl_snapshot_cover_url, pl.cover_image_url)  AS pl_cover_image_url,
+               pl.like_count                                           AS pl_like_count,
+               COALESCE(p.pl_snapshot_movie_count,
+                        (SELECT COUNT(*) FROM playlist_item pi2
+                         WHERE pi2.playlist_id = p.playlist_id))       AS pl_movie_count
         FROM posts p
-        LEFT JOIN users u    ON p.user_id     = u.user_id
+        LEFT JOIN users u     ON p.user_id     = u.user_id
         LEFT JOIN playlist pl ON p.playlist_id = pl.playlist_id
         WHERE p.category    = 'PLAYLIST_SHARE'
           AND p.status      = 'PUBLISHED'

@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.playlist.service;
 
+import com.monglepick.monglepickbackend.domain.community.service.PostService;
 import com.monglepick.monglepickbackend.domain.playlist.dto.PlaylistDto;
 import com.monglepick.monglepickbackend.domain.playlist.entity.Playlist;
 import com.monglepick.monglepickbackend.domain.playlist.entity.PlaylistItem;
@@ -59,6 +60,13 @@ public class PlaylistService {
 
     /** 플레이리스트 통합 Mapper — playlist/playlist_item/playlist_likes 세 테이블 모두 담당 */
     private final PlaylistMapper playlistMapper;
+
+    /**
+     * 커뮤니티 포스트 서비스 — 비공유 전환 시 PLAYLIST_SHARE 게시글 삭제에 사용.
+     * 플레이리스트가 비공개로 전환될 때 연결된 커뮤니티 공유 포스트도 함께 제거해야 하므로
+     * PostService.deletePostByPlaylistId()를 위임 호출한다.
+     */
+    private final PostService postService;
 
     // ─────────────────────────────────────────────
     // 조회 (readOnly = true 상속)
@@ -160,6 +168,24 @@ public class PlaylistService {
         playlistMapper.insertPlaylist(playlist);
         log.info("플레이리스트 생성 완료: playlistId={}", playlist.getPlaylistId());
 
+        // 생성과 동시에 영화 추가 — movieIds가 있으면 중복 제거 후 순서대로 INSERT
+        if (request.movieIds() != null && !request.movieIds().isEmpty()) {
+            List<String> unique = request.movieIds().stream()
+                    .filter(id -> id != null && !id.isBlank())
+                    .distinct()
+                    .toList();
+            for (int i = 0; i < unique.size(); i++) {
+                PlaylistItem item = PlaylistItem.builder()
+                        .playlistId(playlist.getPlaylistId())
+                        .movieId(unique.get(i))
+                        .sortOrder(i)
+                        .addedAt(LocalDateTime.now())
+                        .build();
+                playlistMapper.insertItem(item);
+            }
+            log.info("플레이리스트 초기 영화 추가 완료: playlistId={}, count={}", playlist.getPlaylistId(), unique.size());
+        }
+
         return new PlaylistDto.CreateResponse(playlist.getPlaylistId());
     }
 
@@ -186,6 +212,15 @@ public class PlaylistService {
         if (Boolean.TRUE.equals(playlist.getIsImported()) && Boolean.TRUE.equals(request.isPublic())) {
             throw new BusinessException(ErrorCode.PLAYLIST_IMPORTED_CANNOT_SHARE,
                     "가져온 플레이리스트는 공개할 수 없습니다: playlistId=" + playlistId);
+        }
+
+        // 공개 → 비공개 전환 시: 연결된 커뮤니티 PLAYLIST_SHARE 포스트도 함께 삭제
+        // (포스트가 없으면 PostService 내부에서 조용히 무시)
+        boolean wasPublic  = Boolean.TRUE.equals(playlist.getIsPublic());
+        boolean goPrivate  = Boolean.FALSE.equals(request.isPublic());
+        if (wasPublic && goPrivate) {
+            postService.deletePostByPlaylistId(playlistId, userId);
+            log.info("플레이리스트 비공개 전환 — 커뮤니티 포스트 삭제: playlistId={}", playlistId);
         }
 
         // 도메인 메서드로 null-safe 수정 후 MyBatis UPDATE 명시 호출 (dirty checking 미지원)
