@@ -700,14 +700,25 @@ public class AdminPaymentService {
      */
     @Transactional
     public PointItemResponse createPointItem(PointItemCreateRequest request) {
-        log.info("[AdminPayment] 포인트 아이템 등록 — name={}, price={}",
-                request.itemName(), request.itemPrice());
+        log.info("[AdminPayment] 포인트 아이템 등록 — name={}, price={}, itemType={}",
+                request.itemName(), request.itemPrice(), request.itemType());
+
+        /* itemType 문자열 → enum 변환. Blank/미지원 값은 UNKNOWN 으로 처리되며
+         * exchangeItem 에서 Dispense.UNSUPPORTED 로 차단되므로 안전. 운영자에게
+         * "현재 판매되지 않는 아이템" 메시지가 노출돼 itemType 누락이 시각적으로 드러난다. */
+        com.monglepick.monglepickbackend.domain.reward.constants.PointItemType resolvedType =
+                com.monglepick.monglepickbackend.domain.reward.constants.PointItemType
+                        .fromCodeOrUnknown(request.itemType());
 
         PointItem item = PointItem.builder()
                 .itemName(request.itemName())
                 .itemDescription(request.itemDescription())
                 .itemPrice(request.itemPrice())
                 .itemCategory(request.itemCategory() != null ? request.itemCategory() : "general")
+                .itemType(resolvedType)
+                .amount(request.amount())
+                .durationDays(request.durationDays())
+                .imageUrl(request.imageUrl())
                 .isActive(request.isActive() != null ? request.isActive() : true)
                 .build();
 
@@ -738,6 +749,16 @@ public class AdminPaymentService {
                             "포인트 아이템을 찾을 수 없습니다: id=" + itemId);
                 });
 
+        /* itemType 문자열 → enum 변환. NULL/blank 면 기존 값을 유지하기 위해 existing 의 값을 사용한다.
+         * (운영 중 itemType 을 비활성으로 만드는 의도는 없다고 가정 — 비활성화는 isActive=false 로 처리.) */
+        com.monglepick.monglepickbackend.domain.reward.constants.PointItemType resolvedType;
+        if (request.itemType() == null || request.itemType().isBlank()) {
+            resolvedType = existing.getItemType();
+        } else {
+            resolvedType = com.monglepick.monglepickbackend.domain.reward.constants.PointItemType
+                    .fromCodeOrUnknown(request.itemType());
+        }
+
         // @Getter 전용 엔티티는 setter 가 없으므로 Builder 로 병합 후 save (JPA merge 패턴)
         PointItem merged = PointItem.builder()
                 .pointItemId(existing.getPointItemId())
@@ -745,6 +766,10 @@ public class AdminPaymentService {
                 .itemDescription(request.itemDescription())
                 .itemPrice(request.itemPrice())
                 .itemCategory(request.itemCategory() != null ? request.itemCategory() : "general")
+                .itemType(resolvedType)
+                .amount(request.amount())
+                .durationDays(request.durationDays())
+                .imageUrl(request.imageUrl())
                 .isActive(request.isActive())
                 .build();
 
@@ -896,6 +921,9 @@ public class AdminPaymentService {
 
     /**
      * {@link PointItem} 엔티티 → {@link PointItemResponse} 응답 DTO.
+     *
+     * <p>2026-04-27: itemType/amount/durationDays/imageUrl 노출. Admin UI 가 신규 아바타·배지 등록 시
+     * 지급 분기 키와 이미지 경로를 필드 단위로 편집할 수 있도록 한다.</p>
      */
     private PointItemResponse toPointItemResponse(PointItem item) {
         return new PointItemResponse(
@@ -904,6 +932,10 @@ public class AdminPaymentService {
                 item.getItemDescription(),
                 item.getItemPrice(),
                 item.getItemCategory(),
+                item.getItemType() != null ? item.getItemType().name() : null,
+                item.getAmount(),
+                item.getDurationDays(),
+                item.getImageUrl(),
                 item.getIsActive(),
                 item.getCreatedAt(),
                 item.getUpdatedAt()

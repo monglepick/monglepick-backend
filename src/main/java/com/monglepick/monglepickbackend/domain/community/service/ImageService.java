@@ -268,4 +268,170 @@ public class ImageService {
         }
         return true;
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Admin 자산 업로드 (2026-04-27 신설) — point_items 이미지 전용
+    // ═══════════════════════════════════════════════════════════════
+
+    /** Admin 자산 업로드용 허용 확장자 — SVG 포함. 사용자 업로드보다 신뢰도 높지만 별도 화이트리스트로 격리. */
+    private static final Set<String> ADMIN_ALLOWED_EXTENSIONS = Set.of(
+            ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"
+    );
+
+    /** Admin 자산 업로드 시 허용되는 subdir — point_items/{avatars,badges} 만. */
+    private static final Set<String> ADMIN_ALLOWED_SUBDIRS = Set.of(
+            "avatars", "badges"
+    );
+
+    /** SVG 내부에서 거부할 위험 패턴 (XSS 페이로드의 일반 형태). */
+    private static final List<String> SVG_DANGEROUS_PATTERNS = List.of(
+            "<script", "</script", "javascript:", "data:text/html",
+            "onload=", "onclick=", "onerror=", "onmouseover=", "onfocus=",
+            "<iframe", "<embed", "<object",
+            "xlink:href=\"javascript:", "xlink:href='javascript:"
+    );
+
+    /**
+     * Admin 자산(아바타·배지) 이미지 업로드.
+     *
+     * <p>일반 사용자 업로드({@link #uploadImages})와 달리 SVG 를 허용한다. Admin 인증이
+     * 전제이므로 신뢰도가 높지만, SVG 의 XSS 위험을 줄이기 위해 본문에서 위험 패턴
+     * (&lt;script&gt;, javascript:, on*= 등)을 검출하여 즉시 차단한다.</p>
+     *
+     * <p>저장 경로: {@code {uploadDir}/admin-assets/{subdir}/{uuid}.{ext}}<br>
+     * 반환 URL : {@code {urlPrefix}/admin-assets/{subdir}/{filename}} (절대 URL)</p>
+     *
+     * <p>운영 보안 추가 권장: nginx 에서 {@code application/svg+xml} 응답에
+     * {@code Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'} 강제.</p>
+     *
+     * @param file   업로드 파일
+     * @param subdir "avatars" | "badges" — 그 외 값은 거부
+     * @return 절대 URL (DB imageUrl 컬럼에 그대로 저장)
+     */
+    public String uploadAdminAssetImage(MultipartFile file, String subdir) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "업로드할 파일이 없습니다.");
+        }
+        if (subdir == null || !ADMIN_ALLOWED_SUBDIRS.contains(subdir)) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "subdir 은 'avatars' 또는 'badges' 만 허용됩니다.");
+        }
+
+        // ── 1차: 파일 크기 (Admin 용으로 5MB 한도 — SVG 는 보통 수 KB) ──
+        final long ADMIN_MAX_SIZE = 5L * 1024 * 1024;
+        if (file.getSize() > ADMIN_MAX_SIZE) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "파일 크기는 5MB 이하여야 합니다.");
+        }
+
+        // ── 2차: 확장자 추출 + 화이트리스트 (Admin 용 — SVG 포함) ──
+        String ext = extractAdminAssetExtension(file.getOriginalFilename());
+
+        // ── 3차: 본문 검증 분기 ──
+        // SVG 는 magic bytes 가 아니라 XML 이므로 별도 본문 검사. 그 외는 기존 magic bytes 재사용.
+        if (".svg".equals(ext)) {
+            validateSvgContent(file);
+        } else if (!matchesImageMagicBytes(file)) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "파일 내용이 이미지가 아닙니다. (헤더 시그니처 불일치)");
+        }
+
+        // ── 4차: 저장 ──
+        Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
+        Path adminDir = uploadPath.resolve("admin-assets").resolve(subdir);
+        String filename = UUID.randomUUID() + ext;
+        Path filePath = adminDir.resolve(filename);
+
+        Path normalizedFile = filePath.toAbsolutePath().normalize();
+        if (!normalizedFile.startsWith(uploadPath)) {
+            log.error("[Admin] Path traversal 차단 — subdir={}, filename={}, resolved={}",
+                    subdir, filename, normalizedFile);
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "잘못된 파일 경로입니다.");
+        }
+
+        try {
+            Files.createDirectories(adminDir);
+            try (InputStream inputStream = file.getInputStream()) {
+                Files.copy(inputStream, normalizedFile,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            log.error("[Admin] 자산 업로드 실패 — subdir={}, filename={}", subdir, filename, e);
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "이미지 저장에 실패했습니다.");
+        }
+
+        String url = urlPrefix + "/admin-assets/" + subdir + "/" + filename;
+        log.info("[Admin] 자산 업로드 완료 — subdir={}, path={}, url={}", subdir, normalizedFile, url);
+        return url;
+    }
+
+    /**
+     * Admin 자산용 확장자 추출 — {@link #getExtension} 의 SVG 허용 변종.
+     *
+     * <p>일반 사용자 경로의 {@code DENIED_EXTENSIONS} 가 SVG 를 차단하는데, Admin 경로에서는
+     * SVG 를 허용해야 하므로 별도 메서드로 분리. 위험 확장자 차단은 동일하게 유지.</p>
+     */
+    private String extractAdminAssetExtension(String filename) {
+        if (filename == null || filename.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "파일명이 비어 있습니다.");
+        }
+
+        String basename = filename;
+        int slash = Math.max(basename.lastIndexOf('/'), basename.lastIndexOf('\\'));
+        if (slash >= 0) basename = basename.substring(slash + 1);
+
+        if (!basename.contains(".")) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "확장자가 필요합니다.");
+        }
+
+        String ext = basename.substring(basename.lastIndexOf(".")).toLowerCase();
+
+        /* 위험 확장자 차단 — DENIED_EXTENSIONS 의 SVG 만 제외하고 그대로 적용. */
+        for (String denied : DENIED_EXTENSIONS) {
+            /* SVG 는 Admin 경로에서만 허용하므로 DENIED_EXTENSIONS 매칭에서 제외. */
+            if (".svg".equals(denied)) continue;
+            if (denied.equals(ext)) {
+                log.warn("[Admin] 위험 확장자 업로드 차단 — original={}, ext={}", filename, ext);
+                throw new BusinessException(ErrorCode.INVALID_INPUT, "허용되지 않은 파일 형식입니다.");
+            }
+        }
+
+        if (!ADMIN_ALLOWED_EXTENSIONS.contains(ext)) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "JPG, PNG, GIF, WEBP, SVG 형식만 업로드 가능합니다.");
+        }
+
+        return ext.equals(".jpeg") ? ".jpg" : ext;
+    }
+
+    /**
+     * SVG 본문에서 XSS 위험 패턴을 검출한다.
+     *
+     * <p>완전한 sanitization 은 아니지만, 일반적인 페이로드(&lt;script&gt;, javascript:,
+     * on*= 이벤트 핸들러)를 모두 차단한다. 합법적인 디자인 SVG 에는 이들 패턴이 등장할
+     * 이유가 없다.</p>
+     */
+    private void validateSvgContent(MultipartFile file) {
+        try (InputStream is = file.getInputStream()) {
+            byte[] bytes = is.readAllBytes();
+            String content = new String(bytes, java.nio.charset.StandardCharsets.UTF_8).toLowerCase();
+
+            /* SVG 의 기본 요건 — <svg 태그가 본문에 등장해야 한다. */
+            if (!content.contains("<svg")) {
+                throw new BusinessException(ErrorCode.INVALID_INPUT,
+                        "SVG 파일 형식이 올바르지 않습니다.");
+            }
+
+            for (String dangerous : SVG_DANGEROUS_PATTERNS) {
+                if (content.contains(dangerous)) {
+                    log.warn("[Admin] SVG 위험 패턴 검출 — pattern={}, filename={}",
+                            dangerous, file.getOriginalFilename());
+                    throw new BusinessException(ErrorCode.INVALID_INPUT,
+                            "SVG 파일에 허용되지 않은 요소가 포함되어 있습니다: " + dangerous);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("[Admin] SVG 본문 검증 실패 — 파일 읽기 오류", e);
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "SVG 파일을 읽을 수 없습니다.");
+        }
+    }
 }

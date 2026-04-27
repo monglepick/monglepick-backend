@@ -76,6 +76,25 @@ public interface UserItemRepository extends JpaRepository<UserItem, Long> {
                                                   @Param("category") String category);
 
     /**
+     * 다수 사용자의 EQUIPPED 아이템을 한 번에 조회 (2026-04-27 신설).
+     *
+     * <p>커뮤니티 게시글 목록·리뷰 목록 등 N개 작성자의 장착 아이템을 한 번에 가져와
+     * N+1 쿼리를 방지한다. category 별 페치(`avatar` / `badge`)로 호출하면 페이지당 2 쿼리로 끝.</p>
+     *
+     * @param userIds  사용자 ID 배열 (보통 페이지당 20명 이내)
+     * @param category PointItemCategory 정규값 ("avatar" | "badge")
+     * @return EQUIPPED 아이템 목록 (각 사용자당 카테고리 1개 — 정합성 침해 시 복수)
+     */
+    @Query(
+            "SELECT ui FROM UserItem ui JOIN FETCH ui.pointItem pi "
+                    + "WHERE ui.userId IN :userIds "
+                    + "AND pi.itemCategory = :category "
+                    + "AND ui.status = 'EQUIPPED'"
+    )
+    List<UserItem> findEquippedByUserIdsAndCategory(@Param("userIds") java.util.Collection<String> userIds,
+                                                    @Param("category") String category);
+
+    /**
      * 유저의 상태별 보유 개수 집계 — 요약 카드 렌더링용.
      *
      * @param userId 사용자 ID

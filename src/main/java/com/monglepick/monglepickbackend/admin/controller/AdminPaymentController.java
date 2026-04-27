@@ -18,6 +18,7 @@ import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PointItemRespo
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.PointItemUpdateRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminPaymentDto.SubscriptionSummary;
 import com.monglepick.monglepickbackend.admin.service.AdminPaymentService;
+import com.monglepick.monglepickbackend.domain.community.service.ImageService;
 import com.monglepick.monglepickbackend.global.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -40,6 +41,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -80,6 +82,15 @@ public class AdminPaymentController {
 
     /** 결제/포인트 관리 비즈니스 로직 서비스 */
     private final AdminPaymentService adminPaymentService;
+
+    /**
+     * 이미지 업로드 서비스 (2026-04-27 신규 — point_items 자산 업로드).
+     *
+     * <p>커뮤니티 ImageService 를 재사용하되, Admin 자산 전용 메서드
+     * {@link ImageService#uploadAdminAssetImage(MultipartFile, String)} 만 호출한다.
+     * SVG 허용 + admin-assets 디렉토리 격리.</p>
+     */
+    private final ImageService imageService;
 
     // ======================== 결제 주문 ========================
 
@@ -426,4 +437,45 @@ public class AdminPaymentController {
 
     // 설계서 범위: 포인트 아이템은 물리 삭제 대신 isActive=false 로 비활성화한다.
     // (따라서 DELETE EP 는 정의하지 않는다)
+
+    /**
+     * 포인트 아이템 이미지 업로드 (2026-04-27 신규).
+     *
+     * <p>Admin 페이지의 PointItem 등록·수정 폼에서 운영자가 SVG/PNG 등 이미지를 직접 업로드한다.
+     * 응답 URL 을 받아 {@code imageUrl} 필드에 채운 뒤 /point/items 등록 또는 수정 EP 를 호출한다.</p>
+     *
+     * <h3>보안</h3>
+     * <ul>
+     *   <li>Admin 권한 검증은 {@link com.monglepick.monglepickbackend.global.security.SecurityConfig}
+     *       에서 {@code /api/v1/admin/**} 패턴으로 일괄 처리.</li>
+     *   <li>파일 검증(확장자/MIME/magic bytes/SVG XSS 패턴/path traversal) 은
+     *       {@link ImageService#uploadAdminAssetImage}에서 수행.</li>
+     *   <li>저장 위치: {@code {uploadDir}/admin-assets/{subdir}/{uuid}.{ext}}</li>
+     * </ul>
+     *
+     * @param file   업로드 multipart 파일 (SVG/PNG/JPG/WEBP/GIF, 5MB 한도)
+     * @param subdir "avatars" 또는 "badges" — 그 외 값은 거부
+     * @return 절대 URL (DB imageUrl 컬럼에 그대로 저장)
+     */
+    @Operation(
+            summary = "포인트 아이템 이미지 업로드",
+            description = "Admin 이 신규 아바타·배지 등록 시 사용하는 이미지를 업로드한다. SVG 포함 5MB 이내."
+    )
+    @PostMapping(value = "/point/items/images", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<PointItemImageUploadResponse>> uploadPointItemImage(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("subdir") String subdir
+    ) {
+        log.info("[AdminPayment] 포인트 아이템 이미지 업로드 요청 — subdir={}, originalName={}",
+                subdir, file != null ? file.getOriginalFilename() : null);
+        String url = imageService.uploadAdminAssetImage(file, subdir);
+        return ResponseEntity.ok(ApiResponse.ok(new PointItemImageUploadResponse(url)));
+    }
+
+    /**
+     * 포인트 아이템 이미지 업로드 응답 DTO.
+     *
+     * <p>클라이언트는 {@code url} 을 그대로 PointItemCreate/UpdateRequest 의 {@code imageUrl} 에 전달한다.</p>
+     */
+    public record PointItemImageUploadResponse(String url) {}
 }
