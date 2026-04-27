@@ -164,6 +164,8 @@ public class Post extends BaseAuditEntity {
     @Transient @Setter private Integer playlistLikeCount;
     /** 플레이리스트 영화 수 (스냅샷 우선) */
     @Transient @Setter private Integer playlistMovieCount;
+    /** 현재 요청 사용자가 이 플레이리스트에 좋아요를 눌렀는지 여부 (비로그인 시 false) */
+    @Transient @Setter private Boolean playlistLikedByCurrentUser;
 
     /**
      * 게시글 카테고리 열거형.

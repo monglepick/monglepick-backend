@@ -481,6 +481,16 @@ public class RoadmapService {
                     .orElseGet(() -> progressRepo.save(UserCourseProgress.builder()
                             .userId(userId).courseId(courseId).totalMovies(totalMovies)
                             .startedAt(LocalDateTime.now()).build()));
+            // PENDING/NEEDS_REVIEW 상태는 프론트엔드가 에이전트를 다시 호출할 수 있도록 verificationId/moviePlot 반환
+            if ("PENDING".equals(existingStatus) || "NEEDS_REVIEW".equals(existingStatus)) {
+                Long existingVerificationId = existingVerification
+                        .map(CourseVerification::getVerificationId).orElse(null);
+                String existingMoviePlot = movieRepository.findById(movieId)
+                        .map(m -> m.getOverview() != null ? m.getOverview() : "")
+                        .orElse("");
+                return CourseCompleteResponse.from(progress, existingStatus, existingRationale, null, true,
+                        existingVerificationId, existingMoviePlot);
+            }
             return CourseCompleteResponse.from(progress, existingStatus, existingRationale, null, true);
         }
 

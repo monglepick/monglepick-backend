@@ -350,13 +350,19 @@ public class PlaylistDto {
      * @param likeCount     플레이리스트 좋아요 수
      * @param movieCount    포함된 영화 수
      */
+    /**
+     * @param likedByCurrentUser 현재 요청 사용자가 이 플레이리스트에 좋아요를 눌렀는지 여부.
+     *                           비로그인 사용자는 항상 false.
+     *                           새로고침 후 좋아요 상태 복원을 위해 반드시 포함해야 한다.
+     */
     public record SharedPlaylistInfo(
             Long playlistId,
             String playlistName,
             String description,
             String coverImageUrl,
             Integer likeCount,
-            Integer movieCount
+            Integer movieCount,
+            boolean likedByCurrentUser
     ) {}
 
     /**
@@ -369,5 +375,81 @@ public class PlaylistDto {
      */
     public record ImportResponse(
             Long newPlaylistId
+    ) {}
+
+    // ─── 커뮤니티 공유 모달 전용 DTO ───
+
+    /**
+     * 공유 모달용 플레이리스트 항목 응답 DTO.
+     *
+     * <p>{@code GET /api/v1/playlists/shareable} 응답으로, 모달 목록에
+     * 영화 수({@code itemCount})와 이미 커뮤니티 공유됐는지({@code isShared})를 포함한다.</p>
+     *
+     * @param playlistId    플레이리스트 고유 ID
+     * @param playlistName  플레이리스트 이름
+     * @param description   플레이리스트 설명 (null 가능)
+     * @param isPublic      공개 여부
+     * @param likeCount     좋아요 수
+     * @param coverImageUrl 커버 이미지 URL (null 가능)
+     * @param isImported    가져온(복사) 플레이리스트 여부 (true이면 공유 불가)
+     * @param itemCount     영화 수
+     * @param isShared      이미 커뮤니티에 공유됐는지 여부
+     * @param createdAt     생성 시각
+     */
+    public record ShareablePlaylistResponse(
+            Long playlistId,
+            String playlistName,
+            String description,
+            Boolean isPublic,
+            Integer likeCount,
+            String coverImageUrl,
+            Boolean isImported,
+            int itemCount,
+            boolean isShared,
+            LocalDateTime createdAt
+    ) {
+        public static ShareablePlaylistResponse from(Playlist entity) {
+            return new ShareablePlaylistResponse(
+                    entity.getPlaylistId(),
+                    entity.getPlaylistName(),
+                    entity.getDescription(),
+                    entity.getIsPublic(),
+                    entity.getLikeCount(),
+                    entity.getCoverImageUrl(),
+                    Boolean.TRUE.equals(entity.getIsImported()),
+                    entity.getItemCount() != null ? entity.getItemCount() : 0,
+                    Boolean.TRUE.equals(entity.getIsShared()),
+                    entity.getCreatedAt()
+            );
+        }
+    }
+
+    /**
+     * 커뮤니티 공유 요청 DTO.
+     *
+     * <p>{@code POST /api/v1/playlists/{playlistId}/community-share} 요청 바디.
+     * title·content 모두 선택 필드로, 미입력 시 플레이리스트 이름과 기본 문구가 사용된다.</p>
+     *
+     * @param title   커뮤니티 포스트 제목 (선택, 미입력 시 플레이리스트 이름으로 대체)
+     * @param content 커뮤니티 포스트 본문 (선택, 미입력 시 기본 문구로 대체)
+     */
+    public record CommunityShareRequest(
+            String title,
+            String content
+    ) {}
+
+    /**
+     * 커뮤니티 공유 완료 응답 DTO.
+     *
+     * @param postId       생성된 커뮤니티 포스트 ID
+     * @param playlistId   공유된 플레이리스트 ID
+     * @param playlistName 플레이리스트 이름
+     * @param isPublic     공유 후 공개 여부 (항상 true)
+     */
+    public record CommunityShareResponse(
+            Long postId,
+            Long playlistId,
+            String playlistName,
+            boolean isPublic
     ) {}
 }

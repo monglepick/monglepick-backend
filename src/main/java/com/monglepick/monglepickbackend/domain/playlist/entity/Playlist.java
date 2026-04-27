@@ -8,11 +8,13 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 /**
  * 플레이리스트 엔티티 — playlist 테이블 매핑.
@@ -105,6 +107,16 @@ public class Playlist extends BaseAuditEntity {
     @Column(name = "is_deleted")
     @Builder.Default
     private Boolean isDeleted = false;
+
+    // ─── 공유 모달 전용 @Transient JOIN 캐리어 ───
+    // MyBatis ResultMap 'playlistShareableResultMap'이 쿼리 결과를 주입한다.
+    // @Transient로 JPA 영속성에서 제외된다.
+
+    /** 플레이리스트 내 영화 수 (JOIN COUNT, 공유 모달 전용) */
+    @Transient @Setter private Integer itemCount;
+
+    /** 커뮤니티에 이미 공유됐는지 여부 (PLAYLIST_SHARE 포스트 존재 여부) */
+    @Transient @Setter private Boolean isShared;
 
     // ─────────────────────────────────────────────
     // 도메인 메서드 (setter 대신 의미 있는 메서드명 사용)

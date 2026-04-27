@@ -403,6 +403,91 @@ public class PlaylistController extends BaseController {
     }
 
     // ─────────────────────────────────────────────
+    // 커뮤니티 공유 모달
+    // ─────────────────────────────────────────────
+
+    /**
+     * 커뮤니티 공유 모달에 표시할 내 플레이리스트 목록을 조회한다.
+     *
+     * <p>기본 목록 정보에 더해 영화 수({@code itemCount})와
+     * 이미 커뮤니티에 공유됐는지({@code isShared})를 함께 반환한다.
+     * 프론트엔드는 이 응답으로 모달 항목을 렌더링하고
+     * {@code isImported=true}인 플레이리스트는 공유 버튼을 비활성화해야 한다.</p>
+     */
+    @Operation(
+            summary = "공유 모달용 내 플레이리스트 목록",
+            description = "커뮤니티 공유 모달에서 사용할 내 플레이리스트 목록을 반환합니다. " +
+                    "각 항목에 영화 수(itemCount)와 이미 공유됐는지 여부(isShared)가 포함됩니다. " +
+                    "isImported=true 인 플레이리스트는 공유 불가입니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @GetMapping("/shareable")
+    public ResponseEntity<ApiResponse<Page<PlaylistDto.ShareablePlaylistResponse>>> getShareablePlaylists(
+            @Parameter(description = "페이지 번호 (0-based)", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+
+            @Parameter(description = "페이지 크기 (최대 100)", example = "20")
+            @RequestParam(defaultValue = "20") int size,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        int limitedSize = limitPageSize(size);
+        Pageable pageable = PageRequest.of(page, limitedSize, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        log.debug("공유 모달용 플레이리스트 목록 조회: userId={}", userId);
+        Page<PlaylistDto.ShareablePlaylistResponse> result =
+                playlistService.getShareablePlaylists(userId, pageable);
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    /**
+     * 플레이리스트를 커뮤니티에 공유한다.
+     *
+     * <p>비공개 플레이리스트는 공개로 자동 전환된 후 커뮤니티 포스트가 생성된다.
+     * 이미 공유된 플레이리스트는 기존 포스트를 반환한다 (멱등).
+     * title·content 미입력 시 플레이리스트 이름과 기본 문구를 자동 사용한다.</p>
+     *
+     * <p>가져온(복사) 플레이리스트({@code isImported=true})는 공유 불가 — PL011.</p>
+     */
+    @Operation(
+            summary = "플레이리스트 커뮤니티 공유",
+            description = "플레이리스트를 커뮤니티에 공유합니다. " +
+                    "비공개 플레이리스트는 공개로 자동 전환됩니다. " +
+                    "title/content 미입력 시 플레이리스트 이름과 기본 문구가 사용됩니다. " +
+                    "가져온 플레이리스트는 공유 불가(400)입니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "공유 완료"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "가져온 플레이리스트는 공유 불가"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증 필요"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "플레이리스트 없음")
+    })
+    @PostMapping("/{playlistId}/community-share")
+    public ResponseEntity<ApiResponse<PlaylistDto.CommunityShareResponse>> shareToCommunity(
+            @Parameter(description = "공유할 플레이리스트 ID", required = true, example = "1")
+            @PathVariable Long playlistId,
+
+            @RequestBody(required = false) PlaylistDto.CommunityShareRequest request,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        String title   = (request != null) ? request.title()   : null;
+        String content = (request != null) ? request.content() : null;
+
+        log.info("플레이리스트 커뮤니티 공유 요청: playlistId={}, userId={}", playlistId, userId);
+        PlaylistDto.CommunityShareResponse result =
+                playlistService.shareToCommunity(playlistId, userId, title, content);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(result));
+    }
+
+    // ─────────────────────────────────────────────
     // 플레이리스트 가져오기 (복사)
     // ─────────────────────────────────────────────
 

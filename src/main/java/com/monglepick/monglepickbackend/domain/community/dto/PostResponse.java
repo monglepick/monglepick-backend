@@ -89,7 +89,8 @@ public record PostResponse(
                     post.getPlaylistDescription(),
                     post.getPlaylistCoverImageUrl(),
                     post.getPlaylistLikeCount(),
-                    post.getPlaylistMovieCount()
+                    post.getPlaylistMovieCount(),
+                    Boolean.TRUE.equals(post.getPlaylistLikedByCurrentUser())
             );
         }
 

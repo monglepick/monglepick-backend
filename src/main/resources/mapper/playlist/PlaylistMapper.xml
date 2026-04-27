@@ -62,6 +62,14 @@
         <result property="updatedBy" column="updated_by"/>
     </resultMap>
 
+    <!-- 공유 모달 전용: 기본 매핑 + 영화 수 + 커뮤니티 공유 여부 -->
+    <resultMap id="playlistShareableResultMap"
+               type="com.monglepick.monglepickbackend.domain.playlist.entity.Playlist"
+               extends="playlistResultMap">
+        <result property="itemCount" column="item_count"/>
+        <result property="isShared"  column="is_shared"/>
+    </resultMap>
+
     <!-- ═══ 공통 SELECT 컬럼 ═══ -->
 
     <sql id="playlistColumns">
@@ -109,6 +117,32 @@
         FROM playlist
         WHERE is_public = true
           AND is_deleted = false
+    </select>
+
+    <!--
+        공유 모달용 조회: 영화 수 + 커뮤니티 공유 여부를 단일 쿼리로 반환.
+        - item_count : LEFT JOIN playlist_item + GROUP BY COUNT
+        - is_shared  : LEFT JOIN posts(PLAYLIST_SHARE, PUBLISHED, not deleted)로 공유 여부 판별
+    -->
+    <select id="findShareableByUserId" resultMap="playlistShareableResultMap">
+        SELECT pl.playlist_id, pl.user_id, pl.playlist_name, pl.description, pl.is_public,
+               pl.cover_image_url, pl.like_count, pl.is_imported, pl.is_deleted,
+               pl.created_at, pl.updated_at, pl.created_by, pl.updated_by,
+               COUNT(DISTINCT pi.playlist_item_id)                  AS item_count,
+               CASE WHEN MAX(p.post_id) IS NOT NULL THEN 1 ELSE 0 END AS is_shared
+        FROM playlist pl
+        LEFT JOIN playlist_item pi ON pi.playlist_id = pl.playlist_id
+        LEFT JOIN posts p ON p.playlist_id = pl.playlist_id
+                         AND p.category    = 'PLAYLIST_SHARE'
+                         AND p.status      = 'PUBLISHED'
+                         AND p.is_deleted  = false
+        WHERE pl.user_id   = #{userId}
+          AND pl.is_deleted = false
+        GROUP BY pl.playlist_id, pl.user_id, pl.playlist_name, pl.description, pl.is_public,
+                 pl.cover_image_url, pl.like_count, pl.is_imported, pl.is_deleted,
+                 pl.created_at, pl.updated_at, pl.created_by, pl.updated_by
+        ORDER BY pl.created_at DESC
+        LIMIT #{offset}, #{limit}
     </select>
 
     <!-- ═══ Playlist 쓰기 ═══ -->

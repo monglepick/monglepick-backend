@@ -253,7 +253,7 @@ public class PostService {
      * <p>PLAYLIST_SHARE 카테고리는 playlist JOIN 전용 쿼리를 사용하여
      * 플레이리스트 상세 정보(이름/설명/커버/좋아요/영화수)를 함께 반환한다.</p>
      */
-    public Page<PostResponse> getPosts(String category, String keyword, String sort, Pageable pageable) {
+    public Page<PostResponse> getPosts(String category, String keyword, String sort, Pageable pageable, String userId) {
         int offset = (int) pageable.getOffset();
         int limit  = pageable.getPageSize();
         String statusStr = PostStatus.PUBLISHED.name();
@@ -265,7 +265,7 @@ public class PostService {
             Post.Category cat = Post.Category.fromValue(category);
 
             if (cat == Post.Category.PLAYLIST_SHARE) {
-                posts = postMapper.findPlaylistSharePostsWithDetail(offset, limit);
+                posts = postMapper.findPlaylistSharePostsWithDetail(userId, offset, limit);
                 total = postMapper.countPlaylistSharePosts();
             } else {
                 posts = postMapper.findByCategoryAndStatusWithNickname(cat.name(), statusStr, keyword, sort, offset, limit);
@@ -287,11 +287,11 @@ public class PostService {
      * <p>커뮤니티 상단 "플레이리스트 공유" 탭에서 사용한다.
      * playlist JOIN 쿼리로 플레이리스트 상세 정보를 포함하여 반환한다.</p>
      */
-    public Page<PostResponse> getSharedPlaylistPosts(Pageable pageable) {
+    public Page<PostResponse> getSharedPlaylistPosts(Pageable pageable, String userId) {
         int offset = (int) pageable.getOffset();
         int limit  = pageable.getPageSize();
 
-        List<Post> posts = postMapper.findPlaylistSharePostsWithDetail(offset, limit);
+        List<Post> posts = postMapper.findPlaylistSharePostsWithDetail(userId, offset, limit);
         long total = postMapper.countPlaylistSharePosts();
 
         List<PostResponse> content = mapPostsToResponses(posts);

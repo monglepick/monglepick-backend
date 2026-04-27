@@ -1,5 +1,7 @@
 package com.monglepick.monglepickbackend.domain.playlist.service;
 
+import com.monglepick.monglepickbackend.domain.community.dto.PostCreateRequest;
+import com.monglepick.monglepickbackend.domain.community.entity.Post;
 import com.monglepick.monglepickbackend.domain.community.service.PostService;
 import com.monglepick.monglepickbackend.domain.playlist.dto.PlaylistDto;
 import com.monglepick.monglepickbackend.domain.playlist.entity.Playlist;
@@ -412,6 +414,88 @@ public class PlaylistService {
         // likeCount 원자적 감소 — DB 레벨 UPDATE로 동시 요청 race condition 방지
         playlistMapper.decrementLikeCount(playlistId);
         log.info("플레이리스트 좋아요 취소 완료: playlistId={}", playlistId);
+    }
+
+    // ─────────────────────────────────────────────
+    // 커뮤니티 공유 모달
+    // ─────────────────────────────────────────────
+
+    /**
+     * 커뮤니티 공유 모달에 표시할 내 플레이리스트 목록을 조회한다.
+     *
+     * <p>기본 플레이리스트 정보 외에 영화 수({@code itemCount})와
+     * 이미 커뮤니티에 공유됐는지({@code isShared})를 단일 쿼리로 반환한다.</p>
+     *
+     * @param userId   JWT에서 추출한 사용자 ID
+     * @param pageable 페이지 번호·크기 정보
+     * @return 공유 모달용 플레이리스트 응답 DTO 페이지
+     */
+    public Page<PlaylistDto.ShareablePlaylistResponse> getShareablePlaylists(String userId, Pageable pageable) {
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
+
+        List<Playlist> playlists = playlistMapper.findShareableByUserId(userId, offset, limit);
+        long total = playlistMapper.countByUserId(userId);
+
+        List<PlaylistDto.ShareablePlaylistResponse> content = playlists.stream()
+                .map(PlaylistDto.ShareablePlaylistResponse::from)
+                .toList();
+
+        return new PageImpl<>(content, pageable, total);
+    }
+
+    /**
+     * 플레이리스트를 커뮤니티에 공유한다.
+     *
+     * <h3>처리 흐름</h3>
+     * <ol>
+     *   <li>소유자 검증</li>
+     *   <li>가져온(복사) 플레이리스트 공유 차단 — PL011</li>
+     *   <li>비공개 플레이리스트이면 자동으로 공개 전환</li>
+     *   <li>PLAYLIST_SHARE 커뮤니티 포스트 생성 (이미 공유된 경우 기존 포스트 반환 — 멱등)</li>
+     * </ol>
+     *
+     * @param playlistId 공유할 플레이리스트 ID
+     * @param userId     JWT에서 추출한 사용자 ID
+     * @param title      커뮤니티 포스트 제목 (null이면 플레이리스트 이름으로 자동 설정)
+     * @param content    커뮤니티 포스트 본문 (null이면 기본 문구)
+     * @return 커뮤니티 공유 완료 응답
+     */
+    @Transactional
+    public PlaylistDto.CommunityShareResponse shareToCommunity(Long playlistId, String userId,
+                                                                String title, String content) {
+        // 1. 소유자 검증
+        Playlist playlist = findOwnedPlaylist(playlistId, userId);
+
+        // 2. 가져온(복사) 플레이리스트는 공유 불가
+        if (Boolean.TRUE.equals(playlist.getIsImported())) {
+            throw new BusinessException(ErrorCode.PLAYLIST_IMPORTED_CANNOT_SHARE,
+                    "가져온 플레이리스트는 커뮤니티에 공유할 수 없습니다: playlistId=" + playlistId);
+        }
+
+        // 3. 비공개이면 자동으로 공개 전환
+        if (!Boolean.TRUE.equals(playlist.getIsPublic())) {
+            playlist.update(null, null, true);
+            playlistMapper.updatePlaylist(playlist);
+            log.info("커뮤니티 공유 시 비공개 → 공개 자동 전환: playlistId={}", playlistId);
+        }
+
+        // 4. 커뮤니티 포스트 생성 (이미 공유된 경우 멱등 반환)
+        String postTitle   = (title   != null && !title.isBlank())   ? title   : playlist.getPlaylistName();
+        String postContent = (content != null && !content.isBlank()) ? content : "플레이리스트를 공유합니다.";
+
+        PostCreateRequest postRequest = new PostCreateRequest(
+                postTitle, postContent, Post.Category.PLAYLIST_SHARE, playlistId, null
+        );
+        var postResponse = postService.createPost(postRequest, userId);
+
+        log.info("플레이리스트 커뮤니티 공유 완료: playlistId={}, postId={}", playlistId, postResponse.id());
+        return new PlaylistDto.CommunityShareResponse(
+                postResponse.id(),
+                playlistId,
+                playlist.getPlaylistName(),
+                true
+        );
     }
 
     // ─────────────────────────────────────────────

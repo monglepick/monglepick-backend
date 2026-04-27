@@ -61,14 +61,15 @@ public class PostController {
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "latest") String sort,
             @PageableDefault(size = 15, sort = "createdAt", direction = Sort.Direction.DESC)
-            Pageable pageable) {
+            Pageable pageable,
+            @AuthenticationPrincipal String userId) { // 비로그인 시 null — PLAYLIST_SHARE 좋아요 여부 판별용
 
         /* 페이지 크기 상한 제한 (대량 조회 DoS 방지) */
         int safeSize = Math.min(pageable.getPageSize(), AppConstants.MAX_PAGE_SIZE);
         Pageable safePage = org.springframework.data.domain.PageRequest.of(
                 pageable.getPageNumber(), safeSize, pageable.getSort());
 
-        Page<PostResponse> posts = postService.getPosts(category, keyword, sort, safePage);
+        Page<PostResponse> posts = postService.getPosts(category, keyword, sort, safePage, userId);
         return ResponseEntity.ok(posts);
     }
 
@@ -323,13 +324,14 @@ public class PostController {
     @GetMapping("/shared-playlists")
     public ResponseEntity<Page<PostResponse>> getSharedPlaylistPosts(
             @PageableDefault(size = 15, sort = "createdAt", direction = Sort.Direction.DESC)
-            Pageable pageable) {
+            Pageable pageable,
+            @AuthenticationPrincipal String userId) { // 비로그인 시 null — 좋아요 여부 판별용
 
         int safeSize = Math.min(pageable.getPageSize(), AppConstants.MAX_PAGE_SIZE);
         Pageable safePage = org.springframework.data.domain.PageRequest.of(
                 pageable.getPageNumber(), safeSize, pageable.getSort());
 
-        Page<PostResponse> posts = postService.getSharedPlaylistPosts(safePage);
+        Page<PostResponse> posts = postService.getSharedPlaylistPosts(safePage, userId);
         return ResponseEntity.ok(posts);
     }
 

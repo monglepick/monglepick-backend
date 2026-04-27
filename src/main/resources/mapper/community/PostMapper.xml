@@ -50,11 +50,12 @@
     <!-- 게시글 + nickname + playlist JOIN 매핑 (PLAYLIST_SHARE 피드 전용) -->
     <resultMap id="postWithPlaylistResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post"
                extends="postWithNicknameResultMap">
-        <result property="playlistName"         column="pl_playlist_name"/>
-        <result property="playlistDescription"  column="pl_description"/>
-        <result property="playlistCoverImageUrl" column="pl_cover_image_url"/>
-        <result property="playlistLikeCount"    column="pl_like_count"/>
-        <result property="playlistMovieCount"   column="pl_movie_count"/>
+        <result property="playlistName"               column="pl_playlist_name"/>
+        <result property="playlistDescription"        column="pl_description"/>
+        <result property="playlistCoverImageUrl"      column="pl_cover_image_url"/>
+        <result property="playlistLikeCount"          column="pl_like_count"/>
+        <result property="playlistMovieCount"         column="pl_movie_count"/>
+        <result property="playlistLikedByCurrentUser" column="pl_liked_by_me"/>
     </resultMap>
 
     <!-- 댓글 매핑 (기본, 닉네임 없음 — 권한 체크 등 내부 용도) -->
@@ -366,6 +367,8 @@
         이름·설명·커버·영화수는 공유 시점 스냅샷(pl_snapshot_*)을 우선 사용.
         스냅샷이 없는 레거시 포스트는 COALESCE로 라이브 JOIN 값을 fallback.
         좋아요 수는 항상 라이브(공유 이후에도 계속 누적되는 값).
+        pl_liked_by_me: 현재 사용자(userId)가 좋아요를 눌렀는지 여부.
+                        비로그인(userId=null)이면 JOIN 조건이 매칭 안 되므로 0(false) 반환.
     -->
     <select id="findPlaylistSharePostsWithDetail" resultMap="postWithPlaylistResultMap">
         SELECT p.post_id, p.user_id, p.title, p.content, p.category,
@@ -379,10 +382,14 @@
                pl.like_count                                           AS pl_like_count,
                COALESCE(p.pl_snapshot_movie_count,
                         (SELECT COUNT(*) FROM playlist_item pi2
-                         WHERE pi2.playlist_id = p.playlist_id))       AS pl_movie_count
+                         WHERE pi2.playlist_id = p.playlist_id))       AS pl_movie_count,
+               CASE WHEN pl_like.playlist_like_id IS NOT NULL THEN 1 ELSE 0 END AS pl_liked_by_me
         FROM posts p
         LEFT JOIN users u     ON p.user_id     = u.user_id
         LEFT JOIN playlist pl ON p.playlist_id = pl.playlist_id
+        LEFT JOIN playlist_likes pl_like
+               ON pl_like.playlist_id = p.playlist_id
+              AND pl_like.user_id     = #{userId}
         WHERE p.category    = 'PLAYLIST_SHARE'
           AND p.status      = 'PUBLISHED'
           AND p.is_deleted  = false

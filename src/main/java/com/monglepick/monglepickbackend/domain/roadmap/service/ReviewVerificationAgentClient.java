@@ -43,7 +43,7 @@ public class ReviewVerificationAgentClient {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     public ReviewVerificationAgentClient(
-            @Value("${AGENT_BASE_URL:http://localhost:8000}") String agentBaseUrl,
+            @Value("${AI_AGENT_BASE_URL:${AGENT_BASE_URL:http://localhost:8000}}") String agentBaseUrl,
             @Value("${app.service.key:dev-service-key-change-me}") String serviceKey) {
 
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
