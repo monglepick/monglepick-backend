@@ -27,6 +27,9 @@ import java.util.List;
  *                     로컬: http://localhost:8080/images/userId/파일명.jpg
  *                     서버: http://210.109.15.187/images/userId/파일명.jpg
  *                     추후 S3 전환 시 URL만 변경, 구조 동일
+ * @param authorEquippedAvatarUrl  작성자가 장착 중인 아바타 이미지 URL (없으면 null) — 2026-04-27 신설
+ * @param authorEquippedBadgeUrl   작성자가 장착 중인 배지 이미지 URL (없으면 null)  — 2026-04-27 신설
+ * @param authorEquippedBadgeName  작성자가 장착 중인 배지 이름 (tooltip 용, 없으면 null) — 2026-04-27 신설
  */
 public record PostResponse(
         Long id,
@@ -34,7 +37,7 @@ public record PostResponse(
         String content,
         String category,
         String author,
-        String authorId,        // ✅ 추가
+        String authorId,
         int viewCount,
         int likeCount,
         int commentCount,
@@ -43,13 +46,39 @@ public record PostResponse(
         Long playlistId,
         PlaylistDto.SharedPlaylistInfo playlistInfo,
         Integer rewardPoints,
-        List<String> imageUrls  // ✅ 추가
+        List<String> imageUrls,
+        String authorEquippedAvatarUrl,
+        String authorEquippedBadgeUrl,
+        String authorEquippedBadgeName
 ) {
+
+    /**
+     * 작성자 장착 정보 — 게시글 응답 매핑 시 batch 로딩한 결과를 전달하는 좁은 record.
+     *
+     * <p>{@link com.monglepick.monglepickbackend.domain.community.service.PostService} 가
+     * {@link com.monglepick.monglepickbackend.domain.reward.repository.UserItemRepository#findEquippedByUserIdsAndCategory}
+     * 로 페이지당 2 쿼리로 한 번에 조회한 후 userId → AuthorEquipment 맵을 구성해 매핑한다.</p>
+     */
+    public record AuthorEquipment(String avatarUrl, String badgeUrl, String badgeName) {
+        public static final AuthorEquipment EMPTY = new AuthorEquipment(null, null, null);
+    }
+
     public static PostResponse from(Post post) {
-        return from(post, null);
+        return from(post, null, AuthorEquipment.EMPTY);
     }
 
     public static PostResponse from(Post post, Integer rewardPoints) {
+        return from(post, rewardPoints, AuthorEquipment.EMPTY);
+    }
+
+    /**
+     * 게시글 + 리워드 + 작성자 장착 정보 통합 매핑.
+     *
+     * @param post         게시글 엔티티
+     * @param rewardPoints 리워드 포인트 (지급 응답 등 특수 컨텍스트, 일반 조회는 null)
+     * @param equipment    작성자 장착 정보 (없으면 {@link AuthorEquipment#EMPTY})
+     */
+    public static PostResponse from(Post post, Integer rewardPoints, AuthorEquipment equipment) {
         String nickname = post.getNickname() != null ? post.getNickname() : "알 수 없음";
 
         PlaylistDto.SharedPlaylistInfo playlistInfo = null;
@@ -71,13 +100,15 @@ public record PostResponse(
                 ? List.of(post.getImageUrls().split(","))
                 : List.of();
 
+        AuthorEquipment safeEquip = equipment != null ? equipment : AuthorEquipment.EMPTY;
+
         return new PostResponse(
                 post.getPostId(),
                 post.getTitle(),
                 post.getContent(),
                 post.getCategory().name(),
                 nickname,
-                post.getUserId(),       // ✅ authorId
+                post.getUserId(),
                 post.getViewCount(),
                 post.getLikeCount(),
                 post.getCommentCount(),
@@ -86,7 +117,10 @@ public record PostResponse(
                 post.getPlaylistId(),
                 playlistInfo,
                 rewardPoints,
-                imageUrlList            // ✅ imageUrls
+                imageUrlList,
+                safeEquip.avatarUrl(),
+                safeEquip.badgeUrl(),
+                safeEquip.badgeName()
         );
     }
 }

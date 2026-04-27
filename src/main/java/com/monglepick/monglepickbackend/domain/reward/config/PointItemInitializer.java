@@ -32,7 +32,9 @@ import java.util.Map;
  * <p>포인트 상점에서 "AI 이용권"을 판매하여 grade 일일 한도와 구독 보너스 풀이
  * 모두 소진된 사용자에게 추가 AI 사용 경로를 제공한다 (source="PURCHASED").</p>
  *
- * <h3>시드 데이터 (8개 아이템, 모두 소문자 카테고리)</h3>
+ * <h3>시드 데이터 (15개 아이템, 모두 소문자 카테고리)</h3>
+ * <p>2026-04-27 확장: 아바타 4종 + 배지 3종 추가. 신규 시드는 모두 {@link PointItemType#AVATAR_GENERIC}
+ * / {@link PointItemType#BADGE_GENERIC} 으로 dispatch 하므로 향후 enum 추가 없이 행 데이터만 늘려도 운영 가능.</p>
  * <table border="1">
  *   <tr><th>아이템명</th><th>카테고리</th><th>itemType</th><th>가격</th><th>유효기간</th></tr>
  *   <tr><td>AI 이용권 1회</td><td>coupon</td><td>AI_TOKEN_1</td><td>10P</td><td>30일</td></tr>
@@ -41,7 +43,14 @@ import java.util.Map;
  *   <tr><td>AI 이용권 50회</td><td>coupon</td><td>AI_TOKEN_50</td><td>500P</td><td>60일</td></tr>
  *   <tr><td>영화 티켓 응모권</td><td>apply</td><td>APPLY_MOVIE_TICKET</td><td>150P</td><td>월말</td></tr>
  *   <tr><td>프로필 아바타 - 몽글이</td><td>avatar</td><td>AVATAR_MONGLE</td><td>150P</td><td>영구</td></tr>
+ *   <tr><td>프로필 아바타 - 클래퍼보드</td><td>avatar</td><td>AVATAR_GENERIC</td><td>150P</td><td>영구</td></tr>
+ *   <tr><td>프로필 아바타 - 필름 릴</td><td>avatar</td><td>AVATAR_GENERIC</td><td>180P</td><td>영구</td></tr>
+ *   <tr><td>프로필 아바타 - 팝콘 박스</td><td>avatar</td><td>AVATAR_GENERIC</td><td>150P</td><td>영구</td></tr>
+ *   <tr><td>프로필 아바타 - 별 평론가</td><td>avatar</td><td>AVATAR_GENERIC</td><td>200P</td><td>영구</td></tr>
  *   <tr><td>프리미엄 배지 (1개월)</td><td>badge</td><td>BADGE_PREMIUM</td><td>100P</td><td>30일</td></tr>
+ *   <tr><td>시네필 배지 (3개월)</td><td>badge</td><td>BADGE_GENERIC</td><td>180P</td><td>90일</td></tr>
+ *   <tr><td>얼리어답터 배지 (영구)</td><td>badge</td><td>BADGE_GENERIC</td><td>500P</td><td>영구</td></tr>
+ *   <tr><td>30일 연속 출석 배지 (1개월)</td><td>badge</td><td>BADGE_GENERIC</td><td>80P</td><td>30일</td></tr>
  *   <tr><td>퀴즈 힌트</td><td>hint</td><td>QUIZ_HINT</td><td>50P</td><td>영구</td></tr>
  * </table>
  *
@@ -412,6 +421,57 @@ public class PointItemInitializer implements ApplicationRunner {
                         .isActive(true)
                         .build(),
 
+                // ── 아바타 신규 컬렉션 (2026-04-27 — AVATAR_GENERIC 시리즈) ──
+                // itemType=AVATAR_GENERIC 으로 통일 — Admin UI 에서 추가 등록 시에도 같은 패턴 사용.
+                // 기존 AVATAR_MONGLE 처럼 enum 상수를 늘리지 않고 행 데이터(이미지/이름)만 차이.
+                PointItem.builder()
+                        .itemName("프로필 아바타 - 클래퍼보드")
+                        .itemDescription("영화 제작 현장의 클래퍼보드 캐릭터. 클래식한 흑백 슬레이트 디자인으로 영화 마니아에게 추천.")
+                        .itemPrice(150)
+                        .itemCategory(PointItemCategory.AVATAR)
+                        .itemType(PointItemType.AVATAR_GENERIC)
+                        .amount(1)
+                        .durationDays(null)
+                        .imageUrl("/avatars/clapperboard.svg")
+                        .isActive(true)
+                        .build(),
+
+                PointItem.builder()
+                        .itemName("프로필 아바타 - 필름 릴")
+                        .itemDescription("구식 영사기 휠 디자인. 보라/은빛 톤의 빈티지 레트로 컬렉션.")
+                        .itemPrice(180)
+                        .itemCategory(PointItemCategory.AVATAR)
+                        .itemType(PointItemType.AVATAR_GENERIC)
+                        .amount(1)
+                        .durationDays(null)
+                        .imageUrl("/avatars/film_reel.svg")
+                        .isActive(true)
+                        .build(),
+
+                PointItem.builder()
+                        .itemName("프로필 아바타 - 팝콘 박스")
+                        .itemDescription("영화관 클래식 팝콘 박스. 빨강/흰 줄무늬와 솟아오른 팝콘 알갱이가 시원한 분위기.")
+                        .itemPrice(150)
+                        .itemCategory(PointItemCategory.AVATAR)
+                        .itemType(PointItemType.AVATAR_GENERIC)
+                        .amount(1)
+                        .durationDays(null)
+                        .imageUrl("/avatars/popcorn_box.svg")
+                        .isActive(true)
+                        .build(),
+
+                PointItem.builder()
+                        .itemName("프로필 아바타 - 별 평론가")
+                        .itemDescription("5점 만점의 별 평론가. 영화에 대한 진지한 시선을 좋아하는 분에게.")
+                        .itemPrice(200)
+                        .itemCategory(PointItemCategory.AVATAR)
+                        .itemType(PointItemType.AVATAR_GENERIC)
+                        .amount(1)
+                        .durationDays(null)
+                        .imageUrl("/avatars/star_critic.svg")
+                        .isActive(true)
+                        .build(),
+
                 // ── 배지 (category="badge") ──
                 PointItem.builder()
                         .itemName("프리미엄 배지 (1개월)")
@@ -422,6 +482,44 @@ public class PointItemInitializer implements ApplicationRunner {
                         .amount(1)
                         .durationDays(30)
                         .imageUrl("/badges/premium.svg")
+                        .isActive(true)
+                        .build(),
+
+                // ── 배지 신규 컬렉션 (2026-04-27 — BADGE_GENERIC 시리즈) ──
+                // 유효기간을 행 단위로 가변 설정 — 30일/90일/영구 모두 가능.
+                PointItem.builder()
+                        .itemName("시네필 배지 (3개월)")
+                        .itemDescription("영화 마니아 인증 배지. 90일간 프로필에 표시되며 다양한 영화 장르에 깊은 관심이 있는 사용자에게 추천.")
+                        .itemPrice(180)
+                        .itemCategory(PointItemCategory.BADGE)
+                        .itemType(PointItemType.BADGE_GENERIC)
+                        .amount(1)
+                        .durationDays(90)
+                        .imageUrl("/badges/cinephile.svg")
+                        .isActive(true)
+                        .build(),
+
+                PointItem.builder()
+                        .itemName("얼리어답터 배지 (영구)")
+                        .itemDescription("초기 베타 회원에게 한정 발급된 영구 배지. 만료되지 않으며 한 번 보유하면 평생 착용 가능.")
+                        .itemPrice(500)
+                        .itemCategory(PointItemCategory.BADGE)
+                        .itemType(PointItemType.BADGE_GENERIC)
+                        .amount(1)
+                        .durationDays(null)  // 영구
+                        .imageUrl("/badges/early_bird.svg")
+                        .isActive(true)
+                        .build(),
+
+                PointItem.builder()
+                        .itemName("30일 연속 출석 배지 (1개월)")
+                        .itemDescription("30일 출석 마일스톤 기념 배지. 30일간 프로필에 표시. 출석 챔피언의 인증.")
+                        .itemPrice(80)
+                        .itemCategory(PointItemCategory.BADGE)
+                        .itemType(PointItemType.BADGE_GENERIC)
+                        .amount(1)
+                        .durationDays(30)
+                        .imageUrl("/badges/streak_30.svg")
                         .isActive(true)
                         .build(),
 

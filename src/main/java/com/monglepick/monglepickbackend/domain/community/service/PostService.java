@@ -11,6 +11,9 @@ import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
 import com.monglepick.monglepickbackend.domain.playlist.entity.Playlist;
 import com.monglepick.monglepickbackend.domain.playlist.mapper.PlaylistMapper;
+import com.monglepick.monglepickbackend.domain.reward.entity.PointItem;
+import com.monglepick.monglepickbackend.domain.reward.entity.UserItem;
+import com.monglepick.monglepickbackend.domain.reward.repository.UserItemRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -23,7 +26,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 게시글 서비스
@@ -44,6 +53,89 @@ public class PostService {
     private final PlaylistMapper playlistMapper;
     /** 리워드 서비스 — POST_REWARD 정책 지급/회수 */
     private final RewardService rewardService;
+    /**
+     * 보유 아이템 리포지토리 — 작성자 EQUIPPED 아바타·배지 조회용 (2026-04-27 신설).
+     *
+     * <p>게시글 응답에 작성자가 장착한 아바타·배지 이미지를 포함해 닉네임 옆에 노출한다.
+     * 페이지 단위 batch 조회({@link UserItemRepository#findEquippedByUserIdsAndCategory})로
+     * N+1 쿼리를 회피한다.</p>
+     */
+    private final UserItemRepository userItemRepository;
+
+    // ──────────────────────────────────────────────
+    // 작성자 장착 정보 batch 로딩 (2026-04-27)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 게시글 목록 응답 매핑용 — 작성자별 EQUIPPED 아바타·배지 batch 로딩.
+     *
+     * <p>페이지당 2 쿼리(avatar/badge 카테고리 각 1번)로 N+1 회피.
+     * 결과는 {@code userId → AuthorEquipment} 맵으로 반환되며, 매핑 안 된 작성자는
+     * {@link PostResponse.AuthorEquipment#EMPTY} 를 사용한다.</p>
+     *
+     * @param userIds 게시글 작성자 ID 콜렉션 (중복 OK — 내부에서 정규화)
+     * @return userId 별 장착 정보 맵 (보유 사용자만 포함)
+     */
+    private Map<String, PostResponse.AuthorEquipment> loadAuthorEquipmentMap(Collection<String> userIds) {
+        Set<String> uniqueIds = new LinkedHashSet<>();
+        for (String id : userIds) {
+            if (id != null && !id.isBlank()) uniqueIds.add(id);
+        }
+        if (uniqueIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        /* 카테고리별 1쿼리씩 — 페이지당 총 2쿼리. */
+        List<UserItem> avatars = userItemRepository.findEquippedByUserIdsAndCategory(uniqueIds, "avatar");
+        List<UserItem> badges  = userItemRepository.findEquippedByUserIdsAndCategory(uniqueIds, "badge");
+
+        Map<String, String> avatarUrlByUser = new HashMap<>();
+        for (UserItem ui : avatars) {
+            PointItem pi = ui.getPointItem();
+            if (pi != null && pi.getImageUrl() != null) {
+                /* 데이터 정합 침해(같은 사용자에 EQUIPPED 2개) 시 첫 행을 우선. */
+                avatarUrlByUser.putIfAbsent(ui.getUserId(), pi.getImageUrl());
+            }
+        }
+
+        Map<String, String[]> badgeByUser = new HashMap<>();
+        for (UserItem ui : badges) {
+            PointItem pi = ui.getPointItem();
+            if (pi != null) {
+                badgeByUser.putIfAbsent(ui.getUserId(),
+                        new String[]{pi.getImageUrl(), pi.getItemName()});
+            }
+        }
+
+        Map<String, PostResponse.AuthorEquipment> result = new HashMap<>();
+        for (String uid : uniqueIds) {
+            String avatarUrl = avatarUrlByUser.get(uid);
+            String[] badge = badgeByUser.get(uid);
+            if (avatarUrl == null && badge == null) continue;
+            result.put(uid, new PostResponse.AuthorEquipment(
+                    avatarUrl,
+                    badge != null ? badge[0] : null,
+                    badge != null ? badge[1] : null
+            ));
+        }
+        return result;
+    }
+
+    /**
+     * 게시글 페이지를 응답 페이지로 매핑 — 작성자 장착 batch 로딩 포함.
+     *
+     * <p>{@link #loadAuthorEquipmentMap}을 1회 호출해 페이지 전체 작성자의 EQUIPPED 아이템을
+     * 한 번에 가져온 뒤 매핑한다.</p>
+     */
+    private List<PostResponse> mapPostsToResponses(List<Post> posts) {
+        if (posts == null || posts.isEmpty()) return List.of();
+        List<String> userIds = posts.stream().map(Post::getUserId).toList();
+        Map<String, PostResponse.AuthorEquipment> equipmentByUser = loadAuthorEquipmentMap(userIds);
+        return posts.stream()
+                .map(p -> PostResponse.from(p, null,
+                        equipmentByUser.getOrDefault(p.getUserId(), PostResponse.AuthorEquipment.EMPTY)))
+                .toList();
+    }
 
     // ──────────────────────────────────────────────
     // 게시글 CRUD
@@ -148,7 +240,11 @@ public class PostService {
         if (post == null) {
             throw new BusinessException(ErrorCode.POST_NOT_FOUND);
         }
-        return PostResponse.from(post);
+        /* 단건 조회 — 작성자 1명에 대해서만 batch 헬퍼 호출. EMPTY 폴백. */
+        Map<String, PostResponse.AuthorEquipment> map =
+                loadAuthorEquipmentMap(List.of(post.getUserId()));
+        return PostResponse.from(post, null,
+                map.getOrDefault(post.getUserId(), PostResponse.AuthorEquipment.EMPTY));
     }
 
     /**
@@ -180,7 +276,8 @@ public class PostService {
             total = postMapper.countByStatus(statusStr, keyword);
         }
 
-        List<PostResponse> content = posts.stream().map(PostResponse::from).toList();
+        /* 2026-04-27: 작성자 EQUIPPED 아바타·배지를 batch 로 페치해 응답에 포함. */
+        List<PostResponse> content = mapPostsToResponses(posts);
         return new PageImpl<>(content, pageable, total);
     }
 
@@ -197,7 +294,7 @@ public class PostService {
         List<Post> posts = postMapper.findPlaylistSharePostsWithDetail(offset, limit);
         long total = postMapper.countPlaylistSharePosts();
 
-        List<PostResponse> content = posts.stream().map(PostResponse::from).toList();
+        List<PostResponse> content = mapPostsToResponses(posts);
         return new PageImpl<>(content, pageable, total);
     }
 

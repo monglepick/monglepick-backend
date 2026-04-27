@@ -395,6 +395,17 @@ public final class AdminPaymentDto {
             String itemDescription,
             Integer itemPrice,
             String itemCategory,
+            /**
+             * 지급 분기 키 — {@link com.monglepick.monglepickbackend.domain.reward.constants.PointItemType} enum name.
+             * 2026-04-27 신규: Admin UI 에서 신규 아바타/배지 등록 시 NULL 로 저장되어 BusinessException(UNSUPPORTED) 차단을 발생시키던 결함 보정.
+             */
+            String itemType,
+            /** 지급 수량 (AI 토큰 횟수 또는 인벤토리 발급 수). NULL이면 itemType 기본값 사용. */
+            Integer amount,
+            /** 유효기간(일). NULL이면 무기한 또는 itemType 기본값 사용. */
+            Integer durationDays,
+            /** 아바타·배지 이미지 경로 (정적 리소스 또는 CDN). NULL이면 카테고리별 기본 아이콘. */
+            String imageUrl,
             Boolean isActive,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
@@ -403,10 +414,17 @@ public final class AdminPaymentDto {
     /**
      * 포인트 아이템 신규 등록 요청 DTO.
      *
+     * <p>2026-04-27: 프로필 꾸미기 도입을 위해 itemType/amount/durationDays/imageUrl 노출.
+     * Admin UI 에서 신규 아바타·배지 등록 시 itemType 미지정으로 인한 UNSUPPORTED 교환 차단을 해결한다.</p>
+     *
      * @param itemName        상품명 (필수, 최대 200자)
      * @param itemDescription 상품 설명 (nullable, TEXT)
      * @param itemPrice       필요 포인트 (필수, 0 이상)
      * @param itemCategory    카테고리 (nullable → 기본값 "general")
+     * @param itemType        지급 분기 키 (nullable — 등록 시 미지정 가능. 단 미지정 시 교환 차단된다)
+     * @param amount          지급 수량 (nullable — itemType 기본값 fallback)
+     * @param durationDays    유효기간(일, nullable — 무기한 또는 itemType 기본값)
+     * @param imageUrl        아바타/배지 이미지 경로 (nullable, 최대 500자)
      * @param isActive        초기 활성 여부 (nullable → 기본값 true)
      */
     public record PointItemCreateRequest(
@@ -423,14 +441,26 @@ public final class AdminPaymentDto {
             @Size(max = 50, message = "카테고리는 최대 50자입니다.")
             String itemCategory,
 
+            @Size(max = 50, message = "itemType 은 최대 50자입니다.")
+            String itemType,
+
+            @Min(value = 0, message = "지급 수량은 0 이상이어야 합니다.")
+            Integer amount,
+
+            @Min(value = 0, message = "유효기간은 0 이상이어야 합니다.")
+            Integer durationDays,
+
+            @Size(max = 500, message = "이미지 경로는 최대 500자입니다.")
+            String imageUrl,
+
             Boolean isActive
     ) {}
 
     /**
      * 포인트 아이템 수정 요청 DTO.
      *
-     * <p>존재하는 아이템의 필드를 갱신한다. 모든 필드가 필수이며, 부분 수정이 필요하면
-     * 프런트엔드에서 기존 값을 채워 전달한다.</p>
+     * <p>존재하는 아이템의 필드를 갱신한다. 핵심 필드(name/price/active)는 필수이며,
+     * itemType/amount/durationDays/imageUrl 은 nullable — 기존 값을 보존하려면 프런트가 그대로 다시 보낸다.</p>
      */
     public record PointItemUpdateRequest(
             @NotBlank(message = "상품명은 필수입니다.")
@@ -445,6 +475,18 @@ public final class AdminPaymentDto {
 
             @Size(max = 50, message = "카테고리는 최대 50자입니다.")
             String itemCategory,
+
+            @Size(max = 50, message = "itemType 은 최대 50자입니다.")
+            String itemType,
+
+            @Min(value = 0, message = "지급 수량은 0 이상이어야 합니다.")
+            Integer amount,
+
+            @Min(value = 0, message = "유효기간은 0 이상이어야 합니다.")
+            Integer durationDays,
+
+            @Size(max = 500, message = "이미지 경로는 최대 500자입니다.")
+            String imageUrl,
 
             @NotNull(message = "활성화 여부는 필수입니다.")
             Boolean isActive

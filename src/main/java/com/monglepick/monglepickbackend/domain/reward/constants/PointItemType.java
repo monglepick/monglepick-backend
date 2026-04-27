@@ -54,6 +54,25 @@ public enum PointItemType {
     /** 프리미엄 배지 1개월 (100P) */
     BADGE_PREMIUM(Dispense.INVENTORY, 1, 30),
 
+    /**
+     * 일반 아바타 (2026-04-27 신규) — Admin 에서 추가 등록하는 아바타 시리즈 공용.
+     *
+     * <p>v3.2 까지는 새 아바타가 추가될 때마다 enum 상수를 추가해야 했다 (AVATAR_MONGLE 처럼).
+     * Admin UI 에서 운영자가 자유롭게 등록할 수 있게 하려면 enum 분기에 의존하지 않는 일반화된
+     * sentinel 이 필요. AVATAR_GENERIC 은 모든 신규 아바타 시드의 itemType 으로 사용되며
+     * 실제 차이(이미지/이름/설명)는 PointItem 행 데이터로 표현한다. 영구 보유(durationDays=null).</p>
+     */
+    AVATAR_GENERIC(Dispense.INVENTORY, 1, null),
+
+    /**
+     * 일반 배지 (2026-04-27 신규) — Admin 에서 추가 등록하는 배지 시리즈 공용.
+     *
+     * <p>유효기간은 행 단위 {@code duration_days} 로 가변 설정 (NULL=무기한).
+     * BADGE_PREMIUM 의 30일 고정에서 벗어나 7일짜리 이벤트 배지, 영구 컬렉션 배지 등
+     * 다양화할 수 있다.</p>
+     */
+    BADGE_GENERIC(Dispense.INVENTORY, 1, null),
+
     /** 영화 티켓 응모권 (150P, 월말 추첨) */
     APPLY_MOVIE_TICKET(Dispense.INVENTORY, 1, null),
 
