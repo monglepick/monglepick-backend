@@ -1,7 +1,6 @@
 package com.monglepick.monglepickbackend.domain.community.ocrevent;
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.annotation.JsonNaming;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,28 +45,27 @@ public class OcrAnalysisClient {
      * 이는 기존 Map 파싱 구현의 {@code instanceof String ? s : "FAILED"} 휴리스틱과
      * 호환성을 유지하기 위함.</p>
      */
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record OcrResponse(
             boolean success,
             String status,
-            String movieName,
-            String watchDate,
+            @JsonProperty("movie_name")      String movieName,
+            @JsonProperty("watch_date")      String watchDate,
             Integer headcount,
             String seat,
-            String screeningTime,
+            @JsonProperty("screening_time")  String screeningTime,
             String theater,
             String venue,
-            String watchedAt,
-            String parsedText,
+            @JsonProperty("watched_at")      String watchedAt,
+            @JsonProperty("parsed_text")     String parsedText,
             double confidence,
-            String errorMessage,
-            boolean movieNameOk,
-            boolean watchDateOk,
-            boolean headcountOk,
-            boolean seatOk,
-            boolean screeningTimeOk,
-            boolean theaterOk,
-            boolean venueOk
+            @JsonProperty("error_message")   String errorMessage,
+            @JsonProperty("movie_name_ok")   boolean movieNameOk,
+            @JsonProperty("watch_date_ok")   boolean watchDateOk,
+            @JsonProperty("headcount_ok")    boolean headcountOk,
+            @JsonProperty("seat_ok")         boolean seatOk,
+            @JsonProperty("screening_time_ok") boolean screeningTimeOk,
+            @JsonProperty("theater_ok")      boolean theaterOk,
+            @JsonProperty("venue_ok")        boolean venueOk
     ) {
         public OcrResponse {
             if (status == null) status = "FAILED";
@@ -91,7 +89,7 @@ public class OcrAnalysisClient {
             // Jackson 자동 매핑 — Map<String,Object> 수동 파싱 제거 (2026-04-24)
             return restTemplate.postForObject(url, body, OcrResponse.class);
         } catch (Exception e) {
-            log.warn("[OCR] 서버 호출 실패 — imageUrl={}, error={}", imageUrl, e.getMessage());
+            log.warn("[OCR] 서버 호출 실패 — imageUrl={}, error={}", imageUrl, e.getMessage(), e);
             return null;
         }
     }
