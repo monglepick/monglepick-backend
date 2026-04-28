@@ -8,6 +8,7 @@ import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ReverifyResponse
 import com.monglepick.monglepickbackend.admin.repository.AdminCourseVerificationRepository;
 import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
 import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseVerification;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
@@ -83,11 +84,9 @@ public class AdminReviewVerificationService {
 
     /**
      * AI 자동 승인 임계값 — application.yml {@code app.ai.review-verification.threshold}.
-     *
-     * <p>에이전트가 계산한 {@code aiConfidence} 가 이 값 이상이면 AUTO_VERIFIED 로 자동 처리될 예정이다.
-     * 본 서비스는 직접 판정을 하지 않지만 관리자 화면의 임계값 안내 카드에 노출하기 위해 주입받는다.</p>
+     * 에이전트 nodes.py 의 _THRESHOLD_HIGH(0.4) 와 일치해야 한다.
      */
-    @Value("${app.ai.review-verification.threshold:0.7}")
+    @Value("${app.ai.review-verification.threshold:0.4}")
     private float autoVerificationThreshold;
 
     // ─────────────────────────────────────────────
@@ -246,15 +245,25 @@ public class AdminReviewVerificationService {
         String prevStatus = v.getReviewStatus();
 
         log.info("[AdminReviewVerify] 수동 승인 — id={}, actor={}, reason={}", verificationId, actor, reason);
+        boolean wasVerified = Boolean.TRUE.equals(v.getIsVerified());
         v.approveByAdmin(actor, reason);
 
-        // ADMIN_REJECTED였던 경우 count가 이미 감소되어 있으므로 복원
-        if ("ADMIN_REJECTED".equals(prevStatus)) {
+        // 이전에 isVerified=false 였던 모든 상태(PENDING/NEEDS_REVIEW/AUTO_REJECTED/ADMIN_REJECTED)는
+        // verifiedMovies 가 아직 반영되지 않은 상태이므로 이번 승인에서 +1 처리한다.
+        if (!wasVerified) {
             userCourseProgressRepository.findByUserIdAndCourseId(v.getUserId(), v.getCourseId())
                     .ifPresent(progress -> {
                         progress.verify();
+                        // 마지막 영화가 이번 승인으로 완료되면 최종 감상평 대기 상태로 전환
+                        if (progress.getTotalMovies() > 0
+                                && progress.getVerifiedMovies() >= progress.getTotalMovies()
+                                && progress.getStatus() == CourseProgressStatus.IN_PROGRESS) {
+                            progress.enterFinalReviewPending();
+                            log.info("[AdminReviewVerify] 관리자 승인으로 모든 영화 완료 → FINAL_REVIEW_PENDING: userId={}, courseId={}",
+                                    v.getUserId(), v.getCourseId());
+                        }
                         userCourseProgressRepository.save(progress);
-                        log.info("[AdminReviewVerify] 승인 → 진행률 복원: userId={}, courseId={}, verifiedMovies={}",
+                        log.info("[AdminReviewVerify] 승인 → 진행률 반영: userId={}, courseId={}, verifiedMovies={}",
                                 v.getUserId(), v.getCourseId(), progress.getVerifiedMovies());
                     });
         }
@@ -411,7 +420,17 @@ public class AdminReviewVerificationService {
                 .ifPresent(progress -> {
                     if (!wasVerified) {
                         progress.verify();
-                        log.info("[AdminReviewVerify] 진행률 증가 — userId={}, courseId={}", userId, courseId);
+                        // 마지막 영화가 이번 검증으로 완료되면 최종 감상평 대기 상태로 전환
+                        if (progress.getTotalMovies() > 0
+                                && progress.getVerifiedMovies() >= progress.getTotalMovies()
+                                && progress.getStatus() == CourseProgressStatus.IN_PROGRESS) {
+                            progress.enterFinalReviewPending();
+                            log.info("[AdminReviewVerify] 재검증 AUTO_VERIFIED → 모든 영화 완료 → FINAL_REVIEW_PENDING: userId={}, courseId={}",
+                                    userId, courseId);
+                        } else {
+                            log.info("[AdminReviewVerify] 진행률 증가 — userId={}, courseId={}, verifiedMovies={}",
+                                    userId, courseId, progress.getVerifiedMovies());
+                        }
                     } else {
                         progress.unverify();
                         log.info("[AdminReviewVerify] 진행률 감소 — userId={}, courseId={}", userId, courseId);

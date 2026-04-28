@@ -46,4 +46,25 @@ public interface CourseVerificationRepository extends JpaRepository<CourseVerifi
            "AND cv.reviewStatus IN ('PENDING', 'NEEDS_REVIEW')")
     List<String> findPendingMovieIdsByUserIdAndCourseId(
             @Param("userId") String userId, @Param("courseId") String courseId);
+
+    /**
+     * is_verified=true인 영화 ID 목록 조회 (AUTO_VERIFIED / ADMIN_APPROVED).
+     * getCourseDetail()의 completedMovieIds 구성에 사용된다.
+     * verified_movies 카운터와 항상 일치하도록 이 쿼리를 단일 소스로 사용한다.
+     */
+    @Query("SELECT cv.movieId FROM CourseVerification cv " +
+           "WHERE cv.userId = :userId AND cv.courseId = :courseId " +
+           "AND cv.isVerified = true")
+    List<String> findVerifiedMovieIdsByUserIdAndCourseId(
+            @Param("userId") String userId, @Param("courseId") String courseId);
+
+    /**
+     * is_verified=true인 영화 수 조회.
+     * submitFinalReview()의 자가 복구 로직에서 verified_movies 불일치 감지에 사용된다.
+     */
+    @Query("SELECT COUNT(cv) FROM CourseVerification cv " +
+           "WHERE cv.userId = :userId AND cv.courseId = :courseId " +
+           "AND cv.isVerified = true")
+    int countVerifiedByUserIdAndCourseId(
+            @Param("userId") String userId, @Param("courseId") String courseId);
 }
