@@ -107,6 +107,7 @@ public class AdminOcrEventDto {
     public record VerificationResponse(
             Long verificationId,
             String userId,
+            String userNickname,
             String movieId,
             String eventId,
             String imageUrl,

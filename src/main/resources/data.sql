@@ -23,3 +23,15 @@ VALUES
     ('monthly_premium', '월간 Premium',  'MONTHLY',  5900,  60,  600,  '월간 Premium 구독 — 매월 600 포인트 지급 (AI 추천 60회).'),
     ('yearly_basic',    '연간 Basic',    'YEARLY',  29000,  34,  340,  '연간 Basic 구독 — 연간 약 4,000 포인트 지급 (AI 추천 약400회). monthly_basic 대비 약 17% 할인.'),
     ('yearly_premium',  '연간 Premium',  'YEARLY',  59000,  67,  670,  '연간 Premium 구독 — 연간 약 8,000 포인트 지급 (AI 추천 약800회). monthly_premium 대비 약 17% 할인.');
+
+-- ── OCR 실관람 인증 리워드 정책 ──
+-- 관리자가 유저 인증을 APPROVE 할 때 지급. reference_id = "verification_{id}" 로 중복 방지.
+-- points_amount: 500P / daily_limit: null(일일 제한 없음) / max_count: null(횟수 제한 없음)
+INSERT IGNORE INTO reward_policy
+    (action_type, activity_name, action_category, points_amount, point_type,
+     daily_limit, max_count, cooldown_seconds, min_content_length,
+     threshold_count, is_active, description)
+VALUES
+    ('OCR_VERIFY', '실관람 OCR 인증', 'ACTIVITY', 500, 'earn',
+     NULL, NULL, 0, 0,
+     0, true, '영화관 영수증 OCR 실관람 인증 승인 시 지급 (인증 건당 1회, 중복 불가)');

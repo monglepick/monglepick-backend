@@ -3,6 +3,9 @@ package com.monglepick.monglepickbackend.admin.service;
 import com.monglepick.monglepickbackend.admin.dto.AdminOcrEventDto.VerificationResponse;
 import com.monglepick.monglepickbackend.admin.repository.AdminVerificationRepository;
 import com.monglepick.monglepickbackend.domain.community.entity.UserVerification;
+import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.domain.user.entity.User;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class AdminVerificationService {
 
     private final AdminVerificationRepository verificationRepository;
+    private final UserMapper userMapper;
+    private final RewardService rewardService;
 
     /**
      * 특정 이벤트의 인증 목록 조회.
@@ -53,12 +58,30 @@ public class AdminVerificationService {
 
     /**
      * 인증 승인 처리.
+     *
+     * <p>승인 후 OCR_VERIFY 리워드 정책이 존재하면 유저에게 포인트를 지급한다.
+     * 정책이 없으면 지급 없이 승인만 처리된다.
+     * 리워드 지급 실패 시 경고 로그를 남기고 승인은 유지한다.</p>
      */
     @Transactional
     public VerificationResponse approve(Long verificationId) {
         UserVerification v = findOrThrow(verificationId);
         v.approve(resolveAdminId());
-        log.info("[관리자] 인증 승인 — verificationId={}, adminId={}", verificationId, v.getReviewedBy());
+
+        try {
+            rewardService.grantReward(
+                    v.getUserId(),
+                    "OCR_VERIFY",
+                    "verification_" + verificationId,
+                    0
+            );
+        } catch (Exception e) {
+            log.warn("[관리자] OCR 인증 리워드 지급 실패 (승인은 유지) — verificationId={}, error={}",
+                    verificationId, e.getMessage());
+        }
+
+        log.info("[관리자] 인증 승인 — verificationId={}, userId={}, adminId={}",
+                verificationId, v.getUserId(), v.getReviewedBy());
         return toResponse(v);
     }
 
@@ -85,9 +108,16 @@ public class AdminVerificationService {
     }
 
     private VerificationResponse toResponse(UserVerification v) {
+        String nickname = null;
+        try {
+            User user = userMapper.findById(v.getUserId());
+            if (user != null) nickname = user.getNickname();
+        } catch (Exception ignored) {}
+
         return new VerificationResponse(
                 v.getVerificationId(),
                 v.getUserId(),
+                nickname,
                 v.getMovieId(),
                 v.getEventId(),
                 v.getImageId(),
