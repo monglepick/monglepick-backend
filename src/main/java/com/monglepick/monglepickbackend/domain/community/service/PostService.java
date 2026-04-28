@@ -565,13 +565,16 @@ public class PostService {
 
         // 4) 신고 INSERT — status="pending", target_type="post", toxicity_score=null
         //    categoryId는 Category 마스터 미연동 상태이므로 null 저장 (Phase 5-2 이후 매핑 예정)
+        String content = (request.detail() != null && !request.detail().isBlank())
+                ? request.reason() + ": " + request.detail().trim()
+                : request.reason();
         PostDeclaration declaration = PostDeclaration.builder()
                 .postId(postId)
                 .categoryId(null)
                 .userId(userId)
                 .reportedUserId(target.getUserId())
                 .targetType("post")
-                .declarationContent(request.reason())
+                .declarationContent(content)
                 .toxicityScore(null)
                 .status("pending")
                 .build();
