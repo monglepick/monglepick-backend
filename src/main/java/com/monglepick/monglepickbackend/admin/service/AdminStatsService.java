@@ -27,6 +27,9 @@ import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStat
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserAchievementRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizAttemptRepository;
+import com.monglepick.monglepickbackend.domain.search.entity.PopularSearchKeyword;
+import com.monglepick.monglepickbackend.domain.search.entity.SearchHistory;
+import com.monglepick.monglepickbackend.domain.search.repository.PopularSearchKeywordRepository;
 import com.monglepick.monglepickbackend.domain.search.repository.SearchHistoryRepository;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
@@ -36,12 +39,16 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -90,6 +97,11 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class AdminStatsService {
 
+    /** trending_keywords 전체 누적치를 얻기 위한 사실상 무제한 lookback. */
+    private static final String TRENDING_FULL_LOOKBACK_PERIOD = "36500d";
+    /** 검색 세션 만료 기준. 동일 user_id + keyword 조합에서 30분 inactivity면 새 세션으로 본다. */
+    private static final long SEARCH_SESSION_TIMEOUT_MINUTES = 30L;
+
     /** 사용자 통계 — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
     private final UserMapper userMapper;
     private final PaymentOrderRepository paymentOrderRepository;
@@ -110,6 +122,8 @@ public class AdminStatsService {
     private final RecommendationLogRepository recommendationLogRepository;
     /* 검색 이력 리포지토리 — 인기 검색어/검색 품질 집계 */
     private final SearchHistoryRepository searchHistoryRepository;
+    /* 인기 검색어 운영 메타 — 상단 TOP 20에 제외/수정 상태 병합 */
+    private final PopularSearchKeywordRepository popularSearchKeywordRepository;
     /* Phase 4: Mock 제거 — Movie genres 파싱 (장르 분포 집계용) */
     private final MovieRepository movieRepository;
     /* Phase 4: Mock 제거 — UserBehaviorProfile 의 genreAffinity JSON 집계 */
@@ -141,6 +155,12 @@ public class AdminStatsService {
 
     /* Phase 4: Mock 제거 — Movie.genres / UserBehaviorProfile.genreAffinity JSON 파싱 */
     private static final ObjectMapper STATS_OBJECT_MAPPER = new ObjectMapper();
+
+    @Value("${admin.health.recommend-url:http://localhost:8001}")
+    private String recommendUrl;
+
+    /** recommend 관리자 집계 API 호출용 클라이언트. */
+    private final RestClient restClient = RestClient.create();
 
     /* ── 날짜 포맷터 ── */
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -396,45 +416,358 @@ public class AdminStatsService {
     }
 
     // ──────────────────────────────────────────────
-    // 4. 검색 분석 — search_history 기반 (실측치)
+    // 4. 검색 분석
     // ──────────────────────────────────────────────
 
     /**
      * 인기 검색어를 반환한다.
      *
-     * <p>search_history 테이블의 실제 데이터를 집계한다.
-     * COUNT는 해당 키워드에 대해 저장된 검색 이력 레코드 수를 의미한다.</p>
-     *
-     * <p>ctr 필드는 키워드 검색 후 결과가 1건 이상인 검색 비율을 나타낸다.
-     * totalResultCount &gt; 0이면 결과 있음으로 간주하고,
-     * 값이 클수록 검색 결과 제공률이 높음을 의미한다.</p>
-     *
-     * @param period 기간 문자열 (현재 미사용 — 전체 기간 집계)
-     * @param limit  반환할 상위 키워드 수
-     * @return 인기 검색어 목록 (사용자 수 내림차순)
+     * <p>recommend의 trending_keywords 누적치를 기준으로 TOP N을 반환한다.
+     * 기간 필터는 무시하며, 관리자 운영 메타(popular_search_keyword)만 병합한다.</p>
      */
-    public PopularKeywordsResponse getPopularKeywords(String period, int limit) {
-        // keyword별 검색 사용자 수 + 총 결과 수를 내림차순으로 limit개 조회
-        List<Object[]> rows = searchHistoryRepository.findTopKeywordsByUserCount(
+    public PopularKeywordsResponse getPopularKeywords(int limit) {
+        PopularKeywordsResponse recommendResponse = getPopularKeywordsViaRecommend(limit);
+        if (recommendResponse != null) {
+            return recommendResponse;
+        }
+
+        log.warn("[admin-stats] recommend 인기 검색어 집계 실패, 빈 목록 반환");
+        return new PopularKeywordsResponse(List.of());
+    }
+
+    private PopularKeywordsResponse getPopularKeywordsViaRecommend(int limit) {
+        try {
+            URI uri = UriComponentsBuilder.fromUriString(recommendUrl)
+                    .path("/api/v2/search/admin/popular")
+                    .queryParam("period", TRENDING_FULL_LOOKBACK_PERIOD)
+                    .queryParam("limit", limit)
+                    .encode()
+                    .build()
+                    .toUri();
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payload = restClient.get()
+                    .uri(uri)
+                    .retrieve()
+                    .body(Map.class);
+
+            List<KeywordItem> items = enrichPopularKeywords(extractRecommendPopularKeywords(payload));
+            log.debug("[admin-stats] recommend 인기 검색어 집계 성공 — lookback={}, limit={}, count={}",
+                    TRENDING_FULL_LOOKBACK_PERIOD, limit, items.size());
+            return new PopularKeywordsResponse(items);
+        } catch (Exception e) {
+            log.warn("[admin-stats] recommend 인기 검색어 집계 호출 실패 — lookback={}, limit={}, error={}",
+                    TRENDING_FULL_LOOKBACK_PERIOD, limit, e.getMessage());
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<KeywordItem> extractRecommendPopularKeywords(Map<String, Object> payload) {
+        if (payload == null) {
+            return List.of();
+        }
+
+        Object keywordsObject = payload.get("keywords");
+        if (!(keywordsObject instanceof List<?> keywordList) || keywordList.isEmpty()) {
+            return List.of();
+        }
+
+        List<KeywordItem> items = new ArrayList<>();
+        for (Object entry : keywordList) {
+            if (!(entry instanceof Map<?, ?> item)) {
+                continue;
+            }
+
+            String keyword = asString(item.get("keyword"));
+            if (keyword == null || keyword.isBlank()) {
+                continue;
+            }
+
+            long searchCount = asLong(item.get("search_count"));
+            items.add(new KeywordItem(keyword, searchCount, 0.0, null, null, null, null, null));
+        }
+        return items;
+    }
+
+    private List<KeywordItem> enrichPopularKeywords(List<KeywordItem> items) {
+        if (items.isEmpty()) {
+            return items;
+        }
+
+        List<String> keywords = items.stream()
+                .map(KeywordItem::keyword)
+                .filter(keyword -> keyword != null && !keyword.isBlank())
+                .distinct()
+                .toList();
+        if (keywords.isEmpty()) {
+            return items;
+        }
+
+        Map<String, PopularSearchKeyword> metaByKeyword = new HashMap<>();
+        for (PopularSearchKeyword entity : popularSearchKeywordRepository.findByKeywordIn(keywords)) {
+            metaByKeyword.put(entity.getKeyword(), entity);
+        }
+
+        List<KeywordItem> enriched = new ArrayList<>();
+        for (KeywordItem item : items) {
+            PopularSearchKeyword meta = metaByKeyword.get(item.keyword());
+            enriched.add(new KeywordItem(
+                    item.keyword(),
+                    item.searchCount(),
+                    item.conversionRate(),
+                    meta != null ? meta.getId() : null,
+                    meta != null ? meta.getDisplayRank() : null,
+                    meta != null ? meta.getManualPriority() : null,
+                    meta != null ? meta.getIsExcluded() : null,
+                    meta != null ? meta.getAdminNote() : null
+            ));
+        }
+        return enriched;
+    }
+
+    /**
+     * 기간별 검색 이력 키워드 통계를 반환한다.
+     */
+    public SearchHistoryKeywordsResponse getSearchHistoryKeywords(String period, int limit) {
+        int days = parsePeriodDays(period);
+        LocalDateTime since = LocalDateTime.now().minusDays(days);
+
+        List<Object[]> rows = searchHistoryRepository.findKeywordStatsSince(
+                since,
                 PageRequest.of(0, limit)
         );
+        List<String> targetKeywords = rows.stream()
+                .map(row -> row[0] != null ? String.valueOf(row[0]) : null)
+                .filter(keyword -> keyword != null && !keyword.isBlank())
+                .distinct()
+                .toList();
+        Map<String, KeywordSessionStats> sessionStatsByKeyword = buildKeywordSessionStats(since, targetKeywords);
 
-        List<KeywordItem> keywords = rows.stream()
+        List<SearchHistoryKeywordItem> keywords = rows.stream()
                 .map(row -> {
-                    // 반환 배열: [keyword(String), userCount(Long), totalResultCount(Long)]
                     String keyword = (String) row[0];
-                    long userCount = ((Number) row[1]).longValue();
-                    long totalResultCount = ((Number) row[2]).longValue();
-                    // ctr: 해당 키워드의 총 결과 수를 사용자 수로 나눈 값 (결과 제공률, 최대 1.0 보정)
-                    double ctr = userCount > 0
-                            ? Math.min(Math.round((double) totalResultCount / userCount * 100.0) / 100.0, 1.0)
-                            : 0.0;
-                    return new KeywordItem(keyword, userCount, ctr);
+                    long searchCount = asLong(row[1]);
+                    long resultCount = asLong(row[2]);
+                    KeywordSessionStats sessionStats = sessionStatsByKeyword.get(keyword);
+                    long sessionCount = sessionStats != null ? sessionStats.totalSessions() : 0L;
+                    double conversionRate = 0.0;
+                    if (sessionCount > 0) {
+                        conversionRate = Math.round(
+                                (double) sessionStats.clickedSessions() / sessionCount * 1000.0
+                        ) / 1000.0;
+                    }
+                    return new SearchHistoryKeywordItem(
+                            keyword,
+                            searchCount,
+                            resultCount,
+                            conversionRate
+                    );
                 })
                 .toList();
 
-        log.debug("[admin-stats] 인기 검색어 — {}개 조회 완료", keywords.size());
-        return new PopularKeywordsResponse(keywords);
+        return new SearchHistoryKeywordsResponse(keywords);
+    }
+
+    private Map<String, KeywordSessionStats> buildKeywordSessionStats(
+            LocalDateTime since,
+            List<String> keywords
+    ) {
+        if (keywords.isEmpty()) {
+            return Map.of();
+        }
+
+        List<SearchHistory> events = searchHistoryRepository.findSessionEventsSince(since, keywords);
+        if (events.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, MutableKeywordSessionStats> statsByKeyword = new HashMap<>();
+        Map<String, OpenKeywordSession> openSessions = new HashMap<>();
+
+        for (SearchHistory event : events) {
+            if (event.getUserId() == null || event.getUserId().isBlank()
+                    || event.getKeyword() == null || event.getKeyword().isBlank()
+                    || event.getSearchedAt() == null) {
+                continue;
+            }
+
+            String sessionKey = buildSessionKey(event.getUserId(), event.getKeyword());
+            OpenKeywordSession openSession = openSessions.get(sessionKey);
+
+            if (openSession != null && isExpired(openSession.lastEventAt(), event.getSearchedAt())) {
+                finalizeSession(statsByKeyword, openSession);
+                openSessions.remove(sessionKey);
+                openSession = null;
+            }
+
+            if (event.getClickedMovieId() == null || event.getClickedMovieId().isBlank()) {
+                if (openSession == null) {
+                    openSessions.put(sessionKey, new OpenKeywordSession(event.getKeyword(), event.getSearchedAt()));
+                } else {
+                    openSession.touch(event.getSearchedAt());
+                }
+                continue;
+            }
+
+            if (openSession != null) {
+                openSession.markClicked(event.getSearchedAt());
+            }
+        }
+
+        for (OpenKeywordSession openSession : openSessions.values()) {
+            finalizeSession(statsByKeyword, openSession);
+        }
+
+        Map<String, KeywordSessionStats> immutableStatsByKeyword = new HashMap<>();
+        for (Map.Entry<String, MutableKeywordSessionStats> entry : statsByKeyword.entrySet()) {
+            MutableKeywordSessionStats stats = entry.getValue();
+            immutableStatsByKeyword.put(
+                    entry.getKey(),
+                    new KeywordSessionStats(stats.totalSessions, stats.clickedSessions)
+            );
+        }
+        return immutableStatsByKeyword;
+    }
+
+    private String buildSessionKey(String userId, String keyword) {
+        return userId + '\u0000' + keyword;
+    }
+
+    private boolean isExpired(LocalDateTime lastEventAt, LocalDateTime currentEventAt) {
+        return !currentEventAt.isBefore(lastEventAt.plusMinutes(SEARCH_SESSION_TIMEOUT_MINUTES));
+    }
+
+    private void finalizeSession(
+            Map<String, MutableKeywordSessionStats> statsByKeyword,
+            OpenKeywordSession openSession
+    ) {
+        MutableKeywordSessionStats stats = statsByKeyword.computeIfAbsent(
+                openSession.keyword,
+                ignored -> new MutableKeywordSessionStats()
+        );
+        stats.totalSessions++;
+        if (openSession.clicked) {
+            stats.clickedSessions++;
+        }
+    }
+
+    private record KeywordSessionStats(long totalSessions, long clickedSessions) {}
+
+    private static final class MutableKeywordSessionStats {
+        private long totalSessions;
+        private long clickedSessions;
+    }
+
+    private static final class OpenKeywordSession {
+        private final String keyword;
+        private LocalDateTime lastEventAt;
+        private boolean clicked;
+
+        private OpenKeywordSession(String keyword, LocalDateTime lastEventAt) {
+            this.keyword = keyword;
+            this.lastEventAt = lastEventAt;
+            this.clicked = false;
+        }
+
+        private LocalDateTime lastEventAt() {
+            return lastEventAt;
+        }
+
+        private void touch(LocalDateTime eventAt) {
+            this.lastEventAt = eventAt;
+        }
+
+        private void markClicked(LocalDateTime eventAt) {
+            this.clicked = true;
+            this.lastEventAt = eventAt;
+        }
+    }
+
+    /**
+     * 기간별 특정 키워드의 클릭 영화 통계를 반환한다.
+     */
+    public SearchKeywordClicksResponse getSearchKeywordClicks(String keyword, String period, int limit) {
+        String keywordCleaned = keyword != null ? keyword.trim() : "";
+        if (keywordCleaned.isBlank()) {
+            return new SearchKeywordClicksResponse(keywordCleaned, 0L, List.of());
+        }
+
+        int days = parsePeriodDays(period);
+        LocalDateTime since = LocalDateTime.now().minusDays(days);
+        List<Object[]> rows = searchHistoryRepository.findClickedMoviesByKeywordSince(
+                keywordCleaned,
+                since,
+                PageRequest.of(0, limit)
+        );
+        if (rows.isEmpty()) {
+            return new SearchKeywordClicksResponse(keywordCleaned, 0L, List.of());
+        }
+
+        long totalClicks = rows.stream()
+                .mapToLong(row -> asLong(row[1]))
+                .sum();
+        List<String> movieIds = rows.stream()
+                .map(row -> row[0] != null ? String.valueOf(row[0]) : null)
+                .filter(movieId -> movieId != null && !movieId.isBlank())
+                .distinct()
+                .toList();
+        Map<String, String> movieTitleById = new HashMap<>();
+        if (!movieIds.isEmpty()) {
+            for (Movie movie : movieRepository.findAllByMovieIdIn(movieIds)) {
+                movieTitleById.put(movie.getMovieId(), movie.getTitle());
+            }
+        }
+
+        List<SearchKeywordClickItem> movies = rows.stream()
+                .map(row -> {
+                    String movieId = row[0] != null ? String.valueOf(row[0]) : null;
+                    long clickCount = asLong(row[1]);
+                    double clickRate = totalClicks > 0
+                            ? Math.round((double) clickCount / totalClicks * 1000.0) / 1000.0
+                            : 0.0;
+                    return new SearchKeywordClickItem(
+                            movieId,
+                            movieId != null ? movieTitleById.get(movieId) : null,
+                            clickCount,
+                            clickRate
+                    );
+                })
+                .toList();
+
+        return new SearchKeywordClicksResponse(keywordCleaned, totalClicks, movies);
+    }
+
+    private String asString(Object value) {
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    private long asLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    private double asDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value == null) {
+            return 0.0;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return 0.0;
+        }
     }
 
     /**
@@ -450,23 +783,28 @@ public class AdminStatsService {
      *   <li>zeroResultCount = result_count = 0 인 레코드 수</li>
      * </ul>
      *
-     * @param period 기간 문자열 (현재 미사용 — 전체 기간 집계)
+     * @param period 기간 문자열 ("1d", "7d", "30d" 등)
      * @return 검색 성공률, 전체 검색 수, 무결과 검색 수
      */
     public SearchQualityResponse getSearchQuality(String period) {
-        // 전체 검색 이력 수
-        long totalSearches = searchHistoryRepository.count();
+        int days = parsePeriodDays(period);
+        LocalDateTime since = LocalDateTime.now().minusDays(days);
 
-        // result_count = 0 인 무결과 검색 이력 수
-        long zeroResultCount = searchHistoryRepository.countByResultCount(0);
+        // 클릭 로그(clicked_movie_id IS NOT NULL)는 제외하고 실제 검색 이벤트만 집계한다.
+        long totalSearches = searchHistoryRepository
+                .countBySearchedAtGreaterThanEqualAndClickedMovieIdIsNull(since);
+
+        // result_count = 0 인 무결과 검색 이력 수 (동일하게 클릭 로그 제외)
+        long zeroResultCount = searchHistoryRepository
+                .countByResultCountAndSearchedAtGreaterThanEqualAndClickedMovieIdIsNull(0, since);
 
         // 검색 성공률: 결과가 1건 이상인 검색 / 전체 검색 (소수점 3자리 반올림)
         double successRate = totalSearches > 0
                 ? Math.round((double) (totalSearches - zeroResultCount) / totalSearches * 1000.0) / 1000.0
                 : 0.0;
 
-        log.debug("[admin-stats] 검색 품질 — total={}, zeroResult={}, successRate={}",
-                totalSearches, zeroResultCount, successRate);
+        log.debug("[admin-stats] 검색 품질 — period={}, total={}, zeroResult={}, successRate={}",
+                period, totalSearches, zeroResultCount, successRate);
         return new SearchQualityResponse(successRate, totalSearches, zeroResultCount);
     }
 

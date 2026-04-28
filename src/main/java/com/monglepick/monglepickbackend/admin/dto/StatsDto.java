@@ -186,12 +186,74 @@ public class StatsDto {
      *
      * @param keyword        검색어
      * @param searchCount    검색 횟수
-     * @param conversionRate 추천/상세 페이지 전환율 (0.0~1.0, mock)
+     * @param conversionRate 추천/상세 페이지 전환율 (0.0~1.0)
+     * @param id             popular_search_keyword PK (운영 메타 없으면 null)
+     * @param displayRank    고정 노출 순위 (nullable)
+     * @param manualPriority 수동 우선순위 (nullable)
+     * @param isExcluded     제외 여부 (운영 메타 없으면 null)
+     * @param adminNote      관리자 메모 (nullable)
      */
     public record KeywordItem(
             String keyword,
             long searchCount,
+            double conversionRate,
+            Long id,
+            Integer displayRank,
+            Integer manualPriority,
+            Boolean isExcluded,
+            String adminNote
+    ) {}
+
+    /**
+     * 기간별 검색 이력 키워드 통계 응답.
+     *
+     * @param keywords 키워드 통계 리스트 (검색 수 내림차순)
+     */
+    public record SearchHistoryKeywordsResponse(
+            List<SearchHistoryKeywordItem> keywords
+    ) {}
+
+    /**
+     * 기간별 검색 이력 키워드 단건.
+     *
+     * @param keyword        검색어
+     * @param searchCount    검색 횟수 (clicked_movie_id IS NULL 기준)
+     * @param resultCount    기간 내 누적 검색 결과 수
+     * @param conversionRate 검색 세션 대비 클릭 발생 세션 비율 (0.0~1.0)
+     */
+    public record SearchHistoryKeywordItem(
+            String keyword,
+            long searchCount,
+            long resultCount,
             double conversionRate
+    ) {}
+
+    /**
+     * 특정 키워드의 클릭 영화 통계 응답.
+     *
+     * @param keyword    기준 키워드
+     * @param totalClicks 기간 내 총 클릭 수
+     * @param movies     클릭 영화 통계 리스트
+     */
+    public record SearchKeywordClicksResponse(
+            String keyword,
+            long totalClicks,
+            List<SearchKeywordClickItem> movies
+    ) {}
+
+    /**
+     * 특정 키워드의 클릭 영화 단건.
+     *
+     * @param movieId     클릭된 영화 ID
+     * @param movieTitle  클릭된 영화 제목 (미등록 시 null)
+     * @param clickCount  클릭 수
+     * @param clickRate   해당 키워드 클릭 내 비중 (0.0~1.0)
+     */
+    public record SearchKeywordClickItem(
+            String movieId,
+            String movieTitle,
+            long clickCount,
+            double clickRate
     ) {}
 
     /**

@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,6 +22,9 @@ public interface PopularSearchKeywordRepository extends JpaRepository<PopularSea
 
     /** 키워드로 단건 조회 (사용자 측 isExcluded 필터링용) */
     Optional<PopularSearchKeyword> findByKeyword(String keyword);
+
+    /** 여러 키워드의 운영 메타를 한 번에 조회한다. */
+    List<PopularSearchKeyword> findByKeywordIn(Collection<String> keywords);
 
     /** 페이징 조회 (관리자 화면) — manual_priority DESC, createdAt DESC */
     Page<PopularSearchKeyword> findAll(Pageable pageable);

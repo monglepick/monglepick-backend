@@ -1,15 +1,32 @@
 package com.monglepick.monglepickbackend.admin.controller;
 
+import com.monglepick.monglepickbackend.admin.dto.AdminPopularSearchDto.CreateRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPopularSearchDto.KeywordResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminPopularSearchDto.UpdateExcludedRequest;
+import com.monglepick.monglepickbackend.admin.dto.AdminPopularSearchDto.UpdateRequest;
 import com.monglepick.monglepickbackend.admin.dto.StatsDto.*;
+import com.monglepick.monglepickbackend.admin.service.AdminPopularSearchService;
 import com.monglepick.monglepickbackend.admin.service.AdminStatsService;
 import com.monglepick.monglepickbackend.global.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +64,7 @@ import java.util.List;
 public class AdminStatsController {
 
     private final AdminStatsService adminStatsService;
+    private final AdminPopularSearchService adminPopularSearchService;
 
     // ──────────────────────────────────────────────
     // 1. 서비스 통계
@@ -121,26 +139,126 @@ public class AdminStatsController {
     // ──────────────────────────────────────────────
 
     /**
-     * 인기 검색어를 조회한다. (현재 mock)
+     * 인기 검색어를 조회한다.
      */
-    @Operation(summary = "인기 검색어", description = "검색 수 기준 인기 키워드 목록 (search_histories 미구현 시 mock)")
+    @Operation(summary = "인기 검색어", description = "trending_keywords 누적 검색 수 기반 TOP N. 기간 필터 영향 없음")
     @GetMapping("/search/popular")
     public ResponseEntity<ApiResponse<PopularKeywordsResponse>> getPopularKeywords(
-            @RequestParam(defaultValue = "7d") String period,
             @RequestParam(defaultValue = "20") int limit) {
-        log.debug("[admin-stats-api] GET /search/popular — period={}, limit={}", period, limit);
-        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getPopularKeywords(period, limit)));
+        log.debug("[admin-stats-api] GET /search/popular — limit={}", limit);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getPopularKeywords(limit)));
     }
 
     /**
-     * 검색 품질 지표를 조회한다. (현재 mock)
+     * 기간별 검색 이력 키워드 통계를 조회한다.
      */
-    @Operation(summary = "검색 품질", description = "검색 성공률/총 검색 수/0건 검색 수 (mock)")
+    @Operation(summary = "검색 이력 키워드 통계", description = "search_history 기반 기간별 TOP N 키워드 통계 (전환율은 30분 세션 기준)")
+    @GetMapping("/search/history")
+    public ResponseEntity<ApiResponse<SearchHistoryKeywordsResponse>> getSearchHistoryKeywords(
+            @Parameter(description = "기간 (1d/7d/30d)", example = "7d")
+            @RequestParam(defaultValue = "7d") String period,
+            @RequestParam(defaultValue = "20") int limit) {
+        log.debug("[admin-stats-api] GET /search/history — period={}, limit={}", period, limit);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getSearchHistoryKeywords(period, limit)));
+    }
+
+    /**
+     * 특정 키워드의 클릭 영화 통계를 조회한다.
+     */
+    @Operation(summary = "검색 키워드 클릭 상세", description = "search_history.clicked_movie_id 기반 기간별 클릭 영화 통계")
+    @GetMapping("/search/history/clicks")
+    public ResponseEntity<ApiResponse<SearchKeywordClicksResponse>> getSearchKeywordClicks(
+            @RequestParam String keyword,
+            @Parameter(description = "기간 (1d/7d/30d)", example = "7d")
+            @RequestParam(defaultValue = "7d") String period,
+            @RequestParam(defaultValue = "20") int limit) {
+        log.debug("[admin-stats-api] GET /search/history/clicks — keyword={}, period={}, limit={}",
+                keyword, period, limit);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getSearchKeywordClicks(keyword, period, limit)));
+    }
+
+    /**
+     * 검색 품질 지표를 조회한다.
+     */
+    @Operation(summary = "검색 품질", description = "기간별 검색 성공률/총 검색 수/0건 검색 수")
     @GetMapping("/search/quality")
     public ResponseEntity<ApiResponse<SearchQualityResponse>> getSearchQuality(
             @RequestParam(defaultValue = "7d") String period) {
         log.debug("[admin-stats-api] GET /search/quality — period={}", period);
         return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getSearchQuality(period)));
+    }
+
+    /**
+     * 인기 검색어 운영 메타 목록을 조회한다.
+     */
+    @Operation(summary = "인기 검색어 운영 목록", description = "상단 TOP 20/하단 운영 관리 공용 메타 목록")
+    @GetMapping("/popular-keywords")
+    public ResponseEntity<ApiResponse<Page<KeywordResponse>>> getPopularKeywordMetaList(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        Pageable pageable = PageRequest.of(
+                page, size,
+                Sort.by(Sort.Order.desc("manualPriority"), Sort.Order.desc("createdAt"))
+        );
+        return ResponseEntity.ok(ApiResponse.ok(adminPopularSearchService.getKeywords(pageable)));
+    }
+
+    /**
+     * 인기 검색어 운영 메타 단건을 조회한다.
+     */
+    @Operation(summary = "인기 검색어 운영 단건", description = "TOP 20 편집 모달에서 사용하는 운영 메타 단건 조회")
+    @GetMapping("/popular-keywords/{id}")
+    public ResponseEntity<ApiResponse<KeywordResponse>> getPopularKeywordMeta(
+            @PathVariable Long id
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(adminPopularSearchService.getKeyword(id)));
+    }
+
+    /**
+     * 인기 검색어 운영 메타를 신규 등록한다.
+     */
+    @Operation(summary = "인기 검색어 운영 등록", description = "TOP 20 키워드에 운영 메타를 신규 연결한다")
+    @PostMapping("/popular-keywords")
+    public ResponseEntity<ApiResponse<KeywordResponse>> createPopularKeywordMeta(
+            @Valid @RequestBody CreateRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(adminPopularSearchService.createKeyword(request)));
+    }
+
+    /**
+     * 인기 검색어 운영 메타를 수정한다.
+     */
+    @Operation(summary = "인기 검색어 운영 수정", description = "displayRank/manualPriority/isExcluded/adminNote 수정")
+    @PutMapping("/popular-keywords/{id}")
+    public ResponseEntity<ApiResponse<KeywordResponse>> updatePopularKeywordMeta(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(adminPopularSearchService.updateKeyword(id, request)));
+    }
+
+    /**
+     * 인기 검색어 제외 상태를 토글한다.
+     */
+    @Operation(summary = "인기 검색어 제외 토글", description = "TOP 20 리스트에서 즉시 제외/복원")
+    @PatchMapping("/popular-keywords/{id}/excluded")
+    public ResponseEntity<ApiResponse<KeywordResponse>> updatePopularKeywordMetaExcluded(
+            @PathVariable Long id,
+            @RequestBody UpdateExcludedRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(adminPopularSearchService.updateExcluded(id, request)));
+    }
+
+    /**
+     * 인기 검색어 운영 메타를 삭제한다.
+     */
+    @Operation(summary = "인기 검색어 운영 삭제", description = "popular_search_keyword hard delete")
+    @DeleteMapping("/popular-keywords/{id}")
+    public ResponseEntity<Void> deletePopularKeywordMeta(@PathVariable Long id) {
+        adminPopularSearchService.deleteKeyword(id);
+        return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
     }
 
     // ──────────────────────────────────────────────
