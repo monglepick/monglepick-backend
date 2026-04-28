@@ -27,6 +27,18 @@ public interface UserMapper {
     /** PK(user_id)로 사용자 조회 (없으면 null) */
     User findById(@Param("userId") String userId);
 
+    /**
+     * 단일 사용자의 닉네임만 조회 (없으면 null).
+     *
+     * <p>{@link #findById}가 22컬럼을 모두 가져오는 것과 달리 nickname 한 컬럼만
+     * 가져오는 경량 쿼리. 관리자 고객센터 티켓 화면처럼 "작성자 표시명만 필요한"
+     * N+1 류 화면에서 사용한다.</p>
+     *
+     * @param userId 대상 사용자 PK
+     * @return 닉네임 (사용자 없거나 nickname이 NULL이면 null)
+     */
+    String findNicknameById(@Param("userId") String userId);
+
     /** 이메일로 사용자 조회 (로컬 로그인, 없으면 null) */
     User findByEmail(@Param("email") String email);
 

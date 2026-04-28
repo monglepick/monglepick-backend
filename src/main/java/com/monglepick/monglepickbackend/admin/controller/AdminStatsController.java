@@ -334,9 +334,10 @@ public class AdminStatsController {
 
     /**
      * 포인트 유형별 분포를 조회한다.
-     * earn/spend/bonus/expire/refund/revoke 유형별 건수 + 합계.
+     * earn/spend/bonus/expire/refund/revoke + admin_grant/admin_revoke (운영 조정) 유형별 건수 + 합계.
      */
-    @Operation(summary = "포인트 유형별 분포", description = "포인트 유형(earn/spend/bonus 등)별 건수 + 합계")
+    @Operation(summary = "포인트 유형별 분포",
+            description = "포인트 유형(earn/spend/bonus/expire/refund/revoke + admin_grant/admin_revoke 운영 조정)별 건수 + 합계")
     @GetMapping("/point-economy/distribution")
     public ResponseEntity<ApiResponse<PointTypeDistributionResponse>> getPointTypeDistribution() {
         log.debug("[admin-stats-api] GET /point-economy/distribution");

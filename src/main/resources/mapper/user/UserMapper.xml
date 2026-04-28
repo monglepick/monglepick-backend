@@ -57,6 +57,16 @@
         WHERE user_id = #{userId}
     </select>
 
+    <!--
+        단건 nickname 경량 조회.
+        관리자 고객센터 티켓 화면처럼 작성자 표시명만 필요한 화면에서 22컬럼 풀스캔을 회피한다.
+    -->
+    <select id="findNicknameById" resultType="string">
+        SELECT nickname
+        FROM users
+        WHERE user_id = #{userId}
+    </select>
+
     <!-- 이메일로 조회 (로컬 로그인) -->
     <select id="findByEmail" resultMap="userResultMap">
         SELECT <include refid="allColumns"/>

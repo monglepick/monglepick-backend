@@ -88,9 +88,18 @@ public interface AdminPointsHistoryRepository extends JpaRepository<PointsHistor
     );
 
     // ═══ 포인트 경제 통계 집계 쿼리 ═══
+    //
+    // 2026-04-28 — 운영 조정 분리 정책
+    //   관리자 수동 지급/회수는 point_type='admin_grant'/'admin_revoke' 로 박힌다.
+    //   아래 KPI 쿼리들은 의도적으로 'earn'+'bonus' (발행) / 'spend' (소비) 만 포함하므로
+    //   admin_grant/admin_revoke 는 KPI 합산에서 자연 제외된다. 분포 차트(getPointTypeDistribution)
+    //   는 모든 point_type 을 반환하므로 별도 "운영 조정" 카테고리로 표시된다.
 
     /**
      * 포인트 유형별 건수와 포인트 합계를 집계한다.
+     *
+     * <p>모든 point_type (earn/spend/bonus/expire/refund/revoke/admin_grant/admin_revoke)
+     * 을 그룹핑한다. 분포 차트 라벨링은 {@code AdminStatsService.getPointTypeDistribution()} 참조.</p>
      *
      * <p>반환 배열: [pointType(String), count(Long), totalAmount(Long)]</p>
      */
@@ -100,6 +109,8 @@ public interface AdminPointsHistoryRepository extends JpaRepository<PointsHistor
 
     /**
      * 지정 기간 내 발행(earn+bonus) 포인트 합계를 조회한다.
+     *
+     * <p>운영 조정(admin_grant)은 의도적으로 제외 — KPI 가 정상 사용자 활동을 반영하도록.</p>
      */
     @Query("SELECT COALESCE(SUM(p.pointChange), 0) FROM PointsHistory p " +
            "WHERE p.pointType IN ('earn', 'bonus') " +
@@ -108,6 +119,8 @@ public interface AdminPointsHistoryRepository extends JpaRepository<PointsHistor
 
     /**
      * 지정 기간 내 소비(spend) 포인트 합계를 조회한다 (절대값 반환).
+     *
+     * <p>운영 회수(admin_revoke)는 의도적으로 제외 — 사용자 소비 행동이 아니므로.</p>
      */
     @Query("SELECT COALESCE(SUM(ABS(p.pointChange)), 0) FROM PointsHistory p " +
            "WHERE p.pointType = 'spend' " +
@@ -115,14 +128,14 @@ public interface AdminPointsHistoryRepository extends JpaRepository<PointsHistor
     long sumSpentBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
     /**
-     * 전체 발행 포인트 합계 (earn + bonus).
+     * 전체 발행 포인트 합계 (earn + bonus). 운영 조정(admin_grant) 제외.
      */
     @Query("SELECT COALESCE(SUM(p.pointChange), 0) FROM PointsHistory p " +
            "WHERE p.pointType IN ('earn', 'bonus')")
     long sumTotalIssued();
 
     /**
-     * 전체 소비 포인트 합계 (spend, 절대값).
+     * 전체 소비 포인트 합계 (spend, 절대값). 운영 회수(admin_revoke) 제외.
      */
     @Query("SELECT COALESCE(SUM(ABS(p.pointChange)), 0) FROM PointsHistory p " +
            "WHERE p.pointType = 'spend'")

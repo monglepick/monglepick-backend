@@ -73,6 +73,43 @@ public enum PointItemType {
      */
     BADGE_GENERIC(Dispense.INVENTORY, 1, null),
 
+    /**
+     * 일반 프레임 (2026-04-28 신규) — 프로필 사진 테두리 시리즈 공용 sentinel.
+     *
+     * <p>아바타 위에 합성되는 SVG/PNG 테두리. 영화 필름·골든 시상식·할로윈/크리스마스 한정 등을
+     * 행 단위로 자유 등록 가능. 영구(durationDays=null) 또는 기간 제한(시즌 한정) 모두 지원.
+     * itemCategory={@link PointItemCategory#FRAME}.</p>
+     */
+    FRAME_GENERIC(Dispense.INVENTORY, 1, null),
+
+    /**
+     * 일반 배경 (2026-04-28 신규) — 프로필 카드 배경 시리즈 공용 sentinel.
+     *
+     * <p>프로필 카드 뒷배경에 z-index=0 으로 합성되는 이미지/패턴. 극장 좌석·레드카펫·
+     * 우주 SF·영화 포스터 콜라주 등. itemCategory={@link PointItemCategory#BACKGROUND}.</p>
+     */
+    BACKGROUND_GENERIC(Dispense.INVENTORY, 1, null),
+
+    /**
+     * 일반 칭호 (2026-04-28 신규) — 닉네임 옆/위 텍스트 라벨 시리즈 공용 sentinel.
+     *
+     * <p>운영자가 자유 등록하는 칭호 ("🍿 영화광", "리뷰 마스터", "100편 클럽" 등) 와
+     * 등급 달성 시 자동 지급되는 6종(NORMAL~DIAMOND) 칭호 모두 이 타입을 사용한다.
+     * 자동 지급 칭호는 {@link com.monglepick.monglepickbackend.domain.reward.service.GradeTitleService}
+     * 가 GRADE_UP_* 시점에 source="GRADE_AUTO" 로 INSERT 한다.
+     * itemCategory={@link PointItemCategory#TITLE}.</p>
+     */
+    TITLE_GENERIC(Dispense.INVENTORY, 1, null),
+
+    /**
+     * 일반 이펙트 (2026-04-28 신규) — 프로필 위 애니메이션 시리즈 공용 sentinel.
+     *
+     * <p>팝콘 떨어짐·별빛 반짝임·필름 스트립 회전 등 CSS/Lottie 애니메이션. 클라이언트는
+     * pointItem.imageUrl 또는 itemName 매핑을 통해 effect key 를 결정해 합성한다.
+     * itemCategory={@link PointItemCategory#EFFECT}.</p>
+     */
+    EFFECT_GENERIC(Dispense.INVENTORY, 1, null),
+
     /** 영화 티켓 응모권 (150P, 월말 추첨) */
     APPLY_MOVIE_TICKET(Dispense.INVENTORY, 1, null),
 

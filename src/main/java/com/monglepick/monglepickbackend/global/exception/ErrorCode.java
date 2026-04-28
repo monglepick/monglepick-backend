@@ -423,7 +423,32 @@ public enum ErrorCode {
     COURSE_VERIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "ROAD007", "리뷰 인증 기록을 찾을 수 없습니다"),
 
     /** 도장깨기 — REVIEW 타입이 아닌 인증 기록에 리뷰 인증 액션을 시도. */
-    NOT_REVIEW_VERIFICATION(HttpStatus.BAD_REQUEST, "ROAD008", "리뷰 인증 기록이 아닙니다");
+    NOT_REVIEW_VERIFICATION(HttpStatus.BAD_REQUEST, "ROAD008", "리뷰 인증 기록이 아닙니다"),
+
+    // ─────────────────────────────────────────────
+    // 영화 티켓 추첨 (LTR0xx) — 2026-04-28 신규 (관리자 추첨 관리 EP 도입)
+    // ─────────────────────────────────────────────
+
+    /**
+     * lotteryId 또는 cycleYearMonth 에 해당하는 추첨 회차를 찾을 수 없음.
+     * 관리자 회차 상세/수정/추첨 EP 가 모두 이 코드를 공유한다.
+     */
+    LOTTERY_NOT_FOUND(HttpStatus.NOT_FOUND, "LTR001", "추첨 회차를 찾을 수 없습니다"),
+
+    /**
+     * 회차 상태가 추첨 가능 상태(PENDING/DRAWING)가 아닌 경우.
+     * 예) COMPLETED 회차에 수동 추첨을 다시 트리거하려는 시도.
+     */
+    LOTTERY_INVALID_STATE(HttpStatus.BAD_REQUEST, "LTR002", "현재 회차 상태에서는 수행할 수 없는 작업입니다"),
+
+    /**
+     * 관리자 회차 수정 시 winner_count 가 음수이거나 응모자 수보다 큰 등 비정상 값.
+     * 정확한 사유는 message 파라미터로 덮어써서 전달한다.
+     */
+    LOTTERY_INVALID_WINNER_COUNT(HttpStatus.BAD_REQUEST, "LTR003", "당첨자 수가 올바르지 않습니다"),
+
+    /** 회차 cycle_year_month 형식이 'YYYY-MM' 가 아닌 경우. */
+    LOTTERY_INVALID_CYCLE_FORMAT(HttpStatus.BAD_REQUEST, "LTR004", "회차 형식은 YYYY-MM 이어야 합니다");
 
     // ─────────────────────────────────────────────
     // 필드

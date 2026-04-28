@@ -275,9 +275,15 @@ public class AdminPaymentService {
      * <p><b>감사 로그</b>: SYNCED/NO_CHANGE/MISMATCH 모두 기록한다. MISMATCH 케이스는 관리자의
      * 수동 검토가 필요한 의심스러운 상태이므로 오히려 추적이 더 중요하다.</p>
      *
+     * <p><b>트랜잭션</b>: 클래스 레벨 {@code @Transactional(readOnly=true)} 를 쓰기로 오버라이드한다.
+     * 도메인 {@link PaymentService#syncFromPg}의 {@code @Transactional} 은 REQUIRED 전파라서
+     * 호출자 트랜잭션 속성을 그대로 물려받는다. 누락 시 안의 {@code SELECT ... FOR UPDATE} 가
+     * "Cannot execute statement in a READ ONLY transaction" 으로 실패한다 (2026-04-28 수정).</p>
+     *
      * @param orderId 동기화 대상 주문 UUID
      * @return 관리자 UI 용 PG 동기화 결과 응답
      */
+    @Transactional
     public AdminPgSyncResponse syncFromPg(String orderId) {
         log.info("[AdminPayment] PG 재조회 요청 — orderId={}", orderId);
 
@@ -609,11 +615,15 @@ public class AdminPaymentService {
         String gradeCode;
 
         if (amount > 0) {
-            // 양수 → earnPoint (isActivityReward=false 로 등급 미반영)
+            // 양수 → earnPoint (isActivityReward=false 로 등급 미반영).
+            //
+            // 2026-04-28: pointType "bonus" → "admin_grant" 로 분리. 통계 KPI(earn+bonus)
+            // 합산 시 자연 제외되어 운영 조정분이 정상 보너스와 섞이지 않는다. 분포 차트는
+            // 백엔드/프론트 라벨 매핑에서 별도 "운영 조정" 카테고리로 표시한다.
             var earnResponse = pointService.earnPoint(
                     request.userId(),
                     amount,
-                    "bonus",                     // point_type: bonus (관리자 지급은 등급 배율 미적용)
+                    "admin_grant",               // point_type: admin_grant (운영 조정 전용)
                     request.reason(),
                     "admin_manual_" + System.currentTimeMillis(),  // referenceId — 중복 지급 방지용 고유값
                     null,                        // actionType: null (리워드 외 변동)
@@ -622,13 +632,17 @@ public class AdminPaymentService {
             newBalance = earnResponse.balanceAfter();
             gradeCode = earnResponse.grade();
         } else {
-            // 음수 → deductPoint (절댓값 전달)
+            // 음수 → deductPoint 오버로드 (절댓값 전달, pointType=admin_revoke).
+            //
+            // 2026-04-28: 일반 소비("spend")와 분리하기 위해 PointService.deductPoint
+            // 5-인자 오버로드를 사용한다. 통계 분포 차트의 "운영 조정" 카테고리에 합산된다.
             int absAmount = -amount;
             var deductResponse = pointService.deductPoint(
                     request.userId(),
                     absAmount,
                     "admin_manual_" + System.currentTimeMillis(),
-                    request.reason()
+                    request.reason(),
+                    "admin_revoke"               // point_type: admin_revoke (운영 조정 전용)
             );
             newBalance = deductResponse.balanceAfter();
             // 차감 경로는 등급 조회가 없으므로 별도 조회

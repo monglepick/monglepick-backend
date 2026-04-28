@@ -118,4 +118,28 @@ public class MovieTicketLottery extends BaseTimeEntity {
     public void markPending() {
         this.status = MovieTicketLotteryStatus.PENDING;
     }
+
+    // ──────────────────────────────────────────────
+    // 도메인 메서드 — 운영자 수정 (2026-04-28 추가)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 당첨자 수 조정 (관리자 화면).
+     *
+     * <p>회차가 PENDING/DRAWING 일 때만 허용. COMPLETED 회차는 이미 추첨이 끝났으므로
+     * 변경해도 결과에 영향이 없어 차단한다.</p>
+     *
+     * @param winnerCount 새 당첨자 수 (1 이상 1000 이하 권장 — 서비스 레이어에서 검증)
+     */
+    public void changeWinnerCount(int winnerCount) {
+        if (status == MovieTicketLotteryStatus.COMPLETED) {
+            throw new IllegalStateException("추첨이 완료된 회차의 당첨자 수는 변경할 수 없습니다");
+        }
+        this.winnerCount = winnerCount;
+    }
+
+    /** 운영자 메모 변경 — 어느 상태든 허용 (감사 추적용). */
+    public void changeNotes(String notes) {
+        this.notes = notes;
+    }
 }

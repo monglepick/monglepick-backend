@@ -31,6 +31,7 @@ import com.monglepick.monglepickbackend.domain.support.entity.SupportTicket;
 import com.monglepick.monglepickbackend.domain.support.entity.TicketReply;
 import com.monglepick.monglepickbackend.domain.support.entity.TicketStatus;
 import com.monglepick.monglepickbackend.domain.support.infra.SupportFaqElasticsearchIndexer;
+import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +42,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 관리자 고객센터 서비스.
@@ -91,6 +96,15 @@ public class AdminSupportService {
      * FAQ 등록/수정/삭제 이벤트를 admin_audit_log 테이블에 기록한다.
      */
     private final AdminAuditService auditService;
+
+    /**
+     * 사용자 정보 조회용 Mapper (MyBatis).
+     *
+     * <p>티켓 작성자/답변 작성자의 닉네임을 단건 lookup 한다 (UserMapper#findNicknameById).
+     * 김민규 user 도메인은 MyBatis 100% R/W 정책이므로 JpaRepository 가 없어 이 Mapper 를
+     * 직접 의존한다 (JPA/MyBatis 하이브리드 §15).</p>
+     */
+    private final UserMapper userMapper;
 
     // ======================== 공지사항 ========================
     // 2026-04-08: 구 AppNotice 통합 — displayType/linkUrl/imageUrl/startAt/endAt/
@@ -502,7 +516,14 @@ public class AdminSupportService {
         } else {
             result = adminTicketRepository.findAllByOrderByCreatedAtDesc(pageable);
         }
-        return result.map(this::toTicketSummary);
+
+        // 페이지 내 모든 티켓 작성자 닉네임을 한 번에 조회 — N+1 회피용 batch lookup.
+        // 한 페이지(기본 size=20)당 최악의 경우 20번 SELECT 가 나가지만, distinct user_id 만 조회하므로
+        // 서로 다른 작성자 수만큼만 호출된다. 닉네임 누락 시 null → 프론트가 user_id 로 fallback 표시.
+        Map<String, String> nicknameCache = preloadNicknames(
+                result.getContent().stream().map(SupportTicket::getUserId).toList()
+        );
+        return result.map(t -> toTicketSummary(t, nicknameCache));
     }
 
     /** 티켓 상세 조회 (답변 포함). */
@@ -512,16 +533,28 @@ public class AdminSupportService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
                         "티켓을 찾을 수 없습니다: id=" + ticketId));
 
-        List<TicketReplyItem> replies = adminTicketReplyRepository
-                .findByTicketIdOrderByCreatedAtAsc(ticketId)
-                .stream()
-                .map(this::toTicketReplyItem)
+        // 작성자 + 답변 작성자 모두를 distinct 모아 닉네임 batch 조회.
+        // 답변은 ADMIN/USER 혼합 — ADMIN 답변은 프론트에서 정적 라벨 "관리자" 로 대체되지만,
+        // userNickname 필드는 일관성을 위해 모든 답변에 채워둔다 (없으면 null).
+        List<TicketReply> replyEntities = adminTicketReplyRepository
+                .findByTicketIdOrderByCreatedAtAsc(ticketId);
+
+        Set<String> userIds = new LinkedHashSet<>();
+        userIds.add(ticket.getUserId());
+        for (TicketReply r : replyEntities) {
+            if (r.getAuthorId() != null) userIds.add(r.getAuthorId());
+        }
+        Map<String, String> nicknameCache = preloadNicknames(userIds.stream().toList());
+
+        List<TicketReplyItem> replies = replyEntities.stream()
+                .map(r -> toTicketReplyItem(r, nicknameCache))
                 .toList();
 
         // SupportTicket 은 String FK 직접 보관 (JPA/MyBatis 하이브리드 §15.4)
         return new TicketDetail(
                 ticket.getTicketId(),
                 ticket.getUserId(),
+                nicknameCache.get(ticket.getUserId()),
                 ticket.getCategory().name(),
                 ticket.getTitle(),
                 ticket.getContent(),
@@ -557,7 +590,8 @@ public class AdminSupportService {
             ticket.startProcessing();
         }
 
-        return toTicketReplyItem(saved);
+        // ADMIN 답변이므로 프론트는 정적 라벨 "관리자" 를 쓴다 → nickname lookup 생략.
+        return toTicketReplyItem(saved, Map.of());
     }
 
     /** 티켓 상태 변경. */
@@ -585,7 +619,8 @@ public class AdminSupportService {
                     "OPEN 으로의 되돌리기는 지원하지 않습니다.");
         }
 
-        return toTicketSummary(ticket);
+        // 단건 응답이므로 작성자 닉네임 1건만 lookup 한다.
+        return toTicketSummary(ticket, preloadNicknames(List.of(ticket.getUserId())));
     }
 
     /** 티켓 통계 조회. */
@@ -670,11 +705,17 @@ public class AdminSupportService {
         );
     }
 
-    private TicketSummary toTicketSummary(SupportTicket ticket) {
-        // SupportTicket 은 String FK 직접 보관 (JPA/MyBatis 하이브리드 §15.4)
+    /**
+     * 티켓 → DTO 변환 (닉네임 캐시 사용).
+     *
+     * <p>SupportTicket 은 String FK 직접 보관 (JPA/MyBatis 하이브리드 §15.4) — 작성자 닉네임은
+     * 미리 batch 로딩한 cache 에서 꺼내고, 없으면 null (프론트가 user_id 로 fallback).</p>
+     */
+    private TicketSummary toTicketSummary(SupportTicket ticket, Map<String, String> nicknameCache) {
         return new TicketSummary(
                 ticket.getTicketId(),
                 ticket.getUserId(),
+                nicknameCache.get(ticket.getUserId()),
                 ticket.getCategory().name(),
                 ticket.getTitle(),
                 ticket.getStatus().name(),
@@ -684,14 +725,53 @@ public class AdminSupportService {
         );
     }
 
-    private TicketReplyItem toTicketReplyItem(TicketReply reply) {
+    /**
+     * 티켓 답변 → DTO 변환 (닉네임 캐시 사용).
+     *
+     * <p>{@code isAdmin} 은 {@code "ADMIN".equals(authorType)} 으로 파생.
+     * USER 답변일 때만 {@code userNickname} 을 채운다 (ADMIN 은 정적 라벨로 대체되므로 null 허용).</p>
+     */
+    private TicketReplyItem toTicketReplyItem(TicketReply reply, Map<String, String> nicknameCache) {
+        boolean isAdmin = reply.isAdminReply();
+        String userNickname = isAdmin ? null : nicknameCache.get(reply.getAuthorId());
         return new TicketReplyItem(
                 reply.getReplyId(),
                 reply.getAuthorId(),
                 reply.getAuthorType(),
+                isAdmin,
+                userNickname,
                 reply.getContent(),
                 reply.getCreatedAt()
         );
+    }
+
+    /**
+     * 다수의 user_id 에 대한 닉네임을 단발 조회로 캐시한다.
+     *
+     * <p>UserMapper 가 batch IN 쿼리를 제공하지 않으므로 distinct 후 N 번 단건 SELECT 한다.
+     * 한 페이지(size=20) 당 최대 20번이지만 작성자 중복이 많을수록 호출 수는 줄어든다.
+     * 닉네임이 NULL 이거나 사용자가 없으면 결과 Map 에서 해당 키가 누락된다 → 프론트가 user_id 로 fallback.</p>
+     *
+     * @param userIds 조회할 user_id 목록 (null/빈 항목 허용 — 자동 무시)
+     * @return user_id → nickname 캐시 (NULL 닉네임은 미포함)
+     */
+    private Map<String, String> preloadNicknames(List<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) return Map.of();
+        Set<String> distinct = new LinkedHashSet<>();
+        for (String id : userIds) {
+            if (id != null && !id.isBlank()) distinct.add(id);
+        }
+        Map<String, String> cache = new HashMap<>(distinct.size() * 2);
+        for (String id : distinct) {
+            try {
+                String nickname = userMapper.findNicknameById(id);
+                if (nickname != null) cache.put(id, nickname);
+            } catch (Exception e) {
+                // 닉네임 lookup 실패는 화면 표시 품질 문제일 뿐, 티켓 조회 자체를 막지 않는다.
+                log.warn("[AdminSupport] 닉네임 lookup 실패 — userId={}, msg={}", id, e.getMessage());
+            }
+        }
+        return cache;
     }
 
 }
