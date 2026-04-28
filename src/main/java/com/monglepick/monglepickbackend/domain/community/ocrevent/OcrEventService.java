@@ -127,6 +127,20 @@ public class OcrEventService {
     }
 
     /**
+     * eventId 로 이벤트 대상 영화 제목을 조회한다 (신뢰도 부스트 판단용).
+     *
+     * @param eventId 이벤트 PK
+     * @return 영화 한국어 제목, 이벤트/영화가 없으면 null
+     */
+    public String getMovieTitleByEventId(Long eventId) {
+        if (eventId == null) return null;
+        return ocrEventRepository.findById(eventId)
+                .flatMap(e -> movieRepository.findById(e.getMovieId()))
+                .map(Movie::getTitle)
+                .orElse(null);
+    }
+
+    /**
      * 엔티티 + 영화 메타 → 유저 응답 DTO.
      *
      * @param event 이벤트 엔티티

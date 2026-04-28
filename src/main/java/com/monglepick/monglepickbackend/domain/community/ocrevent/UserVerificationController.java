@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.community.ocrevent;
 
+import com.monglepick.monglepickbackend.domain.community.entity.OcrEvent;
 import com.monglepick.monglepickbackend.global.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -15,6 +16,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
 
 /**
  * 유저 OCR 실관람 인증 제출 컨트롤러 (2026-04-14 신규).
@@ -37,6 +40,7 @@ public class UserVerificationController {
 
     private final UserVerificationService userVerificationService;
     private final OcrAnalysisClient ocrAnalysisClient;
+    private final OcrEventService ocrEventService;
 
     /**
      * OCR 미리보기 분석 — 이미지에서 영화명/관람일/인원 추출 결과를 반환한다.
@@ -60,6 +64,7 @@ public class UserVerificationController {
 
         UserVerificationDto.AnalyzeResponse response;
         if (ocr != null && ocr.success()) {
+            double boostedConfidence = applyEventConfidenceBoost(ocr, request.eventId());
             response = new UserVerificationDto.AnalyzeResponse(
                     true,
                     ocr.status(),
@@ -71,7 +76,7 @@ public class UserVerificationController {
                     UserVerificationDto.OcrField.of(ocr.theater()),
                     UserVerificationDto.OcrField.of(ocr.venue()),
                     UserVerificationDto.OcrField.of(ocr.watchedAt()),
-                    ocr.confidence(),
+                    boostedConfidence,
                     ocr.parsedText(),
                     null
             );
@@ -129,5 +134,58 @@ public class UserVerificationController {
         log.info("[OCR 인증] 제출 완료 — userId={}, eventId={}, verificationId={}",
                 userId, eventId, result.verificationId());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(result));
+    }
+
+    /**
+     * 이벤트 영화명·기간 일치 여부에 따라 OCR 신뢰도를 보정한다.
+     *
+     * <ul>
+     *   <li>추출된 영화명 ≈ 이벤트 영화 제목 → +0.10</li>
+     *   <li>추출된 관람일이 이벤트 기간 내 → +0.05</li>
+     *   <li>최대 1.0 cap</li>
+     * </ul>
+     */
+    private double applyEventConfidenceBoost(OcrAnalysisClient.OcrResponse ocr, String eventIdStr) {
+        double base = ocr.confidence();
+        if (eventIdStr == null || eventIdStr.isBlank()) return base;
+        try {
+            Long eventId = Long.parseLong(eventIdStr);
+            OcrEvent event = ocrEventService.findEntityById(eventId).orElse(null);
+            if (event == null) return base;
+
+            double boost = 0.0;
+
+            // 영화명 유사도: 추출값이 이벤트 영화 제목을 포함하거나 그 역방향이면 일치로 판단
+            String movieTitle = ocrEventService.getMovieTitleByEventId(eventId);
+            if (ocr.movieName() != null && movieTitle != null) {
+                if (isMovieNameSimilar(ocr.movieName(), movieTitle)) {
+                    boost += 0.10;
+                }
+            }
+
+            // 관람일 범위: 추출된 날짜가 이벤트 startDate ~ endDate 내이면 일치
+            if (ocr.watchDate() != null && event.getStartDate() != null && event.getEndDate() != null) {
+                try {
+                    LocalDate watchDate = LocalDate.parse(ocr.watchDate());
+                    LocalDate start = event.getStartDate().toLocalDate();
+                    LocalDate end = event.getEndDate().toLocalDate();
+                    if (!watchDate.isBefore(start) && !watchDate.isAfter(end)) {
+                        boost += 0.05;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            return Math.min(1.0, base + boost);
+        } catch (Exception e) {
+            log.debug("[OCR] 신뢰도 부스트 계산 실패: {}", e.getMessage());
+            return base;
+        }
+    }
+
+    /** 공백·대소문자를 무시하고 한쪽이 다른 쪽을 포함하는지 확인한다. */
+    private boolean isMovieNameSimilar(String extracted, String target) {
+        String a = extracted.trim().toLowerCase().replaceAll("\\s+", "");
+        String b = target.trim().toLowerCase().replaceAll("\\s+", "");
+        return !a.isEmpty() && !b.isEmpty() && (a.contains(b) || b.contains(a));
     }
 }
