@@ -151,18 +151,25 @@
         LIMIT #{offset}, #{limit}
     </select>
 
-    <!-- 커뮤니티 미공유 플레이리스트 총 건수 — 페이지 조립용 -->
+    <!--
+        커뮤니티 미공유 플레이리스트 총 건수 — 페이지 조립용.
+        NOT EXISTS 서브쿼리로 미공유만 1행씩 카운트한다.
+        (이전 GROUP BY + COUNT(*) 조합은 그룹마다 1을 반환해 MyBatis 가 첫 행만 읽어
+         항상 0/1만 반환하던 결함을 수정.)
+    -->
     <select id="countUnsharedByUserId" resultType="long">
         SELECT COUNT(*)
         FROM playlist pl
-        LEFT JOIN posts p ON p.playlist_id = pl.playlist_id
-                         AND p.category    = 'PLAYLIST_SHARE'
-                         AND p.status      = 'PUBLISHED'
-                         AND p.is_deleted  = false
         WHERE pl.user_id   = #{userId}
           AND pl.is_deleted = false
-        GROUP BY pl.playlist_id
-        HAVING MAX(p.post_id) IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM posts p
+              WHERE p.playlist_id = pl.playlist_id
+                AND p.category    = 'PLAYLIST_SHARE'
+                AND p.status      = 'PUBLISHED'
+                AND p.is_deleted  = false
+          )
     </select>
 
     <!-- ═══ Playlist 쓰기 ═══ -->
