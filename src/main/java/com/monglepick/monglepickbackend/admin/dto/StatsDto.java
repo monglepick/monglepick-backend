@@ -350,16 +350,64 @@ public class StatsDto {
     // ──────────────────────────────────────────────
 
     /**
-     * 매출 현황 응답.
+     * 매출 현황 응답 (확장 — 2026-04-28).
      *
-     * @param monthlyRevenue 이번 달 누적 매출 (원 단위, COMPLETED 결제 합산)
-     * @param mrr            월 반복 매출 — Monthly Recurring Revenue (구독 수 × 평균 구독 금액)
-     * @param dailyRevenue   일별 매출 추이 리스트
+     * <p>Frontend RevenueTab 의 모든 KPI 카드/차트가 이 DTO 하나로 렌더링된다.
+     * 기존 monthlyRevenue/mrr/dailyRevenue 외에 ARPU·환불·플랜·결제수단·시간대
+     * ·요일·신규vs갱신·Top payer 까지 한 번의 API 호출로 제공한다.</p>
+     *
+     * <h4>금액 단위</h4>
+     * <p>모든 금액 필드는 {@code long} (원 단위, KRW). 환불은 양수로 표시하며 별도로 차감 표시.
+     * netRevenue = monthlyRevenue - refundAmount.</p>
+     *
+     * @param monthlyRevenue           이번 달 누적 매출 (COMPLETED 합산)
+     * @param mrr                      월 반복 매출 (구독 활성 사용자 × 월환산 가격)
+     * @param arpu                     사용자 1인당 평균 매출 (선택 기간 매출 / 결제 고유 사용자 수)
+     * @param avgOrderValue            객단가 (선택 기간 매출 / 결제 건수)
+     * @param totalRevenue             서비스 시작 이후 총 누적 매출
+     * @param todayRevenue             오늘 매출
+     * @param yesterdayRevenue         어제 매출
+     * @param weekRevenue              이번 주(월요일~) 매출
+     * @param totalOrders              선택 기간 총 결제 건수 (COMPLETED)
+     * @param todayOrders              오늘 결제 건수
+     * @param payingUsers              선택 기간 결제 고유 사용자 수
+     * @param refundAmount             선택 기간 환불 금액
+     * @param refundCount              선택 기간 환불 건수
+     * @param refundRate               환불률 (0.0~1.0, 환불 금액 / 매출)
+     * @param netRevenue               순 매출 (이번 달 매출 - 이번 달 환불)
+     * @param dailyRevenue             일별 매출 추이 (선택 기간)
+     * @param monthlyRevenueTrend      월별 매출 추이 (최근 12개월)
+     * @param paymentMethodDistribution 결제 수단별 분포 (선택 기간)
+     * @param planRevenueDistribution  구독 플랜별 매출 (선택 기간)
+     * @param orderTypeDistribution    주문 유형별 분포 (point_pack vs subscription)
+     * @param hourlyDistribution       시간대별(0~23시) 결제 분포 (선택 기간)
+     * @param weekdayDistribution      요일별(월~일) 결제 분포 (선택 기간)
+     * @param topPayers                Top 10 결제 사용자 (선택 기간)
      */
     public record RevenueResponse(
             long monthlyRevenue,
             long mrr,
-            List<DailyRevenue> dailyRevenue
+            long arpu,
+            long avgOrderValue,
+            long totalRevenue,
+            long todayRevenue,
+            long yesterdayRevenue,
+            long weekRevenue,
+            long totalOrders,
+            long todayOrders,
+            long payingUsers,
+            long refundAmount,
+            long refundCount,
+            double refundRate,
+            long netRevenue,
+            List<DailyRevenue> dailyRevenue,
+            List<MonthlyRevenue> monthlyRevenueTrend,
+            List<PaymentMethodItem> paymentMethodDistribution,
+            List<PlanRevenueItem> planRevenueDistribution,
+            List<OrderTypeItem> orderTypeDistribution,
+            List<HourlyRevenueItem> hourlyDistribution,
+            List<WeekdayRevenueItem> weekdayDistribution,
+            List<TopPayerItem> topPayers
     ) {}
 
     /**
@@ -367,10 +415,119 @@ public class StatsDto {
      *
      * @param date   날짜 문자열 (yyyy-MM-dd)
      * @param amount 해당 날짜 매출 합계 (원 단위)
+     * @param count  해당 날짜 결제 건수
      */
     public record DailyRevenue(
             String date,
-            long amount
+            long amount,
+            long count
+    ) {}
+
+    /**
+     * 월별 매출 단건 (12개월 추이용).
+     *
+     * @param month  월 문자열 (yyyy-MM)
+     * @param amount 해당 월 매출 합계
+     * @param count  해당 월 결제 건수
+     */
+    public record MonthlyRevenue(
+            String month,
+            long amount,
+            long count
+    ) {}
+
+    /**
+     * 결제 수단(pgProvider)별 분포.
+     *
+     * @param provider 결제 수단 코드 (toss, kakao, naver 등 — null 이면 "unknown")
+     * @param label    표시명 (예: "토스페이먼츠")
+     * @param amount   금액 합계
+     * @param count    건수
+     * @param ratio    전체 대비 비율 (0.0~1.0)
+     */
+    public record PaymentMethodItem(
+            String provider,
+            String label,
+            long amount,
+            long count,
+            double ratio
+    ) {}
+
+    /**
+     * 구독 플랜별 매출 분포.
+     *
+     * @param planCode 플랜 코드 (monthly_basic 등)
+     * @param planName 플랜 표시명
+     * @param amount   해당 플랜 매출 합계
+     * @param count    해당 플랜 결제 건수
+     * @param ratio    구독 매출 내 비율 (0.0~1.0)
+     */
+    public record PlanRevenueItem(
+            String planCode,
+            String planName,
+            long amount,
+            long count,
+            double ratio
+    ) {}
+
+    /**
+     * 주문 유형별 분포 (point_pack vs subscription).
+     *
+     * @param type   "POINT_PACK" 또는 "SUBSCRIPTION"
+     * @param label  표시명 ("포인트팩"/"구독")
+     * @param amount 매출 합계
+     * @param count  건수
+     * @param ratio  전체 대비 비율 (0.0~1.0)
+     */
+    public record OrderTypeItem(
+            String type,
+            String label,
+            long amount,
+            long count,
+            double ratio
+    ) {}
+
+    /**
+     * 시간대별 결제 분포.
+     *
+     * @param hour   시간 (0~23)
+     * @param amount 해당 시간 매출
+     * @param count  해당 시간 건수
+     */
+    public record HourlyRevenueItem(
+            int hour,
+            long amount,
+            long count
+    ) {}
+
+    /**
+     * 요일별 결제 분포.
+     *
+     * @param weekday    요일 인덱스 (1=월요일 ~ 7=일요일)
+     * @param weekdayName 표시명 ("월", "화", ...)
+     * @param amount     해당 요일 매출
+     * @param count      해당 요일 건수
+     */
+    public record WeekdayRevenueItem(
+            int weekday,
+            String weekdayName,
+            long amount,
+            long count
+    ) {}
+
+    /**
+     * Top 결제 사용자.
+     *
+     * @param userId      사용자 ID
+     * @param nickname    닉네임 (없으면 userId 앞 8자리)
+     * @param totalAmount 누적 결제액
+     * @param orderCount  결제 건수
+     */
+    public record TopPayerItem(
+            String userId,
+            String nickname,
+            long totalAmount,
+            long orderCount
     ) {}
 
     // ──────────────────────────────────────────────
@@ -378,31 +535,65 @@ public class StatsDto {
     // ──────────────────────────────────────────────
 
     /**
-     * 구독 통계 응답.
+     * 구독 통계 응답 (확장 — 2026-04-28).
      *
-     * @param totalActive 현재 활성 구독 수 (status=ACTIVE)
-     * @param churnRate   구독 이탈률 (최근 30일 내 취소/만료 건수 / 이전 달 총 구독 수, mock)
-     * @param plans       구독 플랜별 분포 리스트
+     * <p>Frontend SubscriptionTab/RevenueTab 에서 사용. 필드명을 Frontend 와 정렬:
+     * activeSubscriptions / planDistribution / churnRate(0.0~1.0).</p>
+     *
+     * @param activeSubscriptions    현재 활성 구독 수 (status=ACTIVE)
+     * @param totalSubscriptions     역대 총 구독 수 (모든 상태 합계)
+     * @param newThisMonth           이번 달 신규 구독 건수
+     * @param cancelledThisMonth     이번 달 취소 구독 건수
+     * @param expiredThisMonth       이번 달 만료(미갱신) 추정 건수
+     * @param churnRate              구독 이탈률 (0.0~1.0, 누적 취소+만료 / 누적 전체)
+     * @param subscriptionMrr        활성 구독 기준 MRR (월환산)
+     * @param avgRevenuePerSubscriber 활성 구독자 1인당 월 평균 매출
+     * @param planDistribution       구독 플랜별 가입자 분포 (Frontend 호환 키)
+     * @param planMrr                플랜별 월 환산 MRR 기여도
      */
     public record SubscriptionStatsResponse(
-            long totalActive,
+            long activeSubscriptions,
+            long totalSubscriptions,
+            long newThisMonth,
+            long cancelledThisMonth,
+            long expiredThisMonth,
             double churnRate,
-            List<PlanDistribution> plans
+            long subscriptionMrr,
+            long avgRevenuePerSubscriber,
+            List<PlanDistribution> planDistribution,
+            List<PlanMrrItem> planMrr
     ) {}
 
     /**
-     * 구독 플랜별 분포 단건.
+     * 구독 플랜별 분포 단건 (Frontend 호환 — plan/ratio 키).
      *
-     * @param planCode   플랜 코드 (예: "monthly_basic", "yearly_premium")
-     * @param planName   플랜 표시명 (예: "베이직 월간", "프리미엄 연간")
-     * @param count      해당 플랜 활성 구독 수
-     * @param percentage 전체 활성 구독 대비 비율 (0.0~100.0)
+     * @param planCode 플랜 코드 (monthly_basic, yearly_premium 등)
+     * @param plan     플랜 표시명 (Frontend `nameKey="plan"` 호환)
+     * @param count    해당 플랜 활성 구독 수
+     * @param ratio    전체 활성 구독 대비 비율 (0.0~1.0, Frontend `props.payload.ratio` 호환)
      */
     public record PlanDistribution(
             String planCode,
-            String planName,
+            String plan,
             long count,
-            double percentage
+            double ratio
+    ) {}
+
+    /**
+     * 플랜별 MRR 기여도.
+     *
+     * @param planCode 플랜 코드
+     * @param plan     플랜 표시명
+     * @param mrr      월 환산 매출 (연간 플랜은 price/12)
+     * @param count    해당 플랜 활성 구독 수
+     * @param ratio    MRR 내 비율 (0.0~1.0)
+     */
+    public record PlanMrrItem(
+            String planCode,
+            String plan,
+            long mrr,
+            long count,
+            double ratio
     ) {}
 
     // ══════════════════════════════════════════════
@@ -433,7 +624,8 @@ public class StatsDto {
     /**
      * 포인트 유형별 분포 응답.
      *
-     * @param distribution 유형(earn/spend/bonus/expire/refund/revoke)별 건수 + 포인트 합계
+     * @param distribution 유형(earn/spend/bonus/expire/refund/revoke/admin_grant/admin_revoke)별
+     *                     건수 + 포인트 합계
      */
     public record PointTypeDistributionResponse(
             List<PointTypeItem> distribution
@@ -442,8 +634,10 @@ public class StatsDto {
     /**
      * 포인트 유형별 분포 단건.
      *
-     * @param pointType  유형 코드 (earn/spend/bonus/expire/refund/revoke)
-     * @param label      한국어 라벨 (예: "활동 리워드", "AI 추천 사용")
+     * @param pointType  유형 코드 (earn/spend/bonus/expire/refund/revoke/admin_grant/admin_revoke).
+     *                   admin_grant/admin_revoke 는 2026-04-28 도입된 운영 조정 전용 코드로,
+     *                   KPI(총발행/총소비)에서는 자동 제외되며 분포 차트만 별도 카테고리로 표시된다.
+     * @param label      한국어 라벨 (예: "활동 리워드", "운영 지급")
      * @param count      해당 유형 거래 건수
      * @param totalAmount 해당 유형 포인트 합계 (절대값)
      * @param percentage 전체 대비 비율 (0.0~100.0)
