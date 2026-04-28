@@ -142,7 +142,14 @@ public class PointsHistory {
      *   <li>{@code expire} — 포인트 만료</li>
      *   <li>{@code refund} — 결제 환불로 인한 포인트 회수</li>
      *   <li>{@code revoke} — 콘텐츠 삭제로 인한 리워드 회수 (§6.3.2)</li>
+     *   <li>{@code admin_grant} — 관리자 수동 지급 (운영 조정, 통계 KPI 제외 대상)</li>
+     *   <li>{@code admin_revoke} — 관리자 수동 회수 (운영 조정, 통계 KPI 제외 대상)</li>
      * </ul>
+     *
+     * <p><b>운영 조정 분리 정책 (2026-04-28)</b> — admin_grant/admin_revoke 는
+     * "포인트 경제 분석" KPI(총발행=earn+bonus, 총소비=spend)에서 자연 제외되며,
+     * 분포 차트는 별도 "운영 조정" 카테고리로 합산 표시된다. PointsHistory 원장
+     * 자체는 INSERT-ONLY 정책에 따라 그대로 보존되어 감사 추적은 동일하게 유지된다.</p>
      */
     @Column(name = "point_type", length = 50, nullable = false)
     private String pointType;

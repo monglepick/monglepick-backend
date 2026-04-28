@@ -278,9 +278,14 @@ public class ImageService {
             ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"
     );
 
-    /** Admin 자산 업로드 시 허용되는 subdir — point_items/{avatars,badges} 만. */
+    /**
+     * Admin 자산 업로드 시 허용되는 subdir.
+     *
+     * <p>2026-04-28 v3.5 6슬롯 꾸미기 확장 — 프레임/배경/칭호/이펙트 4종 추가.
+     * 칭호(titles)는 텍스트 기반이지만 운영자가 동반 아이콘을 첨부하고 싶을 때를 위해 허용.</p>
+     */
     private static final Set<String> ADMIN_ALLOWED_SUBDIRS = Set.of(
-            "avatars", "badges"
+            "avatars", "badges", "frames", "backgrounds", "titles", "effects"
     );
 
     /** SVG 내부에서 거부할 위험 패턴 (XSS 페이로드의 일반 형태). */
@@ -305,7 +310,7 @@ public class ImageService {
      * {@code Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'} 강제.</p>
      *
      * @param file   업로드 파일
-     * @param subdir "avatars" | "badges" — 그 외 값은 거부
+     * @param subdir "avatars" | "badges" | "frames" | "backgrounds" | "titles" | "effects" (꾸미기 6슬롯) — 그 외 값은 거부
      * @return 절대 URL (DB imageUrl 컬럼에 그대로 저장)
      */
     public String uploadAdminAssetImage(MultipartFile file, String subdir) {
@@ -314,7 +319,7 @@ public class ImageService {
         }
         if (subdir == null || !ADMIN_ALLOWED_SUBDIRS.contains(subdir)) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
-                    "subdir 은 'avatars' 또는 'badges' 만 허용됩니다.");
+                    "subdir 은 avatars/badges/frames/backgrounds/titles/effects 중 하나여야 합니다.");
         }
 
         // ── 1차: 파일 크기 (Admin 용으로 5MB 한도 — SVG 는 보통 수 KB) ──

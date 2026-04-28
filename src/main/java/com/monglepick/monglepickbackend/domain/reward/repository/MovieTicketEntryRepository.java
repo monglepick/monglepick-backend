@@ -47,4 +47,29 @@ public interface MovieTicketEntryRepository extends JpaRepository<MovieTicketEnt
             countQuery = "SELECT COUNT(e) FROM MovieTicketEntry e WHERE e.userId = :userId"
     )
     Page<MovieTicketEntry> findByUserIdWithLottery(@Param("userId") String userId, Pageable pageable);
+
+    /**
+     * 관리자 — 특정 회차의 entry 페이징 조회 (2026-04-28 신규).
+     *
+     * <p>관리자 회차 상세 화면에서 응모자 명단을 페이지 단위로 노출한다.
+     * status 가 null 이면 전체 entry, 값이 있으면 PENDING/WON/LOST 로 필터링한다.</p>
+     *
+     * @param lotteryId 회차 PK
+     * @param status    nullable. 값이 있으면 해당 상태만 반환
+     * @param pageable  페이징 (정렬은 관리자 측에서 enrolledAt DESC 권장)
+     * @return entry 페이지
+     */
+    @Query(
+            value = "SELECT e FROM MovieTicketEntry e "
+                    + "WHERE e.lottery.lotteryId = :lotteryId "
+                    + "AND (:status IS NULL OR e.status = :status)",
+            countQuery = "SELECT COUNT(e) FROM MovieTicketEntry e "
+                    + "WHERE e.lottery.lotteryId = :lotteryId "
+                    + "AND (:status IS NULL OR e.status = :status)"
+    )
+    Page<MovieTicketEntry> findByLotteryIdForAdmin(
+            @Param("lotteryId") Long lotteryId,
+            @Param("status") MovieTicketEntryStatus status,
+            Pageable pageable
+    );
 }

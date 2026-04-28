@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.reward.controller;
 
+import com.monglepick.monglepickbackend.domain.reward.dto.AiQuotaStatusResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.AttendanceResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.AttendanceStatusResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.PointDto.BalanceResponse;
@@ -17,6 +18,7 @@ import com.monglepick.monglepickbackend.domain.reward.dto.RewardCatalogDto.UserR
 import com.monglepick.monglepickbackend.domain.reward.service.AttendanceService;
 import com.monglepick.monglepickbackend.domain.reward.service.PointItemService;
 import com.monglepick.monglepickbackend.domain.reward.service.PointService;
+import com.monglepick.monglepickbackend.domain.reward.service.QuotaService;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardQueryService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
 import io.swagger.v3.oas.annotations.Operation;
@@ -76,6 +78,14 @@ public class PointController extends BaseController {
      * 기존 PointService 가 잔액/차감 비즈니스 로직 위주인 것과 역할을 분리했다.</p>
      */
     private final RewardQueryService rewardQueryService;
+
+    /**
+     * 쿼터 서비스 — AI 쿼터 현황 조회 (고객센터 봇 진단용, 2026-04-28 추가).
+     *
+     * <p>3-소스(GRADE_FREE/SUB_BONUS/PURCHASED) 쿼터 현황을 읽기 전용으로 조회한다.
+     * {@code GET /api/v1/point/ai-quota} EP 에서 사용한다.</p>
+     */
+    private final QuotaService quotaService;
 
     // ──────────────────────────────────────────────
     // Agent 내부 호출 엔드포인트
@@ -232,6 +242,51 @@ public class PointController extends BaseController {
     // ──────────────────────────────────────────────
     // 클라이언트 전용 엔드포인트
     // ──────────────────────────────────────────────
+
+    /**
+     * AI 쿼터 현황 조회 — 고객센터 AI 봇 진단용 (v4 신규, 2026-04-28).
+     *
+     * <p>고객센터 지원 봇(support_assistant v4)이 "AI 추천 더 못 써요" 류의 발화를
+     * 진단할 때 호출한다. 사용자 본인의 쿼터 현황만 반환하므로
+     * JWT 인증이 필수이며 쿼리 파라미터로 userId 를 받지 않는다 (BOLA 방지).</p>
+     *
+     * <h3>반환 값 해석</h3>
+     * <ul>
+     *   <li>{@code dailyAiUsed/dailyAiLimit} — GRADE_FREE 소스 소진 여부 판단</li>
+     *   <li>{@code remainingAiBonus} — SUB_BONUS 가용 여부 (-1=구독 없음)</li>
+     *   <li>{@code purchasedAiTokens} — PURCHASED 소스 잔여</li>
+     *   <li>{@code monthlyCouponUsed/monthlyCouponLimit} — PURCHASED 월간 상한 소진 여부</li>
+     *   <li>{@code resetAt} — 다음 일일 리셋 시각 (KST 다음 자정, ISO 8601)</li>
+     * </ul>
+     *
+     * @param principal JWT에서 추출한 인증 정보
+     * @return 200 OK + AI 쿼터 현황 DTO
+     */
+    @Operation(
+            summary = "AI 쿼터 현황 조회 (고객센터 봇 진단용)",
+            description = "JWT 필수. 본인의 AI 쿼터 현황(GRADE_FREE/SUB_BONUS/PURCHASED 3-소스)을 읽기 전용으로 반환한다. " +
+                    "고객센터 봇이 'AI 추천 더 못 써요' 진단에 사용. 쿼리 파라미터 userId 미지원(BOLA 방지)."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "쿼터 현황 조회 성공"),
+            @ApiResponse(responseCode = "401", description = "JWT 인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @GetMapping("/ai-quota")
+    public ResponseEntity<AiQuotaStatusResponse> getAiQuotaStatus(Principal principal) {
+        // JWT에서 userId 추출 — resolveUserIdWithServiceKey(principal, null) 로 JWT 전용 경로
+        // null 을 전달하면 ServiceKey 경로에서 "userId 필수" 예외를 던지므로,
+        // 순수 JWT 전용인 resolveUserId 헬퍼를 사용한다
+        String userId = resolveUserId(principal);
+        log.debug("GET /api/v1/point/ai-quota — userId={}", userId);
+
+        // PointService.getBalance() 와 동일한 방식으로 등급 조회
+        // (UserPoint → Grade.gradeCode, 레코드 없으면 NORMAL fallback)
+        String grade = pointService.getBalance(userId).grade();
+
+        AiQuotaStatusResponse response = quotaService.getAiQuotaStatus(userId, grade);
+        return ResponseEntity.ok(response);
+    }
 
     /**
      * 포인트 변동 이력 조회 (클라이언트 전용).

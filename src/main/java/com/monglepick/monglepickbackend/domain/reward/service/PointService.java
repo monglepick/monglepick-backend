@@ -335,8 +335,38 @@ public class PointService {
      */
     @Transactional
     public DeductResponse deductPoint(String userId, int amount, String sessionId, String description) {
+        // 일반 소비(AI/아이템 등) 경로 — pointType="spend" 위임.
+        return deductPoint(userId, amount, sessionId, description, "spend");
+    }
+
+    /**
+     * 사용자 포인트를 지정한 {@code pointType} 으로 차감한다 (오버로드).
+     *
+     * <p>{@link #deductPoint(String, int, String, String)} 와 동작은 동일하되,
+     * PointsHistory 에 기록되는 {@code point_type} 을 호출자가 지정할 수 있다.
+     * 운영 회수(관리자 수동 차감)처럼 일반 소비("spend")와 통계상 분리해야 하는
+     * 경로에서 사용한다.</p>
+     *
+     * <h4>허용 값</h4>
+     * <ul>
+     *   <li>{@code spend} — 일반 소비(기본 메서드 위임)</li>
+     *   <li>{@code admin_revoke} — 관리자 수동 회수 (2026-04-28 도입)</li>
+     *   <li>{@code refund} — 결제 환불에 따른 포인트 회수</li>
+     * </ul>
+     *
+     * @param userId      사용자 ID
+     * @param amount      차감 포인트 (양수)
+     * @param sessionId   참조 ID (이력 추적용, nullable)
+     * @param description 차감 사유 (nullable)
+     * @param pointType   PointsHistory.point_type 값 (필수)
+     * @return 차감 결과 (success, balanceAfter, transactionId)
+     */
+    @Transactional
+    public DeductResponse deductPoint(String userId, int amount, String sessionId,
+                                      String description, String pointType) {
         validateUserId(userId);
-        log.info("포인트 차감 시작: userId={}, amount={}, sessionId={}", userId, amount, sessionId);
+        log.info("포인트 차감 시작: userId={}, amount={}, sessionId={}, pointType={}",
+                userId, amount, sessionId, pointType);
 
         // 1. 비관적 락으로 포인트 레코드 조회 (SELECT FOR UPDATE)
         UserPoint userPoint = userPointRepository.findByUserIdForUpdate(userId)
@@ -356,19 +386,19 @@ public class PointService {
         userPoint.deductPoints(amount);
         int newBalance = userPoint.getBalance();
 
-        // 4. 변동 이력 기록: pointChange=-amount, pointType="spend"
+        // 4. 변동 이력 기록: pointChange=-amount, pointType=호출자 지정값
         PointsHistory history = PointsHistory.builder()
                 .userId(userId)
                 .pointChange(-amount)
                 .pointAfter(newBalance)
-                .pointType("spend")
+                .pointType(pointType != null ? pointType : "spend")
                 .description(description != null ? description : "포인트 사용")
                 .referenceId(sessionId)
                 .build();
         PointsHistory savedHistory = pointsHistoryRepository.save(history);
 
-        log.info("포인트 차감 완료: userId={}, 차감={}, 잔액={}, historyId={}",
-                userId, amount, newBalance, savedHistory.getPointsHistoryId());
+        log.info("포인트 차감 완료: userId={}, 차감={}, 잔액={}, pointType={}, historyId={}",
+                userId, amount, newBalance, pointType, savedHistory.getPointsHistoryId());
 
         // 5. 응답 반환
         return new DeductResponse(true, newBalance, savedHistory.getPointsHistoryId());

@@ -484,11 +484,16 @@ public class AdminUserService {
      *
      * <h4>기록 형식</h4>
      * <ul>
-     *   <li>point_type: 양수이면 "bonus", 음수이면 "revoke"</li>
+     *   <li>point_type: 양수이면 "admin_grant", 음수이면 "admin_revoke" (2026-04-28 분리)</li>
      *   <li>description: "[관리자 수동] " + request.reason()</li>
      *   <li>action_type: "ADMIN_MANUAL_ADJUST"</li>
      *   <li>reference_id: "admin_" + 현재 관리자 ID + "_" + System.currentTimeMillis()</li>
      * </ul>
+     *
+     * <p><b>2026-04-28 변경</b> — 통계 KPI 왜곡 방지를 위해 운영 조정분 전용 point_type
+     * (admin_grant / admin_revoke)으로 분리. 통계 집계({@code earn + bonus})에서 자연
+     * 제외되며, 분포 차트는 별도 "운영 조정" 카테고리로 표시한다. PointsHistory 원장
+     * 자체는 INSERT-ONLY 정책상 그대로 보존되며 감사 로그도 동일하게 기록한다.</p>
      *
      * @param userId  대상 사용자 ID
      * @param request 변동량 + 사유
@@ -529,7 +534,9 @@ public class AdminUserService {
         userPointRepository.save(userPoint);
 
         int balanceAfter = userPoint.getBalance();
-        String pointType = (delta > 0) ? "bonus" : "revoke";
+        // 운영 조정분 전용 point_type — 통계 KPI(earn/bonus 합산)에서 자연 제외되며
+        // 분포 차트는 별도 "운영 조정" 카테고리로 분리 표시한다 (2026-04-28).
+        String pointType = (delta > 0) ? "admin_grant" : "admin_revoke";
         String adminId = resolveCurrentAdminId();
         String referenceId = "admin_" + adminId + "_" + System.currentTimeMillis();
         String description = "[관리자 수동] " + request.reason();

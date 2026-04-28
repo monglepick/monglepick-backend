@@ -88,6 +88,14 @@ public class RewardService {
     /** 포인트 서비스 — 실제 잔액 변경(earnPoint / deductPoint) 위임 */
     private final PointService pointService;
 
+    /**
+     * 등급 자동 칭호 지급 서비스 (2026-04-28 신규 — B안 v3.5 6슬롯 꾸미기).
+     *
+     * <p>등급 승격 감지 시 해당 등급의 칭호({@code TITLE_GENERIC}) PointItem 을 user_items 에 자동 INSERT.
+     * REQUIRES_NEW 트랜잭션이라 본 기능 롤백을 유발하지 않는다.</p>
+     */
+    private final GradeTitleService gradeTitleService;
+
     // ────────────────────────────────────────────────────────────────
     // public 메서드
     // ────────────────────────────────────────────────────────────────
@@ -218,13 +226,17 @@ public class RewardService {
             checkThresholdRewards(userId, actionType, progress);
 
             /* ⑩ 등급 승격 보너스 — earnPoint 결과에서 등급 변경을 감지하여 GRADE_UP_* 지급.
-             *    GRADE_UP_* 정책의 max_count=1이므로 중복 지급 불가. */
+             *    GRADE_UP_* 정책의 max_count=1이므로 중복 지급 불가.
+             *    추가로 등급 자동 칭호({@code TITLE_GENERIC}) 도 함께 발급한다 (2026-04-28 v3.5). */
             if (previousGrade != null && currentGrade != null
                     && !currentGrade.equals(previousGrade)) {
                 String gradeUpAction = "GRADE_UP_" + currentGrade;
                 log.info("등급 승격 감지 → 보너스 지급 시도: userId={}, {} → {}, actionType={}",
                         userId, previousGrade, currentGrade, gradeUpAction);
                 grantReward(userId, gradeUpAction, "grade_" + currentGrade + "_" + userId, 0);
+
+                /* 등급 자동 칭호 지급 — REQUIRES_NEW 라 본 트랜잭션과 분리. 실패 무영향. */
+                gradeTitleService.grantTitleForGrade(userId, currentGrade);
             }
 
             /* ⑪ 지급 결과 반환 — 호출자가 API 응답에 포함할 수 있도록 */

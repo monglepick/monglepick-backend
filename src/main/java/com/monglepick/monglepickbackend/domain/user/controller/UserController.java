@@ -2,6 +2,8 @@ package com.monglepick.monglepickbackend.domain.user.controller;
 
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
 import com.monglepick.monglepickbackend.domain.community.service.PostService;
+import com.monglepick.monglepickbackend.domain.review.dto.MyReviewSummary;
+import com.monglepick.monglepickbackend.domain.review.service.ReviewService;
 import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.UserPreference;
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.http.MediaType;
@@ -53,6 +56,13 @@ public class UserController {
         private final UserService userService;
     private final PostService postService;
         private final ImageService imageService;
+
+    /**
+     * 리뷰 서비스 — 내 리뷰 목록 조회 (고객센터 봇 진단용, 2026-04-28 추가).
+     *
+     * <p>pointAwarded 조인 + 날짜 필터 페이징 로직을 ReviewService 에 위임한다.</p>
+     */
+    private final ReviewService reviewService;
 
     /**
      * 프로필 조회 API
@@ -267,5 +277,60 @@ public class UserController {
         return userService.getPreferences(userId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.noContent().build());
+    }
+
+    /**
+     * 내 리뷰 목록 조회 API — 고객센터 AI 봇 진단용 (v4 신규, 2026-04-28).
+     *
+     * <p>고객센터 지원 봇(support_assistant v4)이 "리뷰 작성했는데 포인트 안 들어와요" 류의
+     * 발화를 진단할 때 호출한다. JWT 에서 userId 를 강제 주입하므로
+     * 쿼리 파라미터로 userId 를 받지 않는다 (BOLA 방지).</p>
+     *
+     * <h3>파라미터</h3>
+     * <ul>
+     *   <li>{@code days} — 최근 N일 필터 (기본 30, 최대 365). 범위 초과 시 자동 보정.</li>
+     *   <li>{@code page} — 0-based 페이지 번호 (기본 0)</li>
+     *   <li>{@code size} — 페이지 크기 (기본 20, 최대 AppConstants.MAX_PAGE_SIZE)</li>
+     * </ul>
+     *
+     * <h3>pointAwarded 필드 해석</h3>
+     * <ul>
+     *   <li>{@code true} — points_history 에 REVIEW_CREATE 적립 이력 존재</li>
+     *   <li>{@code null} — 이력 없음 (포인트 미지급 또는 정책 변경 전 작성된 리뷰)</li>
+     * </ul>
+     *
+     * @param userId   JWT 에서 추출한 사용자 ID
+     * @param days     최근 N일 필터 (기본 30)
+     * @param page     페이지 번호 (기본 0)
+     * @param size     페이지 크기 (기본 20)
+     * @return 200 OK + 내 리뷰 요약 페이지 (MyReviewSummary)
+     */
+    @Operation(
+            summary = "내 리뷰 목록 조회 (고객센터 봇 진단용)",
+            description = "JWT 필수. 본인이 작성한 리뷰를 날짜 필터 + 페이징으로 조회한다. " +
+                    "pointAwarded=true 면 포인트 적립 이력 존재, null 이면 미적립 또는 이력 없음. " +
+                    "days 기본 30, 최대 365. 쿼리 파라미터 userId 미지원(BOLA 방지)."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "내 리뷰 목록 조회 성공"),
+            @ApiResponse(responseCode = "401", description = "JWT 인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @GetMapping("/reviews")
+    public ResponseEntity<Page<MyReviewSummary>> getMyReviews(
+            @AuthenticationPrincipal String userId,
+            @RequestParam(defaultValue = "30") int days,
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        // 페이지 크기 상한 제한 (DoS 방지)
+        int safeSize = Math.min(size, AppConstants.MAX_PAGE_SIZE);
+        Pageable pageable = org.springframework.data.domain.PageRequest.of(page, safeSize);
+
+        log.debug("GET /api/v1/users/me/reviews — userId={}, days={}, page={}, size={}",
+                userId, days, page, safeSize);
+
+        Page<MyReviewSummary> result = reviewService.getMyReviews(userId, days, pageable);
+        return ResponseEntity.ok(result);
     }
 }
