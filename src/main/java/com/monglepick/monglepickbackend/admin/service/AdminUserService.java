@@ -723,7 +723,7 @@ public class AdminUserService {
         // 게시글 활동 조회 — MyBatis Mapper (§15.4)
         postMapper.findByUserId(userId, offset, limit)
                 .forEach(post -> activities.add(new ActivityResponse(
-                        "POST",
+                        "커뮤니티 작성", //"POST" 대신 한국 레이블
                         post.getTitle(),
                         post.getCategory() != null ? post.getCategory().name() : null,
                         post.getPostId(),
@@ -733,7 +733,7 @@ public class AdminUserService {
         // 리뷰 활동 조회 — MyBatis Mapper (§15)
         reviewMapper.findByUserId(userId, offset, limit)
                 .forEach(review -> activities.add(new ActivityResponse(
-                        "REVIEW",
+                        "리뷰 작성", //"REVIEW" 대신 한국 레이블
                         review.getMovieId(),
                         review.getRating() != null
                                 ? "별점 " + review.getRating() + "점"
@@ -751,7 +751,7 @@ public class AdminUserService {
                             ? content.substring(0, 30) + "..."
                             : content;
                     activities.add(new ActivityResponse(
-                            "COMMENT",
+                            "댓글 작성", //"COMMENT" 대신 한국 레이블
                             title,
                             Boolean.TRUE.equals(comment.getIsDeleted()) ? "[삭제된 댓글]" : null,
                             comment.getPostCommentId(),
@@ -763,6 +763,17 @@ public class AdminUserService {
         activities.sort(Comparator.comparing(ActivityResponse::createdAt).reversed());
 
         return activities;
+    }
+    private String toKoreanPostCategory(String categoryName) {
+        if (categoryName == null) return "일반";
+        return switch (categoryName) {
+            case "FREE" -> "자유 게시판";
+            case "DISCUSSION" -> "영화 토론";
+            case "RECOMMENDATION" -> "추천 요청/공유";
+            case "NEWS" -> "영화 소식";
+            case "PLAYLIST_SHARE" -> "플레이리스트 공유";
+            default -> categoryName;
+        };
     }
 
     /**

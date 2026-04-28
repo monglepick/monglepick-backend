@@ -186,6 +186,18 @@ public class UserCourseProgress extends BaseAuditEntity {
     }
 
     /**
+     * verified_movies 카운터가 실제 course_verification 데이터와 불일치할 때 강제 복구한다.
+     *
+     * <p>approve() 이전 버그 등으로 verified_movies가 실제보다 낮게 기록된 경우
+     * submitFinalReview()에서 자가 복구 시 호출한다.</p>
+     */
+    public void repairAndEnterFinalReviewPending(int actualVerifiedCount) {
+        this.verifiedMovies = actualVerifiedCount;
+        this.progressPercent = new BigDecimal("100.00");
+        this.status = CourseProgressStatus.FINAL_REVIEW_PENDING;
+    }
+
+    /**
      * 모든 영화 인증 완료 후 최종 감상평 대기 상태로 전환한다.
      *
      * <p>verifiedMovies == totalMovies 달성 직후 호출된다.

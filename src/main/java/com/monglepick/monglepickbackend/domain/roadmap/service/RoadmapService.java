@@ -307,12 +307,10 @@ public class RoadmapService {
             pendingSet = java.util.Collections.emptySet();
         }
 
-        // 완료된 영화 ID — ADMIN_REJECTED · PENDING · NEEDS_REVIEW 제외, AI 검증 완료(AUTO_VERIFIED/ADMIN_APPROVED)만 포함
+        // 완료된 영화 ID — is_verified=true(AUTO_VERIFIED/ADMIN_APPROVED)인 것만 포함.
+        // verified_movies 카운터와 동일한 소스를 사용해 클라이언트 표시와 백엔드 상태를 일치시킨다.
         List<String> completedMovieIds = (userId != null)
-                ? courseReviewRepository.findAllByCourseIdAndUserId(courseId, userId).stream()
-                .map(com.monglepick.monglepickbackend.domain.roadmap.entity.CourseReview::getMovieId)
-                .filter(id -> !rejectedSet.contains(id) && !pendingSet.contains(id))
-                .toList()
+                ? courseVerificationRepository.findVerifiedMovieIdsByUserIdAndCourseId(userId, courseId)
                 : Collections.emptyList();
 
         List<String> pendingMovieIds = new java.util.ArrayList<>(pendingSet);
@@ -726,6 +724,19 @@ public class RoadmapService {
         if (progress.getStatus() == CourseProgressStatus.COMPLETED) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
                     "이미 완주 처리된 코스입니다.");
+        }
+        // verified_movies 카운터 불일치 자가 복구:
+        // approve() 이전 버그 등으로 verified_movies가 실제보다 낮게 기록된 경우
+        // course_verification 실제 데이터로 재계산하여 FINAL_REVIEW_PENDING으로 전환한다.
+        if (progress.getStatus() == CourseProgressStatus.IN_PROGRESS) {
+            int actualVerified = courseVerificationRepository.countVerifiedByUserIdAndCourseId(userId, courseId);
+            if (progress.getTotalMovies() > 0 && actualVerified >= progress.getTotalMovies()) {
+                log.warn("[submitFinalReview] verified_movies 불일치 자동 복구: userId={}, courseId={}, " +
+                        "cached={}, actual={}, total={}",
+                        userId, courseId, progress.getVerifiedMovies(), actualVerified, progress.getTotalMovies());
+                progress.repairAndEnterFinalReviewPending(actualVerified);
+                progressRepo.save(progress);
+            }
         }
         if (progress.getStatus() != CourseProgressStatus.FINAL_REVIEW_PENDING) {
             throw new BusinessException(ErrorCode.INVALID_INPUT,
