@@ -969,41 +969,294 @@ public class AdminStatsService {
     // ──────────────────────────────────────────────
 
     /**
-     * 매출 현황을 반환한다.
+     * 매출 현황을 반환한다 (확장 — 2026-04-28).
      *
-     * @param period 기간 문자열 ("7d", "30d" 등)
-     * @return 월 매출, MRR, 일별 추이
+     * <p>Frontend RevenueTab 가 요구하는 모든 KPI/차트 데이터를 한 번에 응답한다.
+     * 기간 파라미터는 일별 추이/시간대/요일/Top payer/결제수단/플랜 분포의 윈도우 크기를 결정한다.
+     * 월 매출/MRR/오늘/어제/이번주/12개월 추이는 기간과 무관하게 항상 계산한다.</p>
+     *
+     * <h4>집계 정의</h4>
+     * <ul>
+     *   <li>monthlyRevenue: 이번 달 1일 ~ 현재 COMPLETED 합산</li>
+     *   <li>mrr: 활성 구독의 월 환산 가격 합계 (subscriptionMrr 와 동일)</li>
+     *   <li>arpu: 선택 기간 매출 / 결제 고유 사용자 수 (없으면 0)</li>
+     *   <li>avgOrderValue: 선택 기간 매출 / 결제 건수 (없으면 0)</li>
+     *   <li>refundRate: 이번 달 환불액 / 이번 달 매출 (0~1)</li>
+     *   <li>netRevenue: monthlyRevenue - 이번 달 환불액 (음수 가능 시 0 클램프)</li>
+     * </ul>
+     *
+     * @param period 기간 문자열 ("7d", "30d", "90d")
+     * @return 매출 종합 응답
      */
     public RevenueResponse getRevenue(String period) {
         int days = parsePeriodDays(period);
         LocalDate today = LocalDate.now();
-        LocalDateTime monthStart = today.withDayOfMonth(1).atStartOfDay();
         LocalDateTime now = LocalDateTime.now();
+        LocalDateTime monthStart = today.withDayOfMonth(1).atStartOfDay();
+        LocalDateTime periodStart = today.minusDays(days - 1L).atStartOfDay();
 
-        /* 이번 달 누적 매출 */
-        Long monthlyRaw = paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
-                PaymentOrder.OrderStatus.COMPLETED, monthStart, now);
-        long monthlyRevenue = monthlyRaw != null ? monthlyRaw : 0L;
+        /* ── 1. 핵심 KPI ── */
 
-        /* MRR: 이번 달 1일 이후 COMPLETED 합계 (구독 기반 매출 추정) */
-        Long mrrRaw = paymentOrderRepository.sumAmountByStatusAndCreatedAtAfter(
-                PaymentOrder.OrderStatus.COMPLETED, monthStart);
-        long mrr = mrrRaw != null ? mrrRaw : 0L;
+        // 이번 달 누적 매출 (COMPLETED)
+        long monthlyRevenue = nz(paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+                PaymentOrder.OrderStatus.COMPLETED, monthStart, now));
 
-        /* 일별 매출 추이 */
+        // 누적 총 매출
+        long totalRevenue = nz(paymentOrderRepository.sumAmountByStatus(PaymentOrder.OrderStatus.COMPLETED));
+
+        // 오늘 / 어제 / 이번주(월요일~) 매출
+        LocalDateTime todayStart = today.atStartOfDay();
+        LocalDateTime tomorrowStart = today.plusDays(1).atStartOfDay();
+        LocalDateTime yesterdayStart = today.minusDays(1).atStartOfDay();
+        LocalDateTime weekStart = today.minusDays((today.getDayOfWeek().getValue() - 1L)).atStartOfDay();
+
+        long todayRevenue = nz(paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+                PaymentOrder.OrderStatus.COMPLETED, todayStart, tomorrowStart));
+        long yesterdayRevenue = nz(paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+                PaymentOrder.OrderStatus.COMPLETED, yesterdayStart, todayStart));
+        long weekRevenue = nz(paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+                PaymentOrder.OrderStatus.COMPLETED, weekStart, now));
+
+        // 선택 기간 매출 / 건수 / 결제 고유 사용자 수 → ARPU·객단가 분모
+        long periodRevenue = nz(paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+                PaymentOrder.OrderStatus.COMPLETED, periodStart, now));
+        long periodOrders = paymentOrderRepository.countByStatusAndCreatedAtBetween(
+                PaymentOrder.OrderStatus.COMPLETED, periodStart, now);
+        long payingUsers = paymentOrderRepository.findDistinctPayerCountAfter(
+                PaymentOrder.OrderStatus.COMPLETED, periodStart);
+
+        long arpu = payingUsers > 0 ? periodRevenue / payingUsers : 0L;
+        long avgOrderValue = periodOrders > 0 ? periodRevenue / periodOrders : 0L;
+
+        // 오늘 결제 건수
+        long todayOrders = paymentOrderRepository.countByStatusAndCreatedAtBetween(
+                PaymentOrder.OrderStatus.COMPLETED, todayStart, tomorrowStart);
+
+        /* ── 2. 환불 통계 (이번 달 기준) ── */
+        long refundAmount = nz(paymentOrderRepository.sumRefundAmountAfter(monthStart));
+        long refundCount = paymentOrderRepository.countRefundedAfter(monthStart);
+        double refundRate = monthlyRevenue > 0
+                ? Math.round((double) refundAmount / monthlyRevenue * 1000.0) / 1000.0
+                : 0.0;
+        long netRevenue = Math.max(0L, monthlyRevenue - refundAmount);
+
+        /* ── 3. MRR (활성 구독 월 환산) ── */
+        long mrr = computeSubscriptionMrr();
+
+        /* ── 4. 일별 추이 (선택 기간) ── */
         List<DailyRevenue> dailyRevenue = new ArrayList<>();
         for (int i = days - 1; i >= 0; i--) {
             LocalDate date = today.minusDays(i);
             LocalDateTime dayStart = date.atStartOfDay();
             LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
-            Long amountRaw = paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+            long amount = nz(paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+                    PaymentOrder.OrderStatus.COMPLETED, dayStart, dayEnd));
+            long count = paymentOrderRepository.countByStatusAndCreatedAtBetween(
                     PaymentOrder.OrderStatus.COMPLETED, dayStart, dayEnd);
-            long amount = amountRaw != null ? amountRaw : 0L;
-            dailyRevenue.add(new DailyRevenue(date.format(DATE_FMT), amount));
+            dailyRevenue.add(new DailyRevenue(date.format(DATE_FMT), amount, count));
         }
 
-        log.debug("[admin-stats] 매출 조회 — 월매출={}, MRR={}, 기간={}일", monthlyRevenue, mrr, days);
-        return new RevenueResponse(monthlyRevenue, mrr, dailyRevenue);
+        /* ── 5. 월별 추이 (최근 12개월, 이번 달 포함) ── */
+        DateTimeFormatter monthFmt = DateTimeFormatter.ofPattern("yyyy-MM");
+        List<MonthlyRevenue> monthlyTrend = new ArrayList<>();
+        for (int i = 11; i >= 0; i--) {
+            LocalDate firstOfMonth = today.withDayOfMonth(1).minusMonths(i);
+            LocalDateTime ms = firstOfMonth.atStartOfDay();
+            LocalDateTime me = firstOfMonth.plusMonths(1).atStartOfDay();
+            long amount = nz(paymentOrderRepository.sumAmountByStatusAndCreatedAtBetween(
+                    PaymentOrder.OrderStatus.COMPLETED, ms, me));
+            long count = paymentOrderRepository.countByStatusAndCreatedAtBetween(
+                    PaymentOrder.OrderStatus.COMPLETED, ms, me);
+            monthlyTrend.add(new MonthlyRevenue(firstOfMonth.format(monthFmt), amount, count));
+        }
+
+        /* ── 6. 결제 수단 분포 (선택 기간) ── */
+        List<PaymentMethodItem> methodDist = buildPaymentMethodDistribution(periodStart, periodRevenue);
+
+        /* ── 7. 플랜별 매출 (선택 기간) ── */
+        List<PlanRevenueItem> planRevenue = buildPlanRevenueDistribution(periodStart);
+
+        /* ── 8. 주문 유형 분포 (POINT_PACK vs SUBSCRIPTION) ── */
+        List<OrderTypeItem> orderTypeDist = buildOrderTypeDistribution(periodStart, periodRevenue);
+
+        /* ── 9. 시간대별 분포 (24시간) ── */
+        List<HourlyRevenueItem> hourlyDist = buildHourlyDistribution(periodStart);
+
+        /* ── 10. 요일별 분포 (월~일) ── */
+        List<WeekdayRevenueItem> weekdayDist = buildWeekdayDistribution(periodStart);
+
+        /* ── 11. Top 10 결제 사용자 ── */
+        List<TopPayerItem> topPayers = buildTopPayers(periodStart, 10);
+
+        log.debug("[admin-stats] 매출 조회 — 월={}, MRR={}, ARPU={}, 환불={}, 기간={}일",
+                monthlyRevenue, mrr, arpu, refundAmount, days);
+
+        return new RevenueResponse(
+                monthlyRevenue, mrr, arpu, avgOrderValue, totalRevenue,
+                todayRevenue, yesterdayRevenue, weekRevenue,
+                periodOrders, todayOrders, payingUsers,
+                refundAmount, refundCount, refundRate, netRevenue,
+                dailyRevenue, monthlyTrend,
+                methodDist, planRevenue, orderTypeDist,
+                hourlyDist, weekdayDist, topPayers
+        );
+    }
+
+    /** null-safe Long 언래핑 — Repository SUM 이 0건일 때 null 반환 처리. */
+    private static long nz(Long v) {
+        return v != null ? v : 0L;
+    }
+
+    /**
+     * 활성 구독 기준 MRR 을 계산한다.
+     *
+     * <p>월간 플랜은 price 그대로, 연간 플랜은 price/12 로 환산하여 모두 합산.</p>
+     */
+    private long computeSubscriptionMrr() {
+        List<Object[]> rows = userSubscriptionRepository.sumMrrByPlan();
+        long mrr = 0L;
+        for (Object[] row : rows) {
+            // [planCode, planName, periodType, price, count]
+            Object periodTypeObj = row[2];
+            int price = ((Number) row[3]).intValue();
+            long count = ((Number) row[4]).longValue();
+            // PeriodType enum 의 toString — YEARLY 만 12 분할
+            boolean yearly = periodTypeObj != null && "YEARLY".equals(periodTypeObj.toString());
+            long monthly = yearly ? Math.round(price / 12.0) : price;
+            mrr += monthly * count;
+        }
+        return mrr;
+    }
+
+    /** 결제 수단 코드 → 한국어 표시명 매핑 */
+    private static String mapProviderLabel(String code) {
+        if (code == null || code.isBlank()) return "미지정";
+        return switch (code.toLowerCase()) {
+            case "toss", "tosspayments" -> "토스페이먼츠";
+            case "kakao", "kakaopay"    -> "카카오페이";
+            case "naver", "naverpay"    -> "네이버페이";
+            case "card"                 -> "신용카드";
+            case "transfer"             -> "계좌이체";
+            case "vbank"                -> "가상계좌";
+            default                     -> code;
+        };
+    }
+
+    /** 결제 수단 분포 목록을 빌드한다. */
+    private List<PaymentMethodItem> buildPaymentMethodDistribution(LocalDateTime periodStart, long periodRevenue) {
+        List<Object[]> rows = paymentOrderRepository.sumAndCountGroupByProviderAfter(
+                PaymentOrder.OrderStatus.COMPLETED, periodStart);
+        List<PaymentMethodItem> out = new ArrayList<>();
+        for (Object[] row : rows) {
+            String provider = row[0] != null ? String.valueOf(row[0]) : "unknown";
+            long amount = nz(((Number) row[1]).longValue());
+            long count = ((Number) row[2]).longValue();
+            double ratio = periodRevenue > 0
+                    ? Math.round((double) amount / periodRevenue * 1000.0) / 1000.0
+                    : 0.0;
+            out.add(new PaymentMethodItem(provider, mapProviderLabel(provider), amount, count, ratio));
+        }
+        return out;
+    }
+
+    /** 플랜별 매출 목록을 빌드한다 (구독 매출 한정). */
+    private List<PlanRevenueItem> buildPlanRevenueDistribution(LocalDateTime periodStart) {
+        List<Object[]> rows = paymentOrderRepository.sumAndCountGroupByPlanAfter(periodStart);
+        long total = rows.stream().mapToLong(r -> ((Number) r[2]).longValue()).sum();
+        List<PlanRevenueItem> out = new ArrayList<>();
+        for (Object[] row : rows) {
+            String code = String.valueOf(row[0]);
+            String name = row[1] != null ? String.valueOf(row[1]) : code;
+            long amount = ((Number) row[2]).longValue();
+            long count = ((Number) row[3]).longValue();
+            double ratio = total > 0
+                    ? Math.round((double) amount / total * 1000.0) / 1000.0
+                    : 0.0;
+            out.add(new PlanRevenueItem(code, name, amount, count, ratio));
+        }
+        return out;
+    }
+
+    /** 주문 유형 분포(POINT_PACK vs SUBSCRIPTION). */
+    private List<OrderTypeItem> buildOrderTypeDistribution(LocalDateTime periodStart, long periodRevenue) {
+        List<Object[]> rows = paymentOrderRepository.sumAndCountGroupByOrderTypeAfter(
+                PaymentOrder.OrderStatus.COMPLETED, periodStart);
+        List<OrderTypeItem> out = new ArrayList<>();
+        for (Object[] row : rows) {
+            String type = row[0] != null ? row[0].toString() : "UNKNOWN";
+            long amount = ((Number) row[1]).longValue();
+            long count = ((Number) row[2]).longValue();
+            double ratio = periodRevenue > 0
+                    ? Math.round((double) amount / periodRevenue * 1000.0) / 1000.0
+                    : 0.0;
+            String label = switch (type) {
+                case "POINT_PACK"   -> "포인트팩";
+                case "SUBSCRIPTION" -> "구독";
+                default             -> type;
+            };
+            out.add(new OrderTypeItem(type, label, amount, count, ratio));
+        }
+        return out;
+    }
+
+    /** 시간대별(24시간) 결제 분포. 빈 시간은 0/0 으로 채움. */
+    private List<HourlyRevenueItem> buildHourlyDistribution(LocalDateTime periodStart) {
+        List<Object[]> rows = paymentOrderRepository.sumAndCountGroupByHourAfter(
+                PaymentOrder.OrderStatus.COMPLETED, periodStart);
+        Map<Integer, long[]> bucket = new HashMap<>();
+        for (Object[] row : rows) {
+            int hour = ((Number) row[0]).intValue();
+            long amount = ((Number) row[1]).longValue();
+            long count = ((Number) row[2]).longValue();
+            bucket.put(hour, new long[]{amount, count});
+        }
+        List<HourlyRevenueItem> out = new ArrayList<>(24);
+        for (int h = 0; h < 24; h++) {
+            long[] v = bucket.getOrDefault(h, new long[]{0L, 0L});
+            out.add(new HourlyRevenueItem(h, v[0], v[1]));
+        }
+        return out;
+    }
+
+    /** 요일별 결제 분포. MySQL DAYOFWEEK(1=일~7=토) → 표시는 월~일 순. */
+    private List<WeekdayRevenueItem> buildWeekdayDistribution(LocalDateTime periodStart) {
+        List<Object[]> rows = paymentOrderRepository.sumAndCountGroupByWeekdayAfter(
+                PaymentOrder.OrderStatus.COMPLETED, periodStart);
+        // mysqlDow(1=일,2=월,...,7=토) → out 인덱스(1=월,...,7=일) 변환
+        Map<Integer, long[]> bucket = new HashMap<>();
+        for (Object[] row : rows) {
+            int mysqlDow = ((Number) row[0]).intValue();
+            int monIdx = (mysqlDow == 1) ? 7 : mysqlDow - 1; // 일=7, 나머지는 -1
+            long amount = ((Number) row[1]).longValue();
+            long count = ((Number) row[2]).longValue();
+            bucket.put(monIdx, new long[]{amount, count});
+        }
+        String[] names = {"월", "화", "수", "목", "금", "토", "일"};
+        List<WeekdayRevenueItem> out = new ArrayList<>(7);
+        for (int i = 1; i <= 7; i++) {
+            long[] v = bucket.getOrDefault(i, new long[]{0L, 0L});
+            out.add(new WeekdayRevenueItem(i, names[i - 1], v[0], v[1]));
+        }
+        return out;
+    }
+
+    /** Top N 결제 사용자. 닉네임은 UserMapper.findNicknameById 로 조회. */
+    private List<TopPayerItem> buildTopPayers(LocalDateTime periodStart, int limit) {
+        List<Object[]> rows = paymentOrderRepository.findTopPayersAfter(
+                periodStart, PageRequest.of(0, limit));
+        List<TopPayerItem> out = new ArrayList<>();
+        for (Object[] row : rows) {
+            String userId = String.valueOf(row[0]);
+            long amount = ((Number) row[1]).longValue();
+            long cnt = ((Number) row[2]).longValue();
+            // null-safe 닉네임 — 미설정 시 userId 앞 8자
+            String nickname = userMapper.findNicknameById(userId);
+            if (nickname == null || nickname.isBlank()) {
+                nickname = userId.length() > 8 ? userId.substring(0, 8) : userId;
+            }
+            out.add(new TopPayerItem(userId, nickname, amount, cnt));
+        }
+        return out;
     }
 
     // ──────────────────────────────────────────────
@@ -1011,46 +1264,97 @@ public class AdminStatsService {
     // ──────────────────────────────────────────────
 
     /**
-     * 구독 현황 통계를 반환한다.
+     * 구독 현황 통계를 반환한다 (확장 — 2026-04-28).
      *
-     * @return 활성 구독 수, 이탈률, 플랜별 분포
+     * <p>Frontend 기대 키와 정렬: activeSubscriptions / planDistribution / churnRate(0~1).
+     * 신규/취소/만료 이번 달 카운트, 활성 구독 MRR, 1인당 평균 매출, 플랜별 MRR 추가.</p>
+     *
+     * @return 구독 종합 응답
      */
     public SubscriptionStatsResponse getSubscriptionStats() {
-        /* 활성 구독 수 */
-        long totalActive = userSubscriptionRepository.countByStatus(UserSubscription.Status.ACTIVE);
+        LocalDate today = LocalDate.now();
+        LocalDateTime monthStart = today.withDayOfMonth(1).atStartOfDay();
+        LocalDateTime nextMonthStart = today.withDayOfMonth(1).plusMonths(1).atStartOfDay();
 
-        /* 이탈률: 최근 30일 취소/만료 / 이전 활성 — 단순 추정 */
+        /* 활성/취소/만료 카운트 */
+        long activeSubscriptions = userSubscriptionRepository.countByStatus(UserSubscription.Status.ACTIVE);
         long cancelled = userSubscriptionRepository.countByStatus(UserSubscription.Status.CANCELLED);
         long expired = userSubscriptionRepository.countByStatus(UserSubscription.Status.EXPIRED);
-        long totalEver = totalActive + cancelled + expired;
-        double churnRate = totalEver > 0
-                ? Math.round((double) (cancelled + expired) / totalEver * 1000.0) / 10.0
+        long totalSubscriptions = activeSubscriptions + cancelled + expired;
+
+        /* 이탈률: 누적 취소+만료 / 누적 전체 (0.0~1.0 비율, Frontend 가 *100 포맷) */
+        double churnRate = totalSubscriptions > 0
+                ? Math.round((double) (cancelled + expired) / totalSubscriptions * 1000.0) / 1000.0
                 : 0.0;
 
-        /* 플랜별 실제 가입자 수 집계 — UserSubscription JOIN SubscriptionPlan.planCode 그룹화 */
+        /* 이번 달 신규/취소 — 별도 컬럼 기반 정확한 카운트 */
+        long newThisMonth = userSubscriptionRepository.countByCreatedAtBetween(monthStart, nextMonthStart);
+        long cancelledThisMonth = userSubscriptionRepository.countCancelledBetween(monthStart, nextMonthStart);
+        // 만료(미갱신) 추정: cutoff 를 이번 달 시작 시점으로 사용
+        long expiredThisMonth = userSubscriptionRepository.countExpiredWithoutRenewal(monthStart);
+
+        /* MRR 계산 (활성 구독 월 환산) + 플랜별 MRR */
+        long subscriptionMrr = 0L;
+        List<Object[]> mrrRows = userSubscriptionRepository.sumMrrByPlan();
+        // 1차 패스: 총 MRR 산출
+        long[] perPlanMrr = new long[mrrRows.size()];
+        int idx = 0;
+        for (Object[] row : mrrRows) {
+            int price = ((Number) row[3]).intValue();
+            long count = ((Number) row[4]).longValue();
+            boolean yearly = row[2] != null && "YEARLY".equals(row[2].toString());
+            long monthly = yearly ? Math.round(price / 12.0) : price;
+            long planMrrAmount = monthly * count;
+            perPlanMrr[idx++] = planMrrAmount;
+            subscriptionMrr += planMrrAmount;
+        }
+        // 2차 패스: PlanMrrItem 변환 + ratio
+        List<PlanMrrItem> planMrr = new ArrayList<>();
+        idx = 0;
+        for (Object[] row : mrrRows) {
+            String code = row[0] != null ? String.valueOf(row[0]) : "unknown";
+            String name = row[1] != null ? String.valueOf(row[1]) : code;
+            long count = ((Number) row[4]).longValue();
+            long mrrAmount = perPlanMrr[idx++];
+            double ratio = subscriptionMrr > 0
+                    ? Math.round((double) mrrAmount / subscriptionMrr * 1000.0) / 1000.0
+                    : 0.0;
+            planMrr.add(new PlanMrrItem(code, mapPlanLabel(code, name), mrrAmount, count, ratio));
+        }
+        long avgRevenuePerSubscriber = activeSubscriptions > 0 ? subscriptionMrr / activeSubscriptions : 0L;
+
+        /* 플랜별 가입자 분포 (Frontend 호환 — plan/ratio 키) */
         List<Object[]> planRows = userSubscriptionRepository.countActiveByPlanType();
-        List<PlanDistribution> plans = new ArrayList<>();
+        List<PlanDistribution> planDistribution = new ArrayList<>();
         for (Object[] row : planRows) {
-            // 반환 배열: [planCode(String), count(Long)]
             String planCode = row[0] != null ? String.valueOf(row[0]) : "unknown";
             long count = ((Number) row[1]).longValue();
-            // 비율: 소수점 1자리 퍼센트 (예: 65.4%)
-            double pct = totalActive > 0
-                    ? Math.round((double) count / totalActive * 1000.0) / 10.0
+            double ratio = activeSubscriptions > 0
+                    ? Math.round((double) count / activeSubscriptions * 1000.0) / 1000.0
                     : 0.0;
-            // planCode → 한국어 표시명 매핑
-            String planName = switch (planCode) {
-                case "monthly_basic"   -> "베이직 월간";
-                case "monthly_premium" -> "프리미엄 월간";
-                case "yearly_basic"    -> "베이직 연간";
-                case "yearly_premium"  -> "프리미엄 연간";
-                default                -> planCode;  // 알 수 없는 플랜은 코드 그대로 노출
-            };
-            plans.add(new PlanDistribution(planCode, planName, count, pct));
+            planDistribution.add(new PlanDistribution(planCode, mapPlanLabel(planCode, null), count, ratio));
         }
 
-        log.debug("[admin-stats] 구독 통계 — 활성={}, 이탈률={}%", totalActive, churnRate);
-        return new SubscriptionStatsResponse(totalActive, churnRate, plans);
+        log.debug("[admin-stats] 구독 통계 — 활성={}, 이탈률={}, MRR={}",
+                activeSubscriptions, churnRate, subscriptionMrr);
+
+        return new SubscriptionStatsResponse(
+                activeSubscriptions, totalSubscriptions,
+                newThisMonth, cancelledThisMonth, expiredThisMonth,
+                churnRate, subscriptionMrr, avgRevenuePerSubscriber,
+                planDistribution, planMrr
+        );
+    }
+
+    /** 플랜 코드 → 한국어 표시명. fallback 으로 DB의 name 또는 code 사용. */
+    private static String mapPlanLabel(String code, String fallback) {
+        return switch (code) {
+            case "monthly_basic"   -> "베이직 월간";
+            case "monthly_premium" -> "프리미엄 월간";
+            case "yearly_basic"    -> "베이직 연간";
+            case "yearly_premium"  -> "프리미엄 연간";
+            default -> (fallback != null && !fallback.isBlank()) ? fallback : code;
+        };
     }
 
     // ──────────────────────────────────────────────
@@ -1103,7 +1407,13 @@ public class AdminStatsService {
     /**
      * 포인트 유형별 분포를 반환한다.
      *
-     * <p>earn/spend/bonus/expire/refund/revoke 유형별 건수와 포인트 합계.</p>
+     * <p>earn/spend/bonus/expire/refund/revoke + admin_grant/admin_revoke 유형별
+     * 건수와 포인트 합계.</p>
+     *
+     * <p><b>2026-04-28 변경</b> — 관리자 수동 지급/회수가 정상 보너스/회수와 섞여
+     * 통계 분포가 왜곡되던 문제를 해결하기 위해 admin_grant/admin_revoke 라벨을
+     * "운영 지급"/"운영 회수" 로 별도 표시한다. 클라이언트(PointEconomyTab) 차트는
+     * 두 카테고리를 동일 색상 그룹으로 묶어 "운영 조정" 으로 강조할 수 있다.</p>
      */
     public PointTypeDistributionResponse getPointTypeDistribution() {
         List<Object[]> rows = adminPointsHistoryRepository.countAndSumGroupByPointType();
@@ -1118,13 +1428,15 @@ public class AdminStatsService {
                             ? Math.round((double) count / totalCount * 1000.0) / 10.0
                             : 0.0;
                     String label = switch (type) {
-                        case "earn"   -> "활동 리워드";
-                        case "spend"  -> "포인트 사용";
-                        case "bonus"  -> "보너스";
-                        case "expire" -> "만료";
-                        case "refund" -> "환불";
-                        case "revoke" -> "회수";
-                        default       -> type;
+                        case "earn"         -> "활동 리워드";
+                        case "spend"        -> "포인트 사용";
+                        case "bonus"        -> "보너스";
+                        case "expire"       -> "만료";
+                        case "refund"       -> "환불";
+                        case "revoke"       -> "회수";
+                        case "admin_grant"  -> "운영 지급";   // 2026-04-28 — 운영 조정 분리
+                        case "admin_revoke" -> "운영 회수";   // 2026-04-28 — 운영 조정 분리
+                        default             -> type;
                     };
                     return new PointTypeItem(type, label, count, amount, pct);
                 })

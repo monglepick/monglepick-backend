@@ -139,6 +139,39 @@ public interface UserSubscriptionRepository extends JpaRepository<UserSubscripti
             @Param("userId") String userId, @Param("status") UserSubscription.Status status);
 
     /**
+     * 사용자의 "현재 유효한" 구독을 plan과 함께 조회한다 (2026-04-28 신설).
+     *
+     * <p>유효 정의: status=ACTIVE 또는 (status=CANCELLED AND expiresAt &gt; now).
+     * CANCELLED 상태는 사용자가 해지를 요청했지만 만료일까지 혜택이 유지되는
+     * "유예 기간"이며, 본 메서드는 이를 "현재 구독 중"으로 간주한다.</p>
+     *
+     * <h4>왜 필요한가</h4>
+     * <p>{@code SubscriptionService.getStatus()} 가 ACTIVE 만 조회해서, 해지 예약 상태의
+     * 사용자가 만료일까지 혜택이 있는데도 클라이언트에는 "구독 아님"으로 표시되는 결함이 있었다.
+     * 본 메서드는 ACTIVE 우선, CANCELLED&amp;유효 폴백 순서로 정렬하여 1건만 반환한다.</p>
+     *
+     * <h4>정렬 규칙</h4>
+     * <ul>
+     *   <li>ACTIVE 가 1순위 (CASE 표현식으로 0)</li>
+     *   <li>같은 우선순위 내에서는 createdAt DESC (가장 최근 생성된 구독)</li>
+     * </ul>
+     *
+     * @param userId 사용자 ID
+     * @param now    기준 시각 (보통 LocalDateTime.now())
+     * @return 현재 유효한 구독 (없으면 empty)
+     */
+    @Query("SELECT s FROM UserSubscription s JOIN FETCH s.plan " +
+            "WHERE s.userId = :userId " +
+            "AND (s.status = com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription.Status.ACTIVE " +
+            "  OR (s.status = com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription.Status.CANCELLED " +
+            "      AND s.expiresAt > :now)) " +
+            "ORDER BY CASE WHEN s.status = com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription.Status.ACTIVE THEN 0 ELSE 1 END ASC, " +
+            "         s.createdAt DESC")
+    List<UserSubscription> findCurrentSubscriptionsWithPlan(
+            @Param("userId") String userId,
+            @Param("now") LocalDateTime now);
+
+    /**
      * 만료된 구독을 plan과 함께 페이징으로 조회한다 (OOM + N+1 방지).
      *
      * <p>스케줄러에서 배치 처리 시 사용한다. 100건씩 페이징하여
@@ -241,4 +274,54 @@ public interface UserSubscriptionRepository extends JpaRepository<UserSubscripti
             ORDER BY COUNT(us) DESC
             """)
     List<Object[]> countActiveByPlanType();
+
+    // ──────────────────────────────────────────────
+    // 매출/구독 통계 확장 (Phase 2 — 2026-04-28)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 기간 내 신규 구독 생성 건수 (createdAt 기준).
+     *
+     * <p>이번 달 또는 최근 N일 신규 구독자 카운팅. 상태 무관(ACTIVE/CANCELLED/EXPIRED 모두 포함).</p>
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 신규 구독 건수
+     */
+    long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
+
+    /**
+     * 기간 내 취소된 구독 건수 (status=CANCELLED, cancelledAt 기준).
+     *
+     * <p>UserSubscription.cancelledAt 전용 컬럼을 사용하여 정확한 취소 시점 집계.</p>
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 취소 건수
+     */
+    @Query("""
+            SELECT COUNT(s) FROM UserSubscription s
+            WHERE s.status = com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription.Status.CANCELLED
+              AND s.cancelledAt >= :start AND s.cancelledAt < :end
+            """)
+    long countCancelledBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 활성 구독의 플랜별 가격 합계 (= 플랜별 MRR 추정).
+     *
+     * <p>plan.price * count(active) 형태로 플랜별 월/연 매출 기여도 계산.
+     * 연간 플랜은 서비스 레이어에서 /12 환산.</p>
+     *
+     * <p>반환: [planCode(String), planName(String), periodType(PeriodType), price(Integer), count(Long)]</p>
+     *
+     * @return Object[] 리스트
+     */
+    @Query("""
+            SELECT us.plan.planCode, us.plan.name, us.plan.periodType, us.plan.price, COUNT(us)
+            FROM UserSubscription us
+            WHERE us.status = com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription.Status.ACTIVE
+            GROUP BY us.plan.planCode, us.plan.name, us.plan.periodType, us.plan.price
+            ORDER BY us.plan.price * COUNT(us) DESC
+            """)
+    List<Object[]> sumMrrByPlan();
 }

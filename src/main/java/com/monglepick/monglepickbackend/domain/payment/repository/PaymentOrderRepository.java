@@ -259,4 +259,163 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, Stri
     List<Object[]> sumAmountGroupByProviderAfter(
             @Param("status") PaymentOrder.OrderStatus status,
             @Param("after") LocalDateTime after);
+
+    // ──────────────────────────────────────────────
+    // 매출 통계 확장 쿼리 (Phase 2 — 2026-04-28)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 전체 누적 매출(COMPLETED) 합계.
+     *
+     * <p>서비스 시작 이후 모든 완료 결제 금액의 합. 환불은 차감하지 않음 — 환불은 별도 집계로 표시.</p>
+     *
+     * @return 누적 매출 (없으면 null)
+     */
+    @Query("SELECT SUM(p.amount) FROM PaymentOrder p WHERE p.status = :status")
+    Long sumAmountByStatus(@Param("status") PaymentOrder.OrderStatus status);
+
+    /**
+     * 상태별 전체 건수.
+     *
+     * @param status 주문 상태
+     * @return 건수
+     */
+    long countByStatus(PaymentOrder.OrderStatus status);
+
+    /**
+     * 환불 통계 — 기간 내 REFUNDED 주문의 환불 금액 합계.
+     *
+     * <p>refundAmount 컬럼이 null 인 경우(부분 환불 정보 누락) 주문 amount 로 폴백한다.</p>
+     *
+     * @param after 기준 시각
+     * @return 환불 금액 합계 (없으면 null)
+     */
+    @Query("SELECT SUM(COALESCE(p.refundAmount, p.amount)) FROM PaymentOrder p " +
+           "WHERE p.status = com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder.OrderStatus.REFUNDED " +
+           "AND p.refundedAt > :after")
+    Long sumRefundAmountAfter(@Param("after") LocalDateTime after);
+
+    /**
+     * 환불 건수 — 기간 내 REFUNDED 건수.
+     *
+     * @param after 기준 시각
+     * @return 환불 건수
+     */
+    @Query("SELECT COUNT(p) FROM PaymentOrder p " +
+           "WHERE p.status = com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder.OrderStatus.REFUNDED " +
+           "AND p.refundedAt > :after")
+    long countRefundedAfter(@Param("after") LocalDateTime after);
+
+    /**
+     * 결제 수단(pgProvider)별 매출과 건수를 한 번에 반환.
+     *
+     * <p>반환: [pgProvider(String), sumAmount(Long), count(Long)]</p>
+     *
+     * @param status 주문 상태
+     * @param after  기준 시각
+     * @return Object[] 리스트
+     */
+    @Query("SELECT p.pgProvider, SUM(p.amount), COUNT(p) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt > :after " +
+           "GROUP BY p.pgProvider " +
+           "ORDER BY SUM(p.amount) DESC")
+    List<Object[]> sumAndCountGroupByProviderAfter(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("after") LocalDateTime after);
+
+    /**
+     * 주문 유형(orderType)별 매출과 건수.
+     *
+     * <p>POINT_PACK vs SUBSCRIPTION 분리 — "구독 매출 vs 포인트팩 매출" 비중 분석.</p>
+     *
+     * <p>반환: [orderType(OrderType), sumAmount(Long), count(Long)]</p>
+     *
+     * @param status 주문 상태
+     * @param after  기준 시각
+     * @return Object[] 리스트
+     */
+    @Query("SELECT p.orderType, SUM(p.amount), COUNT(p) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt > :after " +
+           "GROUP BY p.orderType " +
+           "ORDER BY SUM(p.amount) DESC")
+    List<Object[]> sumAndCountGroupByOrderTypeAfter(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("after") LocalDateTime after);
+
+    /**
+     * 구독 플랜별 매출과 건수.
+     *
+     * <p>SUBSCRIPTION 주문에 한해 plan.planCode + plan.name 별 집계.
+     * 어느 구독 상품이 매출에 가장 기여하는지 파악.</p>
+     *
+     * <p>반환: [planCode(String), planName(String), sumAmount(Long), count(Long)]</p>
+     *
+     * @param after 기준 시각
+     * @return Object[] 리스트
+     */
+    @Query("SELECT p.plan.planCode, p.plan.name, SUM(p.amount), COUNT(p) FROM PaymentOrder p " +
+           "WHERE p.status = com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder.OrderStatus.COMPLETED " +
+           "AND p.orderType = com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder.OrderType.SUBSCRIPTION " +
+           "AND p.createdAt > :after " +
+           "AND p.plan IS NOT NULL " +
+           "GROUP BY p.plan.planCode, p.plan.name " +
+           "ORDER BY SUM(p.amount) DESC")
+    List<Object[]> sumAndCountGroupByPlanAfter(@Param("after") LocalDateTime after);
+
+    /**
+     * 시간대(0~23시)별 매출과 건수.
+     *
+     * <p>HOUR(createdAt) 기준 그룹화 — "어느 시간대에 결제가 가장 많이 일어나는가" 분석.
+     * MySQL 의 HOUR() 함수를 JPQL FUNCTION 으로 호출.</p>
+     *
+     * <p>반환: [hour(Integer 0~23), sumAmount(Long), count(Long)]</p>
+     *
+     * @param status 주문 상태
+     * @param after  기준 시각
+     * @return Object[] 리스트
+     */
+    @Query("SELECT FUNCTION('HOUR', p.createdAt), SUM(p.amount), COUNT(p) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt > :after " +
+           "GROUP BY FUNCTION('HOUR', p.createdAt) " +
+           "ORDER BY FUNCTION('HOUR', p.createdAt)")
+    List<Object[]> sumAndCountGroupByHourAfter(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("after") LocalDateTime after);
+
+    /**
+     * 요일별 매출과 건수.
+     *
+     * <p>MySQL DAYOFWEEK(): 1=일요일 ~ 7=토요일. JPQL FUNCTION 으로 호출.</p>
+     *
+     * <p>반환: [dayOfWeek(Integer 1~7), sumAmount(Long), count(Long)]</p>
+     *
+     * @param status 주문 상태
+     * @param after  기준 시각
+     * @return Object[] 리스트
+     */
+    @Query("SELECT FUNCTION('DAYOFWEEK', p.createdAt), SUM(p.amount), COUNT(p) FROM PaymentOrder p " +
+           "WHERE p.status = :status AND p.createdAt > :after " +
+           "GROUP BY FUNCTION('DAYOFWEEK', p.createdAt) " +
+           "ORDER BY FUNCTION('DAYOFWEEK', p.createdAt)")
+    List<Object[]> sumAndCountGroupByWeekdayAfter(
+            @Param("status") PaymentOrder.OrderStatus status,
+            @Param("after") LocalDateTime after);
+
+    /**
+     * Top 결제 사용자 — 기간 내 결제 금액 합산 상위 N명.
+     *
+     * <p>userId 기준 SUM(amount) 정렬 → 상위 N명. 닉네임은 서비스 레이어에서 UserMapper 로 조인.</p>
+     *
+     * <p>반환: [userId(String), totalAmount(Long), orderCount(Long)]</p>
+     *
+     * @param after    기준 시각
+     * @param pageable 상위 N건 (PageRequest.of(0, N))
+     * @return Object[] 리스트
+     */
+    @Query("SELECT p.userId, SUM(p.amount), COUNT(p) FROM PaymentOrder p " +
+           "WHERE p.status = com.monglepick.monglepickbackend.domain.payment.entity.PaymentOrder.OrderStatus.COMPLETED " +
+           "AND p.createdAt > :after " +
+           "GROUP BY p.userId " +
+           "ORDER BY SUM(p.amount) DESC")
+    List<Object[]> findTopPayersAfter(@Param("after") LocalDateTime after, Pageable pageable);
 }
