@@ -146,20 +146,33 @@ public class SubscriptionService {
     public SubscriptionStatusResponse getStatus(String userId) {
         log.debug("구독 상태 조회: userId={}", userId);
 
-        // JOIN FETCH로 plan을 즉시 로딩 (N+1 방지)
-        Optional<UserSubscription> activeSub = subscriptionRepository
-                .findByUserIdAndStatusFetchPlan(userId, UserSubscription.Status.ACTIVE);
+        // ── 2026-04-28 수정 — CANCELLED + 유효 expiresAt 도 "현재 구독 중"으로 인정 ──
+        //
+        // 기존 구현은 status=ACTIVE 만 조회했다. 그러나 사용자가 구독을 해지하면
+        // (cancelSubscription) 또는 플랜 변경으로 이전 구독이 createSubscription 안에서
+        // CANCELLED 로 강등되면, expiresAt 까지는 혜택이 유지되어야 함에도 클라이언트에는
+        // hasActiveSubscription=false 가 응답되어 "구독 아님" 으로 잘못 표시되는 결함이 있었다.
+        //
+        // 결제 내역(payment_orders)에는 결제 완료가 남아 있는데 마이페이지에는 구독중이 아닌
+        // 것으로 보이는 사용자 혼란이 본 결함의 직접 증상이다.
+        //
+        // 본 변경은 ACTIVE 우선 + CANCELLED&expiresAt>now 폴백 순서로 1건만 가져오는
+        // 단일 쿼리(findCurrentSubscriptionsWithPlan)를 사용한다. 클라이언트 SubscriptionStatus
+        // / PaymentPage 는 이미 status=='CANCELLED' 를 "해지 예약" 배지로 표시할 수 있게
+        // 되어 있어 (SubscriptionStatus.jsx:60-64, PaymentPage.jsx:572) 추가 수정 불필요.
+        List<UserSubscription> currentSubs = subscriptionRepository
+                .findCurrentSubscriptionsWithPlan(userId, LocalDateTime.now());
 
-        // 활성 구독이 없는 경우
-        if (activeSub.isEmpty()) {
-            log.debug("활성 구독 없음: userId={}", userId);
+        // 현재 유효한 구독이 없는 경우 (ACTIVE 도 없고, CANCELLED 도 모두 만료됨)
+        if (currentSubs.isEmpty()) {
+            log.debug("현재 유효한 구독 없음: userId={}", userId);
             return new SubscriptionStatusResponse(false, null, null, null, null, null, false);
         }
 
-        // 활성 구독이 있는 경우 (plan은 이미 즉시 로딩됨)
-        UserSubscription sub = activeSub.get();
-        log.debug("활성 구독 발견: userId={}, planId={}, expiresAt={}",
-                userId, sub.getPlan().getSubscriptionPlanId(), sub.getExpiresAt());
+        // 정렬상 첫 번째 = ACTIVE 우선, 그 다음 CANCELLED&유효, 같은 우선순위면 최근 createdAt
+        UserSubscription sub = currentSubs.get(0);
+        log.debug("현재 구독 발견: userId={}, planId={}, status={}, expiresAt={}",
+                userId, sub.getPlan().getSubscriptionPlanId(), sub.getStatus(), sub.getExpiresAt());
 
         // planCode 는 클라이언트가 "같은 플랜 재결제 버튼 비활성" 판정에 사용한다.
         // 2026-04-14 추가 — DTO 에 필드가 없어서 프론트는 planName 문자열 매칭에 의존했고,
