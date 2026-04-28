@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.reward.service;
 import com.monglepick.monglepickbackend.domain.payment.entity.UserSubscription;
 import com.monglepick.monglepickbackend.domain.payment.repository.UserSubscriptionRepository;
 import com.monglepick.monglepickbackend.domain.reward.config.QuotaProperties;
+import com.monglepick.monglepickbackend.domain.reward.dto.AiQuotaStatusResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.QuotaDto.GradeQuota;
 import com.monglepick.monglepickbackend.domain.reward.dto.QuotaDto.QuotaCheckResult;
 import com.monglepick.monglepickbackend.domain.reward.entity.Grade;
@@ -15,6 +16,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.Map;
 import java.util.Optional;
 
@@ -376,6 +380,97 @@ public class QuotaService {
                 purchasedRemaining,
                 quota.maxInputLength(),
                 blockedMsg
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    // 고객센터 AI 봇 진단용 쿼터 현황 조회 (v4 신규, 2026-04-28)
+    // ──────────────────────────────────────────────
+
+    /**
+     * AI 쿼터 현황을 <b>읽기 전용</b>으로 조회하여 고객센터 봇 진단용 DTO를 반환한다.
+     *
+     * <p>고객센터 지원 봇(support_assistant v4)이 "AI 추천 더 못 써요" 류의 발화를
+     * 진단할 때 {@code GET /api/v1/point/ai-quota} 를 통해 호출한다.</p>
+     *
+     * <h4>재사용 원칙</h4>
+     * <p>{@link #checkQuota}의 read-only 현황 파악 로직을 그대로 활용한다.
+     * 카운터를 변경하지 않으며 ({@code SELECT ... FOR UPDATE} 락 없음),
+     * lazy reset 도 쓰기 없이 "effective 값" 만 계산한다.
+     * 이는 {@link #checkQuota} 의 read-only 분기와 동일한 전략이다.</p>
+     *
+     * <h4>resetAt 계산</h4>
+     * <p>KST(Asia/Seoul) 기준 다음 자정을 {@link OffsetDateTime} 으로 반환한다.
+     * 자정이 지났으면 "오늘 자정 + 1일"이 아니라 "내일 자정"이 된다.</p>
+     *
+     * @param userId 사용자 ID (JWT에서 추출, 컨트롤러에서 BOLA 방어 완료)
+     * @param grade  사용자 등급 코드 (NORMAL/BRONZE/SILVER/GOLD/PLATINUM/DIAMOND)
+     * @return AI 쿼터 현황 DTO (3-소스 모델 전체 필드 포함)
+     */
+    @Transactional(readOnly = true)
+    public AiQuotaStatusResponse getAiQuotaStatus(String userId, String grade) {
+        log.debug("AI 쿼터 현황 조회 (고객센터 봇용): userId={}, grade={}", userId, grade);
+
+        // 1. 등급별 쿼터 설정 조회 (알 수 없는 등급이면 NORMAL fallback)
+        String gradeKey = (grade != null) ? grade.toUpperCase() : "NORMAL";
+        GradeQuota quota = gradeQuotas.getOrDefault(gradeKey, gradeQuotas.get("NORMAL"));
+        LocalDate today = LocalDate.now();
+
+        // 2. user_ai_quota 락 없이 조회 (쓰기 없음)
+        Optional<UserAiQuota> aiQuotaOpt = userAiQuotaRepository.findByUserId(userId);
+
+        // 3. 일일 사용량 — 날짜가 바뀌었으면 effective 0 (쓰기 없이 판정)
+        int dailyAiUsed = aiQuotaOpt
+                .map(a -> {
+                    LocalDate lastReset = a.getDailyAiReset();
+                    boolean sameDay = (lastReset != null) && lastReset.isEqual(today);
+                    return sameDay ? a.getDailyAiUsed() : 0;
+                })
+                .orElse(0);
+
+        // 4. 구매 이용권 잔여
+        int purchasedAiTokens = aiQuotaOpt
+                .map(UserAiQuota::getPurchasedAiTokens)
+                .orElse(0);
+
+        // 5. 월간 쿠폰 사용량 — 달이 바뀌었으면 effective 0 (쓰기 없이 판정)
+        int monthlyCouponUsed = aiQuotaOpt
+                .map(a -> {
+                    LocalDate monthlyReset = a.getMonthlyReset();
+                    boolean sameMonth = (monthlyReset != null)
+                            && monthlyReset.getYear() == today.getYear()
+                            && monthlyReset.getMonth() == today.getMonth();
+                    return sameMonth ? a.getMonthlyCouponUsed() : 0;
+                })
+                .orElse(0);
+
+        // 6. 구독 SUB_BONUS 잔여 — getSubBonusRemaining() 재사용 (read-only 헬퍼)
+        int remainingAiBonus = getSubBonusRemaining(userId, today);
+
+        // 7. 월간 쿠폰 한도 — getMonthlyLimitForGrade() 재사용
+        int monthlyCouponLimit = getMonthlyLimitForGrade(userId);
+
+        // 8. 다음 일일 리셋 시각 계산 — KST 기준 내일 자정
+        ZoneId kst = ZoneId.of("Asia/Seoul");
+        OffsetDateTime resetAt = today.plusDays(1)
+                .atTime(LocalTime.MIDNIGHT)
+                .atZone(kst)
+                .toOffsetDateTime();
+
+        log.debug("AI 쿼터 현황 조회 완료: userId={}, dailyAiUsed={}/{}, subBonus={}, purchased={}, " +
+                        "monthlyCouponUsed={}/{}, resetAt={}",
+                userId, dailyAiUsed, quota.dailyLimit(),
+                remainingAiBonus, purchasedAiTokens,
+                monthlyCouponUsed, monthlyCouponLimit, resetAt);
+
+        return new AiQuotaStatusResponse(
+                dailyAiUsed,
+                quota.dailyLimit(),
+                remainingAiBonus,
+                purchasedAiTokens,
+                monthlyCouponUsed,
+                monthlyCouponLimit,
+                resetAt
         );
     }
 

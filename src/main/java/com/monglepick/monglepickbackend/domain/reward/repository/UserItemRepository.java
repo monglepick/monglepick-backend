@@ -151,6 +151,24 @@ public interface UserItemRepository extends JpaRepository<UserItem, Long> {
                                            @Param("itemType") com.monglepick.monglepickbackend.domain.reward.constants.PointItemType itemType);
 
     /**
+     * 특정 PointItem 을 이미 보유한 ACTIVE/EQUIPPED 레코드 존재 여부 (2026-04-28 신규).
+     *
+     * <p>{@link com.monglepick.monglepickbackend.domain.reward.service.GradeTitleService} 가
+     * 등급 자동 칭호를 멱등 지급할 때 사용. 이미 보유 중이면 중복 INSERT 를 차단한다.
+     * EXPIRED/USED 는 카운트하지 않아 만료 후 재승급 시 새로 받을 수 있다.</p>
+     *
+     * @param userId      소유자 ID
+     * @param pointItemId 검사할 PointItem PK
+     * @return ACTIVE 또는 EQUIPPED 상태의 보유 여부
+     */
+    @Query("SELECT COUNT(ui) > 0 FROM UserItem ui "
+            + "WHERE ui.userId = :userId "
+            + "AND ui.pointItem.pointItemId = :pointItemId "
+            + "AND ui.status IN ('ACTIVE', 'EQUIPPED')")
+    boolean existsActiveByUserAndPointItem(@Param("userId") String userId,
+                                           @Param("pointItemId") Long pointItemId);
+
+    /**
      * 만료 배치 스캔 — expires_at이 지났는데 아직 ACTIVE/EQUIPPED인 레코드.
      *
      * <p>@Scheduled 배치가 이 결과를 순회하며 markExpired()를 호출한다.

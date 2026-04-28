@@ -4,6 +4,8 @@ import com.monglepick.monglepickbackend.domain.recommendation.entity.Recommendat
 import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationLog;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationImpactRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationLogRepository;
+import com.monglepick.monglepickbackend.domain.review.dto.MyReviewSummary;
+import com.monglepick.monglepickbackend.domain.review.dto.MyReviewSummaryRow;
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewCreateRequest;
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewResponse;
 import com.monglepick.monglepickbackend.domain.reward.dto.RewardResult;
@@ -12,6 +14,8 @@ import com.monglepick.monglepickbackend.domain.review.entity.Review;
 import com.monglepick.monglepickbackend.domain.review.entity.ReviewCategoryCode;
 import com.monglepick.monglepickbackend.domain.review.entity.ReviewLike;
 import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
+import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
+import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.userwatchhistory.service.UserWatchHistoryService;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
@@ -21,11 +25,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 리뷰 서비스
@@ -64,6 +72,14 @@ public class ReviewService {
      * REQUIRES_NEW 트랜잭션으로 호출하여 정합성을 보장한다.</p>
      */
     private final UserWatchHistoryService userWatchHistoryService;
+
+    /**
+     * 포인트 이력 리포지토리 — 고객센터 봇 진단용 리뷰 목록에서 적립 여부 조회 (2026-04-28 추가).
+     *
+     * <p>리뷰 목록 조회 후 "movie_{movieId}" referenceId 기준 배치 IN 조회로
+     * N+1 없이 적립 이력을 한 번에 매핑한다.</p>
+     */
+    private final PointsHistoryRepository pointsHistoryRepository;
 
     /**
      * 영화 리뷰를 작성한다. 같은 사용자가 같은 영화에 중복 리뷰를 작성할 수 없다.
@@ -327,5 +343,110 @@ public class ReviewService {
 
         // 리워드 회수
         rewardService.revokeReward(userId, "REVIEW_CREATE", "movie_" + review.getMovieId());
+    }
+
+    // ──────────────────────────────────────────────
+    // 내 리뷰 목록 조회 — 고객센터 AI 봇 진단용 (v4 신규, 2026-04-28)
+    // ──────────────────────────────────────────────
+
+    /**
+     * 사용자 본인의 리뷰 목록을 날짜 필터 + 페이징으로 조회한다.
+     *
+     * <p>고객센터 지원 봇(support_assistant v4)이 "리뷰 작성했는데 포인트 안 들어와요" 류의
+     * 발화를 진단할 때 {@code GET /api/v1/users/me/reviews} 를 통해 호출한다.</p>
+     *
+     * <h3>처리 흐름</h3>
+     * <ol>
+     *   <li>ReviewMapper.findMyReviewsWithTitle — reviews LEFT JOIN movies 페이징 조회</li>
+     *   <li>ReviewMapper.countMyReviewsSince — 총 건수 조회 (Page 생성용)</li>
+     *   <li>PointsHistoryRepository.findByUserIdAndActionTypeAndReferenceIdIn —
+     *       "REVIEW_CREATE" 이력을 referenceId IN 절 배치 조회 (N+1 방지)</li>
+     *   <li>Map&lt;referenceId, createdAt&gt; 으로 변환 후 MyReviewSummary.of() 로 DTO 조립</li>
+     * </ol>
+     *
+     * <h3>pointAwarded 판정 기준</h3>
+     * <p>points_history 테이블에서 action_type='REVIEW_CREATE', reference_id='movie_{movieId}'
+     * 인 이력이 존재하면 {@code pointAwarded=true}, 없으면 {@code null}.
+     * 포인트 정책 변경 전 작성된 리뷰는 이력이 없어 {@code null} 이 될 수 있다.</p>
+     *
+     * @param userId  사용자 ID (JWT 강제 주입, BOLA 방지)
+     * @param days    최근 N일 필터 (기본 30, 최대 365)
+     * @param pageable 페이징 정보 (기본 size=20, created_at DESC)
+     * @return 내 리뷰 요약 페이지 (MyReviewSummary)
+     */
+    public Page<MyReviewSummary> getMyReviews(String userId, int days, Pageable pageable) {
+        // 1. days 범위 방어 (최소 1, 최대 365)
+        int safeDays = Math.max(1, Math.min(days, 365));
+        LocalDateTime since = LocalDateTime.now().minusDays(safeDays);
+
+        int offset = (int) pageable.getOffset();
+        int limit  = pageable.getPageSize();
+
+        log.debug("내 리뷰 목록 조회: userId={}, days={}, offset={}, limit={}", userId, safeDays, offset, limit);
+
+        // 2. reviews LEFT JOIN movies — 영화 제목 포함 페이징 조회
+        List<MyReviewSummaryRow> rows = reviewMapper.findMyReviewsWithTitle(userId, since, offset, limit);
+
+        // 3. 총 건수 (Page 메타 계산용)
+        long total = reviewMapper.countMyReviewsSince(userId, since);
+
+        if (rows.isEmpty()) {
+            return new PageImpl<>(List.of(), pageable, total);
+        }
+
+        // 4. 포인트 적립 이력 배치 조회 — referenceId = "movie_{movieId}" 형식
+        //    N+1 방지: 단일 IN 쿼리로 현재 페이지 전체를 한 번에 조회
+        List<String> referenceIds = rows.stream()
+                .map(r -> "movie_" + r.getMovieId())
+                .distinct()
+                .collect(Collectors.toList());
+
+        List<PointsHistory> histories = pointsHistoryRepository
+                .findByUserIdAndActionTypeAndReferenceIdIn(userId, "REVIEW_CREATE", referenceIds);
+
+        // 5. referenceId → createdAt Map 변환
+        //    같은 referenceId 가 여러 건이면 가장 최신 이력 1건을 남긴다 (정합성 복구 상황 대비)
+        Map<String, LocalDateTime> awardMap = histories.stream()
+                .collect(Collectors.toMap(
+                        PointsHistory::getReferenceId,
+                        PointsHistory::getCreatedAt,
+                        (a, b) -> a.isAfter(b) ? a : b   // 중복 시 더 최신 항목 유지
+                ));
+
+        // 6. DTO 조립
+        List<MyReviewSummary> content = rows.stream()
+                .map(row -> {
+                    String refId = "movie_" + row.getMovieId();
+                    LocalDateTime awardedAt = awardMap.get(refId);
+                    // MyReviewSummaryRow → Review-like 구조를 MyReviewSummary.of()로 조립
+                    // 포인트 이력은 awardedAt(null 가능)으로 전달
+                    return new MyReviewSummary(
+                            row.getReviewId(),
+                            row.getMovieId(),
+                            row.getMovieTitle(),
+                            row.getRating(),
+                            // 본문 100자 미리보기
+                            row.getContent() != null && row.getContent().length() > 100
+                                    ? row.getContent().substring(0, 100)
+                                    : row.getContent(),
+                            // createdAt → KST OffsetDateTime
+                            row.getCreatedAt() != null
+                                    ? row.getCreatedAt()
+                                        .atZone(java.time.ZoneId.of("Asia/Seoul"))
+                                        .toOffsetDateTime()
+                                    : null,
+                            // pointAwarded: 이력 존재 시 true, 없으면 null (미확인)
+                            awardedAt != null ? Boolean.TRUE : null,
+                            // pointAwardedAt → KST OffsetDateTime
+                            awardedAt != null
+                                    ? awardedAt.atZone(java.time.ZoneId.of("Asia/Seoul"))
+                                        .toOffsetDateTime()
+                                    : null
+                    );
+                })
+                .collect(Collectors.toList());
+
+        log.debug("내 리뷰 목록 조회 완료: userId={}, 조회건수={}, 총건수={}", userId, content.size(), total);
+        return new PageImpl<>(content, pageable, total);
     }
 }

@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.review.mapper;
 
+import com.monglepick.monglepickbackend.domain.review.dto.MyReviewSummaryRow;
 import com.monglepick.monglepickbackend.domain.review.entity.Review;
 import com.monglepick.monglepickbackend.domain.review.entity.ReviewLike;
 import com.monglepick.monglepickbackend.domain.review.entity.ReviewVote;
@@ -188,6 +189,39 @@ public interface ReviewMapper {
      */
     long countDistinctUserByCreatedAtBetween(@Param("start") LocalDateTime start,
                                               @Param("end") LocalDateTime end);
+
+    // ═══ 내 리뷰 목록 조회 — 고객센터 AI 봇 진단용 (v4 신규, 2026-04-28) ═══
+
+    /**
+     * 사용자 본인의 리뷰를 날짜 필터 + 페이징으로 조회한다 (영화 제목 LEFT JOIN 포함).
+     *
+     * <p>{@code GET /api/v1/users/me/reviews} 에서 사용. reviews LEFT JOIN movies 로
+     * 영화 제목을 한 번에 가져온다. 소프트 삭제(is_deleted=true) 제외.</p>
+     *
+     * @param userId    사용자 ID (JWT 강제 주입)
+     * @param since     조회 시작 시각 (reviews.created_at >= since)
+     * @param offset    페이징 오프셋 (0-based)
+     * @param limit     페이지 크기
+     * @return 리뷰 + 영화 제목 행 목록 (created_at DESC)
+     */
+    List<MyReviewSummaryRow> findMyReviewsWithTitle(
+            @Param("userId") String userId,
+            @Param("since") LocalDateTime since,
+            @Param("offset") int offset,
+            @Param("limit") int limit);
+
+    /**
+     * 날짜 필터 조건의 사용자 리뷰 총 건수를 반환한다 (페이징 total 계산용).
+     *
+     * <p>소프트 삭제(is_deleted=true) 제외.</p>
+     *
+     * @param userId 사용자 ID
+     * @param since  조회 시작 시각
+     * @return 조건에 맞는 총 리뷰 건수
+     */
+    long countMyReviewsSince(
+            @Param("userId") String userId,
+            @Param("since") LocalDateTime since);
 
     // ═══ ReviewLike ═══
 

@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.global.exception;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -248,6 +249,39 @@ public class GlobalExceptionHandler {
      * @param ex NoResourceFoundException
      * @return 404 응답
      */
+    /**
+     * 경로 변수/쿼리 파라미터 타입 변환 실패 처리.
+     *
+     * <p>예: {@code GET /api/v1/admin/tickets/{id}} 에서 {@code {id}} 가 {@code Long} 으로 정의돼 있는데
+     * 클라이언트가 {@code "undefined"} 같은 비숫자를 보내면 Spring 이 이 예외를 던진다.
+     * 기본 {@code Exception} 핸들러로 떨어지면 500 + "서버오류" 가 떠서 원인이 불명확해지므로,
+     * 400 + 어떤 파라미터가 어떻게 잘못됐는지 알려주는 응답으로 변환한다.</p>
+     *
+     * <p>실제 사례: 관리자 화면에서 backend 가 {@code ticketId} 를 반환하는데 프론트가 {@code id}
+     * 를 읽어 {@code undefined} 가 path 로 들어가 500 이 떴다. DTO 정합성을 잡는 동안에도
+     * 동일한 사고가 다른 화면에서 재발하지 않도록 이 핸들러를 추가했다.</p>
+     *
+     * @param ex 타입 변환 실패 예외
+     * @return 400 응답 (파라미터명 + 입력값 + 기대 타입 포함)
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    protected ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String name = ex.getName();
+        Object value = ex.getValue();
+        String expected = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "?";
+        log.warn("요청 파라미터 타입 불일치 — name={}, value={}, expected={}", name, value, expected);
+
+        ErrorCode errorCode = ErrorCode.INVALID_INPUT;
+        ErrorResponse response = new ErrorResponse(
+                errorCode.getCode(),
+                "요청 파라미터 형식이 올바르지 않습니다: " + name + "=" + value + " (기대 타입: " + expected + ")",
+                Map.of("parameter", name, "value", String.valueOf(value), "expectedType", expected)
+        );
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(response);
+    }
+
     @ExceptionHandler(NoResourceFoundException.class)
     protected ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {
         log.warn("요청 경로를 찾을 수 없음: {}", ex.getResourcePath());

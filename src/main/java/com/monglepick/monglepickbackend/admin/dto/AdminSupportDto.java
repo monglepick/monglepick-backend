@@ -272,18 +272,29 @@ public final class AdminSupportDto {
     /**
      * 티켓 목록 요약 응답 DTO.
      *
-     * @param ticketId   티켓 PK
-     * @param userId     작성자 ID
-     * @param category   카테고리
-     * @param title      제목
-     * @param status     상태 (OPEN/IN_PROGRESS/RESOLVED/CLOSED)
-     * @param priority   우선순위
-     * @param assignedTo 담당자 ID (nullable)
-     * @param createdAt  등록 시각
+     * <p>2026-04-28 필드 정합성 수정:
+     * <ul>
+     *   <li>{@code ticketId} → {@code id} 로 이름 변경 — 프론트(TicketTab.jsx)는 {@code ticket.id} 를 키로 사용한다.
+     *       이전 응답은 {@code ticketId} 만 있어서 클릭 시 {@code id=undefined} 로 디테일 GET 이 호출되며
+     *       Path Variable 변환 실패 → 500 → "서버오류" 가 떴다.</li>
+     *   <li>{@code userNickname} 추가 — 관리자 화면에서 user_id(VARCHAR50 random) 대신 닉네임을 보여주기 위함.
+     *       UserMapper.findNicknameById 로 조회한다.</li>
+     * </ul>
+     *
+     * @param id           티켓 PK
+     * @param userId       작성자 user_id (VARCHAR FK)
+     * @param userNickname 작성자 닉네임 (없거나 lookup 실패 시 null)
+     * @param category     카테고리
+     * @param title        제목
+     * @param status       상태 (OPEN/IN_PROGRESS/RESOLVED/CLOSED)
+     * @param priority     우선순위
+     * @param assignedTo   담당자 ID (nullable)
+     * @param createdAt    등록 시각
      */
     public record TicketSummary(
-            Long ticketId,
+            Long id,
             String userId,
+            String userNickname,
             String category,
             String title,
             String status,
@@ -292,11 +303,32 @@ public final class AdminSupportDto {
             LocalDateTime createdAt
     ) {}
 
-    /** 단일 티켓 답변 응답 DTO. */
+    /**
+     * 단일 티켓 답변 응답 DTO.
+     *
+     * <p>2026-04-28 필드 정합성 수정:
+     * <ul>
+     *   <li>{@code replyId} → {@code id} 로 이름 변경 (프론트는 {@code reply.id} 를 key 로 사용).</li>
+     *   <li>{@code isAdmin} 추가 — {@code authorType=="ADMIN"} 파생값. 프론트가 좌/우 정렬과 라벨을
+     *       전환할 때 사용한다.</li>
+     *   <li>{@code userNickname} 추가 — USER 답변일 때 작성자 닉네임. ADMIN 답변은 정적 라벨 "관리자" 로
+     *       대체되므로 null 이어도 무방하다.</li>
+     * </ul>
+     *
+     * @param id           답변 PK
+     * @param authorId     작성자 user_id (관리자 또는 사용자)
+     * @param authorType   작성자 유형 ("ADMIN" / "USER")
+     * @param isAdmin      관리자 작성 여부 ({@code "ADMIN".equals(authorType)})
+     * @param userNickname 작성자 닉네임 (USER 답변일 때 표시용, ADMIN 은 null 가능)
+     * @param content      답변 본문
+     * @param createdAt    작성 시각
+     */
     public record TicketReplyItem(
-            Long replyId,
+            Long id,
             String authorId,
             String authorType,
+            boolean isAdmin,
+            String userNickname,
             String content,
             LocalDateTime createdAt
     ) {}
@@ -304,22 +336,27 @@ public final class AdminSupportDto {
     /**
      * 티켓 상세 응답 DTO (본문 + 답변 리스트 포함).
      *
-     * @param ticketId   티켓 PK
-     * @param userId     작성자 ID
-     * @param category   카테고리
-     * @param title      제목
-     * @param content    본문
-     * @param status     상태
-     * @param priority   우선순위
-     * @param assignedTo 담당자 ID (nullable)
-     * @param resolvedAt 해결 시각 (nullable)
-     * @param closedAt   종결 시각 (nullable)
-     * @param replies    답변 리스트 (시간 오름차순)
-     * @param createdAt  등록 시각
+     * <p>2026-04-28 필드 정합성 수정 — {@link TicketSummary} 와 동일한 사유로
+     * {@code ticketId} → {@code id}, {@code userNickname} 추가.</p>
+     *
+     * @param id           티켓 PK
+     * @param userId       작성자 user_id
+     * @param userNickname 작성자 닉네임 (lookup 실패 시 null)
+     * @param category     카테고리
+     * @param title        제목
+     * @param content      본문
+     * @param status       상태
+     * @param priority     우선순위
+     * @param assignedTo   담당자 ID (nullable)
+     * @param resolvedAt   해결 시각 (nullable)
+     * @param closedAt     종결 시각 (nullable)
+     * @param replies      답변 리스트 (시간 오름차순)
+     * @param createdAt    등록 시각
      */
     public record TicketDetail(
-            Long ticketId,
+            Long id,
             String userId,
+            String userNickname,
             String category,
             String title,
             String content,

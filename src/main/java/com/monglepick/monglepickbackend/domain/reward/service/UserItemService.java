@@ -20,7 +20,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -51,11 +53,13 @@ import java.util.Set;
 @Transactional(readOnly = true)
 public class UserItemService {
 
-    /** 착용 가능한 카테고리 — 아바타/배지만 해당 */
-    private static final Set<String> EQUIPPABLE_CATEGORIES = Set.of(
-            PointItemCategory.AVATAR,
-            PointItemCategory.BADGE
-    );
+    /**
+     * 착용 가능한 카테고리 — 2026-04-28 6슬롯 확장.
+     *
+     * <p>{@link PointItemCategory#EQUIPPABLE} 의 위임체. 단일 진실 원본은 PointItemCategory 이며,
+     * 이 필드는 메서드 내부 가독성을 위한 별칭이다.</p>
+     */
+    private static final Set<String> EQUIPPABLE_CATEGORIES = PointItemCategory.EQUIPPABLE;
 
     /** 보유 아이템 리포지토리 */
     private final UserItemRepository userItemRepository;
@@ -114,7 +118,11 @@ public class UserItemService {
     }
 
     /**
-     * 카테고리별 보유 개수 요약 + 착용 중인 아바타/배지를 반환한다.
+     * 카테고리별 보유 개수 요약 + 6슬롯 착용 아이템 반환 (2026-04-28 6슬롯 확장).
+     *
+     * <p>레거시 클라이언트 호환을 위해 {@code equippedAvatar} / {@code equippedBadge} 는 그대로
+     * 채우고, 신규 6슬롯(avatar/badge/frame/background/title/effect)은 {@code equippedSlots} Map
+     * 으로 통합 제공한다. 미착용 슬롯은 Map 에서 키 자체가 누락된다(null 명시 X).</p>
      *
      * @param userId 사용자 ID
      * @return 요약 DTO
@@ -123,39 +131,89 @@ public class UserItemService {
         long totalActive = userItemRepository.countByUserIdAndStatus(userId, UserItemStatus.ACTIVE)
                 + userItemRepository.countByUserIdAndStatus(userId, UserItemStatus.EQUIPPED);
 
+        /* 6 꾸미기 카테고리 + 3 비꾸미기(coupon/apply/hint) 카운트 집계 */
         long avatarCount = countByCategory(userId, PointItemCategory.AVATAR);
         long badgeCount = countByCategory(userId, PointItemCategory.BADGE);
+        long frameCount = countByCategory(userId, PointItemCategory.FRAME);
+        long backgroundCount = countByCategory(userId, PointItemCategory.BACKGROUND);
+        long titleCount = countByCategory(userId, PointItemCategory.TITLE);
+        long effectCount = countByCategory(userId, PointItemCategory.EFFECT);
         long couponCount = countByCategory(userId, PointItemCategory.COUPON);
         long applyCount = userItemRepository.countByUserAndCategoryAndStatus(
                 userId, PointItemCategory.APPLY, UserItemStatus.ACTIVE);
         long hintCount = userItemRepository.countByUserAndCategoryAndStatus(
                 userId, PointItemCategory.HINT, UserItemStatus.ACTIVE);
 
-        UserItemResponse equippedAvatar = pickFirstEquipped(userId, PointItemCategory.AVATAR);
-        UserItemResponse equippedBadge = pickFirstEquipped(userId, PointItemCategory.BADGE);
+        /* 6슬롯 착용 정보 — LinkedHashMap 으로 카테고리 순서 보장 (UI 미리보기 z-index 순서와 일치) */
+        Map<String, UserItemResponse> equippedSlots = collectEquippedSlots(userId);
+        UserItemResponse equippedAvatar = equippedSlots.get(PointItemCategory.AVATAR);
+        UserItemResponse equippedBadge = equippedSlots.get(PointItemCategory.BADGE);
 
         return new UserItemSummaryResponse(
                 totalActive,
                 avatarCount,
                 badgeCount,
+                frameCount,
+                backgroundCount,
+                titleCount,
+                effectCount,
                 couponCount,
                 applyCount,
                 hintCount,
                 equippedAvatar,
-                equippedBadge
+                equippedBadge,
+                equippedSlots
         );
     }
 
     /**
-     * 유저의 착용 아이템(아바타+배지)만 조회 — 프로필 렌더링용 경량 API.
+     * 유저의 착용 아이템 6슬롯을 List 로 반환 — 프로필 렌더링용 경량 API (2026-04-28 6슬롯 확장).
+     *
+     * <p>레거시 클라이언트 호환을 위해 {@code [avatar, badge, frame, background, title, effect]}
+     * 6원소 고정 순서 배열로 반환한다. 기존 클라이언트는 [0]/[1]만 사용하므로 영향 없으며,
+     * 신규 클라이언트는 6원소 모두 활용한다. 미착용 슬롯은 null.</p>
      *
      * @param userId 사용자 ID
-     * @return 각 카테고리 1개씩 (없으면 null 포함)
+     * @return 6원소 List (각 슬롯 미착용 시 null 포함)
      */
     public List<UserItemResponse> getEquipped(String userId) {
-        UserItemResponse avatar = pickFirstEquipped(userId, PointItemCategory.AVATAR);
-        UserItemResponse badge = pickFirstEquipped(userId, PointItemCategory.BADGE);
-        return java.util.Arrays.asList(avatar, badge); // null 포함 가능 — 클라이언트 방어 필요
+        Map<String, UserItemResponse> slots = collectEquippedSlots(userId);
+        /* 고정 순서 — 클라이언트가 인덱스로 접근하는 레거시 경로를 깨지 않기 위해 절대 변경 금지 */
+        return java.util.Arrays.asList(
+                slots.get(PointItemCategory.AVATAR),
+                slots.get(PointItemCategory.BADGE),
+                slots.get(PointItemCategory.FRAME),
+                slots.get(PointItemCategory.BACKGROUND),
+                slots.get(PointItemCategory.TITLE),
+                slots.get(PointItemCategory.EFFECT)
+        );
+    }
+
+    /**
+     * 6슬롯 카테고리별 착용 아이템을 Map 으로 수집 (2026-04-28 신규).
+     *
+     * <p>{@link #getSummary} / {@link #getEquipped} 양쪽에서 공유. 카테고리당 EQUIPPED 1개 정합성을
+     * 가정하며, 정합성 침해 발생 시 {@link #pickFirstEquipped} 가 첫 번째만 선택한다 (warn 로그).</p>
+     *
+     * @param userId 사용자 ID
+     * @return 미착용 슬롯은 키 자체가 없는 LinkedHashMap (UI 합성 z-index 순서)
+     */
+    private Map<String, UserItemResponse> collectEquippedSlots(String userId) {
+        Map<String, UserItemResponse> slots = new LinkedHashMap<>();
+        for (String category : List.of(
+                PointItemCategory.BACKGROUND,   // z-index 0 — 뒷배경 먼저
+                PointItemCategory.AVATAR,       // z-index 1 — 아바타 본체
+                PointItemCategory.FRAME,        // z-index 2 — 테두리
+                PointItemCategory.EFFECT,       // z-index 3 — 애니메이션
+                PointItemCategory.TITLE,        // 텍스트 — 닉네임 위/아래
+                PointItemCategory.BADGE         // 칩 — 닉네임 옆
+        )) {
+            UserItemResponse equipped = pickFirstEquipped(userId, category);
+            if (equipped != null) {
+                slots.put(category, equipped);
+            }
+        }
+        return slots;
     }
 
     // ──────────────────────────────────────────────

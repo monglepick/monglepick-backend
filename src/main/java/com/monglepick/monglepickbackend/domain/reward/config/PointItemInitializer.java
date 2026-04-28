@@ -132,7 +132,7 @@ public class PointItemInitializer implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        log.info("포인트 상점 아이템 초기화 시작 (v3.2 + C 방향 확장, 2026-04-14)");
+        log.info("포인트 상점 아이템 초기화 시작 (v3.5 + 6슬롯 꾸미기, 2026-04-28)");
 
         // 1) 카테고리 대소문자 정규화 + itemType/amount/durationDays/imageUrl 보정
         normalizeLegacyRows();
@@ -140,8 +140,11 @@ public class PointItemInitializer implements ApplicationRunner {
         // 2) data.sql 레거시 시드 5종 비활성화 (삭제 대신)
         deactivateLegacySeeds();
 
-        // 3) v3.2 7종 시드 멱등 INSERT
+        // 3) v3.2 표준 7종 시드 멱등 INSERT (AI 이용권/응모권/아바타/배지/힌트)
         seedCanonicalItems();
+
+        // 4) v3.5 꾸미기 6슬롯 확장 — 프레임/배경/칭호/이펙트 40종 멱등 INSERT (2026-04-28)
+        seedDecorationItems();
 
         log.info("포인트 상점 아이템 초기화 완료");
     }
@@ -278,6 +281,38 @@ public class PointItemInitializer implements ApplicationRunner {
         }
 
         log.info("v3.2 시드 적재 완료: INSERT={}개, 건너뜀={}개", inserted, skipped);
+    }
+
+    /**
+     * 4단계: v3.5 꾸미기 6슬롯 시드 40종(프레임/배경/칭호/이펙트)을 itemName 기준으로 멱등 INSERT.
+     *
+     * <p>2026-04-28 신규 — B안 v3.5 6슬롯 꾸미기 확장. 칭호 6종은 등급 자동 지급의 매핑 대상이라
+     * 부팅 시점에 이미 시드돼 있어야 GradeTitleService 가 즉시 발급 가능하다.</p>
+     *
+     * <p>운영 환경에서 이 메서드의 첫 부팅 직후 모든 신규 시드가 INSERT 된다 (아래 멱등 검사로 재실행 안전).</p>
+     */
+    private void seedDecorationItems() {
+        List<PointItem> items = buildDecorationSeedItems();
+        int inserted = 0;
+        int skipped = 0;
+
+        for (PointItem item : items) {
+            boolean exists = pointItemRepository.findAll().stream()
+                    .anyMatch(existing -> existing.getItemName().equals(item.getItemName()));
+            if (exists) {
+                skipped++;
+                continue;
+            }
+            pointItemRepository.save(item);
+            inserted++;
+            log.info("v3.5 꾸미기 시드 INSERT: name={}, category={}, type={}, price={}P",
+                    item.getItemName(), item.getItemCategory(),
+                    item.getItemType() != null ? item.getItemType().name() : "null",
+                    item.getItemPrice());
+        }
+
+        log.info("v3.5 꾸미기 시드 적재 완료: INSERT={}개, 건너뜀={}개 (전체 {}종)",
+                inserted, skipped, items.size());
     }
 
     /**
@@ -539,6 +574,78 @@ public class PointItemInitializer implements ApplicationRunner {
                         .durationDays(null)  // 무기한 보유 (만료 배치 대상 아님)
                         .isActive(true)
                         .build()
+        );
+    }
+
+    /**
+     * v3.5 꾸미기 6슬롯 — 프레임/배경/칭호/이펙트 시드 40종 (2026-04-28 신규).
+     *
+     * <p>{@link #buildCanonicalItems} 와 분리하여 부팅 시 별도 INSERT. 같은 멱등 키(itemName) 정책 사용.
+     * 칭호 6종은 등급 자동 지급의 매핑 대상이므로 itemName 이 정확해야 한다 — {@link GradeTitleService#GRADE_TO_TITLE_NAME}
+     * 와 동기화 필수.</p>
+     *
+     * <h3>구성</h3>
+     * <ul>
+     *   <li>프레임 10종 — 영화 필름·골든 시상식·시즌 한정 등 (영구/30일/90일 혼합)</li>
+     *   <li>배경 10종 — 극장 좌석·레드카펫·우주 SF 등 (영구/30일/90일 혼합)</li>
+     *   <li>칭호 10종 — 등급 자동 6종 + 일반 4종</li>
+     *   <li>이펙트 10종 — 팝콘·반짝임·필름·펄스 4 effectKey 변형 (영구/30일 혼합)</li>
+     * </ul>
+     *
+     * <p>이미지 경로는 정적 리소스 placeholder (운영 자산 업로드 후 교체). Admin UI 에서 imageUrl 갱신 가능.</p>
+     */
+    private List<PointItem> buildDecorationSeedItems() {
+        return List.of(
+                // ── 프레임 10종 (PointItemCategory.FRAME, PointItemType.FRAME_GENERIC) ──
+                PointItem.builder().itemName("프레임 - 영화 필름 스트립").itemDescription("고전 영화 필름 스트립을 모티브로 한 클래식 테두리. 시네마 마니아의 첫 컬렉션.").itemPrice(80).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(null).imageUrl("/frames/film_strip.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 클래퍼보드 골드").itemDescription("황금빛 클래퍼보드가 둘러싼 프레임. 데뷔작 감독에게 어울리는 화려함.").itemPrice(150).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(null).imageUrl("/frames/clapper_gold.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 시상식 트로피").itemDescription("아카데미 트로피를 본뜬 골드 프레임. 평론가 등급에게 추천.").itemPrice(300).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(null).imageUrl("/frames/awards_trophy.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 카라멜 글로우").itemDescription("따뜻한 카라멜 컬러 글로우 프레임. 카라멜팝콘 등급에서 어울리는 디자인.").itemPrice(150).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(null).imageUrl("/frames/caramel_glow.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 네온 사이버").itemDescription("네온 핑크/시아안 글로우 사이버펑크 테두리. 미래 영화 팬을 위한 한정 디자인.").itemPrice(220).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(90).imageUrl("/frames/neon_cyber.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 빈티지 스튜디오").itemDescription("1950년대 헐리우드 스튜디오 풍 빈티지 프레임. 사진 액자처럼 정교한 테두리.").itemPrice(180).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(null).imageUrl("/frames/vintage_studio.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 우주 SF").itemDescription("성운과 별이 흐르는 SF 영화 풍 프레임. 우주 영화 마니아 한정 컬렉션.").itemPrice(250).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(null).imageUrl("/frames/space_sf.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 할로윈 호박").itemDescription("주황색 호박 + 거미줄 모티브 시즌 한정 프레임. 호러 영화 시즌에 어울림 (90일).").itemPrice(120).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(90).imageUrl("/frames/halloween.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 크리스마스 라이트").itemDescription("크리스마스 트리 라이트가 둘러싼 시즌 한정 프레임 (30일).").itemPrice(100).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(30).imageUrl("/frames/xmas_lights.svg").isActive(true).build(),
+                PointItem.builder().itemName("프레임 - 다이아몬드 럭셔리").itemDescription("DIAMOND 등급 영감의 최고급 프레임. 결정 광택의 고급 디자인.").itemPrice(500).itemCategory(PointItemCategory.FRAME).itemType(PointItemType.FRAME_GENERIC).amount(1).durationDays(null).imageUrl("/frames/diamond_luxury.svg").isActive(true).build(),
+
+                // ── 배경 10종 (PointItemCategory.BACKGROUND, PointItemType.BACKGROUND_GENERIC) ──
+                PointItem.builder().itemName("배경 - 극장 좌석").itemDescription("어두운 극장의 빨간 좌석 풍경. 영화관 분위기를 프로필에 그대로.").itemPrice(100).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/theater_seats.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 레드카펫").itemDescription("시상식 레드카펫 + 플래시 라이트 효과의 화려한 배경.").itemPrice(200).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/red_carpet.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 영화관 스크린").itemDescription("커다란 흰 스크린이 빛나는 시네마 룸. 시청자 관점의 깊이감.").itemPrice(150).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/cinema_screen.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 우주 SF").itemDescription("성운·별·외계 행성이 펼쳐지는 SF 우주 배경.").itemPrice(250).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/space.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 영화 포스터 콜라주").itemDescription("100여 편의 명작 포스터를 콜라주한 화려한 배경. 영화 마니아의 자랑.").itemPrice(180).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/poster_collage.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 누아르 도시").itemDescription("비 내리는 어두운 도시 야경 — 누아르 영화 풍 흑백 그라데이션 배경.").itemPrice(180).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/noir_city.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 로맨스 선셋").itemDescription("석양과 야자수가 어우러진 따뜻한 로맨스 영화 풍 배경.").itemPrice(150).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/romance_sunset.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 호러 안개숲").itemDescription("자욱한 안개와 시들어 가는 나무들의 호러 영화 배경 (90일).").itemPrice(160).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(90).imageUrl("/backgrounds/horror_fog.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 팝콘 패턴").itemDescription("팝콘 알갱이가 그득한 귀여운 패턴 배경. 가벼운 코미디 톤.").itemPrice(80).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/popcorn_pattern.svg").isActive(true).build(),
+                PointItem.builder().itemName("배경 - 시네마 골드 패턴").itemDescription("필름 릴/카메라 아이콘이 황금색으로 흩어진 럭셔리 패턴.").itemPrice(280).itemCategory(PointItemCategory.BACKGROUND).itemType(PointItemType.BACKGROUND_GENERIC).amount(1).durationDays(null).imageUrl("/backgrounds/cinema_gold.svg").isActive(true).build(),
+
+                // ── 칭호 10종 (PointItemCategory.TITLE, PointItemType.TITLE_GENERIC) ──
+                // 등급 자동 지급 6종 — itemName 은 GradeTitleService.GRADE_TO_TITLE_NAME 와 동기화 필수
+                PointItem.builder().itemName("칭호 - 알갱이").itemDescription("NORMAL 등급 달성 시 자동 지급되는 입문자 칭호. 영화 여정의 시작을 함께.").itemPrice(0).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - 강냉이").itemDescription("BRONZE 등급 자동 지급 칭호. 누적 1,000P 활동 — 본격 영화 팬의 시작.").itemPrice(0).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - 팝콘").itemDescription("SILVER 등급 자동 지급 칭호. 누적 4,000P 활동 — 시청 일상화의 인증.").itemPrice(0).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - 카라멜팝콘").itemDescription("GOLD 등급 자동 지급 칭호. 누적 6,500P 활동 — 깊이 있는 시청자의 인증.").itemPrice(0).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - 몽글팝콘").itemDescription("PLATINUM 등급 자동 지급 칭호. 누적 10,000P 활동 — 영화광의 인증.").itemPrice(0).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - 몽아일체").itemDescription("DIAMOND 등급 자동 지급 칭호. 누적 20,000P 활동 — 영화와 한 몸이 된 자.").itemPrice(0).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                // 일반 칭호 4종 — 포인트로 구매 가능
+                PointItem.builder().itemName("칭호 - 🍿 영화광").itemDescription("자칭 영화광이라 외치고 싶은 분에게. 닉네임 옆에 영화광 라벨 표시.").itemPrice(120).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - ✍️ 리뷰 마스터").itemDescription("리뷰 작성에 진심인 마스터를 위한 칭호.").itemPrice(180).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - 🎬 100편 클럽").itemDescription("100편 시청을 인증하는 컬렉터 칭호.").itemPrice(250).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+                PointItem.builder().itemName("칭호 - 🌟 평론가").itemDescription("별점에 진심인 평론가용. 무게 있는 시선의 인증.").itemPrice(300).itemCategory(PointItemCategory.TITLE).itemType(PointItemType.TITLE_GENERIC).amount(1).durationDays(null).imageUrl(null).isActive(true).build(),
+
+                // ── 이펙트 10종 (PointItemCategory.EFFECT, PointItemType.EFFECT_GENERIC) ──
+                // itemName/imageUrl 끝부분이 popcorn/sparkle/film/pulse 키워드와 매칭되어 클라 effectKey 결정
+                PointItem.builder().itemName("이펙트 - 팝콘 떨어짐 (popcorn)").itemDescription("프로필 위로 팝콘이 톡톡 떨어지는 애니메이션 (30일).").itemPrice(400).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(30).imageUrl("/effects/popcorn.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 팝콘 영구 (popcorn)").itemDescription("팝콘 떨어짐 영구 버전 — 만료 없음.").itemPrice(900).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(null).imageUrl("/effects/popcorn_permanent.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 별빛 반짝임 (sparkle)").itemDescription("아바타 주변에 작은 별이 깜빡이는 반짝임 효과 (30일).").itemPrice(300).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(30).imageUrl("/effects/sparkle.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 별빛 영구 (sparkle)").itemDescription("별빛 반짝임 영구 버전 — 만료 없음.").itemPrice(700).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(null).imageUrl("/effects/sparkle_permanent.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 필름 스트립 회전 (film)").itemDescription("필름 릴이 천천히 회전하는 시네마 풍 효과 (30일).").itemPrice(500).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(30).imageUrl("/effects/film.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 필름 영구 (film)").itemDescription("필름 스트립 회전 영구 버전 — 만료 없음.").itemPrice(1100).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(null).imageUrl("/effects/film_permanent.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 골드 펄스 (pulse)").itemDescription("아바타 가장자리에 황금빛 펄스가 퍼지는 효과 (30일).").itemPrice(350).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(30).imageUrl("/effects/pulse_gold.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 핑크 펄스 (pulse)").itemDescription("핑크 펄스 효과 — 로맨스 영화 팬에게 추천 (30일).").itemPrice(350).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(30).imageUrl("/effects/pulse_pink.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 펄스 영구 (pulse)").itemDescription("펄스 효과 영구 버전 — 만료 없음.").itemPrice(800).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(null).imageUrl("/effects/pulse_permanent.svg").isActive(true).build(),
+                PointItem.builder().itemName("이펙트 - 다이아몬드 펄스 (pulse)").itemDescription("DIAMOND 등급 영감의 최고급 펄스 — 결정처럼 빛나는 영구 효과.").itemPrice(1500).itemCategory(PointItemCategory.EFFECT).itemType(PointItemType.EFFECT_GENERIC).amount(1).durationDays(null).imageUrl("/effects/pulse_diamond.svg").isActive(true).build()
         );
     }
 }

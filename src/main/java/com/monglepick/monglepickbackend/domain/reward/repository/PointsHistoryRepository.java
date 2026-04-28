@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -124,5 +125,30 @@ public interface PointsHistoryRepository extends JpaRepository<PointsHistory, Lo
             String userId,
             String actionType,
             String referenceId
+    );
+
+    /**
+     * 사용자의 REVIEW_CREATE 적립 이력을 referenceId 목록 기준으로 배치 조회한다.
+     *
+     * <p>고객센터 봇 EP({@code GET /api/v1/users/me/reviews}) 에서 리뷰 목록과
+     * 포인트 적립 이력을 N+1 없이 매핑할 때 사용한다.
+     * referenceId 형식: "movie_{movieId}" (RewardService.grantReward 규칙).</p>
+     *
+     * <p>포인트 이력 없는 리뷰는 Map 에 키가 없으므로 서비스 레이어에서
+     * {@code map.get(referenceId) == null} 로 판단한다.</p>
+     *
+     * @param userId      사용자 ID
+     * @param actionType  활동 유형 코드 (예: "REVIEW_CREATE")
+     * @param referenceIds referenceId 목록 (예: ["movie_tt1234", "movie_tt5678"])
+     * @return 조건에 맞는 포인트 이력 목록 (referenceId 기준 IN 절 조회)
+     */
+    @Query("SELECT h FROM PointsHistory h " +
+            "WHERE h.userId = :userId " +
+            "AND h.actionType = :actionType " +
+            "AND h.referenceId IN :referenceIds")
+    List<PointsHistory> findByUserIdAndActionTypeAndReferenceIdIn(
+            @Param("userId") String userId,
+            @Param("actionType") String actionType,
+            @Param("referenceIds") List<String> referenceIds
     );
 }

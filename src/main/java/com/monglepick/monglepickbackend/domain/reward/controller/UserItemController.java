@@ -36,9 +36,9 @@ import java.util.List;
  * <table border="1">
  *   <tr><th>메서드</th><th>경로</th><th>설명</th></tr>
  *   <tr><td>GET</td><td>/api/v1/users/me/items</td><td>페이징 목록 (카테고리 필터)</td></tr>
- *   <tr><td>GET</td><td>/api/v1/users/me/items/summary</td><td>카테고리별 개수 + 착용 정보</td></tr>
- *   <tr><td>GET</td><td>/api/v1/users/me/items/equipped</td><td>착용 중인 아바타/배지만</td></tr>
- *   <tr><td>POST</td><td>/api/v1/users/me/items/{id}/equip</td><td>착용 (아바타/배지)</td></tr>
+ *   <tr><td>GET</td><td>/api/v1/users/me/items/summary</td><td>카테고리별 개수 + 6슬롯 착용 정보</td></tr>
+ *   <tr><td>GET</td><td>/api/v1/users/me/items/equipped</td><td>꾸미기 6슬롯 착용 아이템 (avatar/badge/frame/background/title/effect)</td></tr>
+ *   <tr><td>POST</td><td>/api/v1/users/me/items/{id}/equip</td><td>착용 (꾸미기 6슬롯)</td></tr>
  *   <tr><td>POST</td><td>/api/v1/users/me/items/{id}/unequip</td><td>착용 해제</td></tr>
  *   <tr><td>POST</td><td>/api/v1/users/me/items/{id}/use</td><td>1회 사용 (힌트/응모권)</td></tr>
  * </table>
@@ -102,16 +102,17 @@ public class UserItemController extends BaseController {
     }
 
     /**
-     * 착용 중인 아바타/배지만 반환 — 프로필 렌더링 경량 API.
+     * 착용 중인 꾸미기 아이템 6슬롯 반환 — 프로필 렌더링 경량 API (2026-04-28 6슬롯 확장).
      *
-     * <p>리스트 인덱스 순서는 [0]=아바타, [1]=배지. 해당 카테고리 미착용 시 null 포함.</p>
+     * <p>리스트 인덱스 순서는 고정: [0]=아바타, [1]=배지, [2]=프레임, [3]=배경, [4]=칭호, [5]=이펙트.
+     * 해당 카테고리 미착용 시 null 포함. 레거시 클라이언트는 [0]/[1] 만 사용하므로 영향 없음.</p>
      *
      * @param principal JWT principal
-     * @return 2-원소 리스트 (avatar, badge)
+     * @return 6원소 리스트 (avatar, badge, frame, background, title, effect)
      */
     @GetMapping("/equipped")
     @Operation(summary = "착용 아이템 조회 (프로필 렌더링용)",
-            description = "착용 중인 아바타와 배지 각각 1개씩, 총 2원소 배열을 반환한다 (없으면 null).")
+            description = "꾸미기 6슬롯 (avatar/badge/frame/background/title/effect) 착용 아이템을 고정 순서 6원소 배열로 반환한다 (없으면 null).")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<List<UserItemResponse>> getEquipped(Principal principal) {
         String userId = resolveUserId(principal);
@@ -119,7 +120,7 @@ public class UserItemController extends BaseController {
     }
 
     /**
-     * 아이템 착용 — 아바타/배지만 가능.
+     * 아이템 착용 — 꾸미기 6슬롯(아바타/배지/프레임/배경/칭호/이펙트)만 가능.
      *
      * <p>동일 카테고리 기존 착용 아이템은 자동 해제된다.</p>
      *
@@ -129,7 +130,7 @@ public class UserItemController extends BaseController {
      */
     @PostMapping("/{userItemId}/equip")
     @Operation(summary = "아이템 착용",
-            description = "아바타/배지 카테고리만 허용. 같은 카테고리 기존 착용은 자동 해제된다.")
+            description = "꾸미기 6슬롯(avatar/badge/frame/background/title/effect)만 허용. 같은 카테고리 기존 착용은 자동 해제된다.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "착용 완료"),
             @ApiResponse(responseCode = "400", description = "착용 불가 카테고리 또는 만료 아이템"),
