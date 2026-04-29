@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.admin.controller;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ChatSessionDetail;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ChatSessionSummary;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ChatStatsResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.QuizStatsResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.QuizSummary;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ReviewDecisionRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ReviewVerificationDetail;
@@ -141,6 +142,36 @@ public class AdminAiOpsController {
                 status, movieId, keyword, fromDate, toDate, pageable
         );
         return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    /**
+     * AI 퀴즈 운영 통계 조회 — 2026-04-28 신규.
+     *
+     * <p>관리자 페이지 / 관리자 AI 어시스턴트의 quiz_stats Read tool 이 호출한다.
+     * 다음 4영역의 단순 집계를 한 번에 반환한다 (모두 read-only):</p>
+     *
+     * <ul>
+     *   <li>기간별 누적 — 오늘 / 최근 7일 / 최근 30일 created_at 기준 신규 quiz 건수</li>
+     *   <li>상태별 분포 — PENDING / APPROVED / REJECTED / PUBLISHED 4 키 (0건 포함)</li>
+     *   <li>검수 통과율 — APPROVED / (APPROVED + REJECTED), 모수 0 시 0.0</li>
+     *   <li>최근 14일 일자별 trend — 0건 날짜도 포함된 시계열 배열 (오름차순)</li>
+     * </ul>
+     *
+     * <h3>인증·권한</h3>
+     * <p>SUPER_ADMIN / ADMIN / AI_OPS_ADMIN. 본 컨트롤러 클래스 레벨에서 ADMIN 게이트를 통과하므로
+     * AI_OPS_ADMIN 역할은 SecurityConfig 매핑에 따른다.</p>
+     *
+     * @return 200 OK + QuizStatsResponse
+     */
+    @Operation(
+            summary = "AI 퀴즈 운영 통계",
+            description = "기간별 누적 건수 + 상태별 분포 + 검수 통과율 + 14일 trend 단일 응답."
+    )
+    @GetMapping("/quiz/stats")
+    public ResponseEntity<ApiResponse<QuizStatsResponse>> getQuizStats() {
+        log.debug("[AdminAiOps] 퀴즈 운영 통계 요청");
+        QuizStatsResponse stats = adminAiOpsService.getQuizStats();
+        return ResponseEntity.ok(ApiResponse.ok(stats));
     }
 
     // ======================== 챗봇 세션 ========================

@@ -68,6 +68,45 @@ public final class AdminAiOpsDto {
     // 2026-04-08: GenerateQuizRequest/GenerateQuizResponse 제거 — 퀴즈 생성이 Agent(FastAPI)로 이관됨
     //   (기존 Backend 스텁은 LLM 호출 없이 입력값을 INSERT 만 하던 dead code)
 
+    /**
+     * AI 퀴즈 운영 통계 응답 DTO — 2026-04-28 신규.
+     *
+     * <p>관리자 페이지 / 관리자 AI 어시스턴트가 호출하는 통계 EP 의 응답.
+     * 최근 quiz_generation 에이전트 결과를 기간별·상태별로 한 화면에 집계한다.</p>
+     *
+     * <h3>필드</h3>
+     * <ul>
+     *   <li>{@code totalToday} — 오늘(=서버 LocalDate) 새로 생성된 퀴즈 건수</li>
+     *   <li>{@code total7d}    — 최근 7 일 (now - 7d 이상, inclusive) 누적 건수</li>
+     *   <li>{@code total30d}   — 최근 30 일 누적 건수</li>
+     *   <li>{@code byStatus}   — PENDING/APPROVED/REJECTED/PUBLISHED 키를 가진 상태별 분포 Map</li>
+     *   <li>{@code approvalRate} — 검수 완료 분 (APPROVED+REJECTED) 중 APPROVED 비율 [0.0~1.0].
+     *       모수가 0 이면 0.0 반환 (NaN 방지)</li>
+     *   <li>{@code dailyTrend14d} — 최근 14 일 일자별 생성 건수 (오름차순). 0 건인 날도 포함.</li>
+     * </ul>
+     *
+     * <p>관리자 AI 가 narrate 하기 좋도록 모든 수치는 사전 계산된 단순 long/double 로 제공된다.</p>
+     */
+    public record QuizStatsResponse(
+            long totalToday,
+            long total7d,
+            long total30d,
+            java.util.Map<String, Long> byStatus,
+            double approvalRate,
+            List<DailyQuizCount> dailyTrend14d
+    ) {}
+
+    /**
+     * 일자별 퀴즈 생성 건수 (최근 14일 trend 용).
+     *
+     * @param date  생성일 (LocalDate, ISO-8601 직렬화: 'YYYY-MM-DD')
+     * @param count 해당 날짜 생성 건수 (0 포함)
+     */
+    public record DailyQuizCount(
+            java.time.LocalDate date,
+            long count
+    ) {}
+
     // ======================== 챗봇 세션 ========================
 
     /**

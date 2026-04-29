@@ -157,6 +157,20 @@ public class Quiz extends BaseAuditEntity {
     }
 
     /**
+     * 퀴즈를 특정 날짜로 출제(PUBLISH) — 2026-04-29 신규.
+     *
+     * <p>{@code QuizPublishScheduler} 가 매일 00:00 KST 에 호출하여 status 와
+     * quiz_date 를 한 번의 영속성 컨텍스트 변경으로 atomic 하게 세팅한다.
+     * 운영자가 수동으로 같은 날짜에 출제할 때도 사용 가능하다.</p>
+     *
+     * @param date 출제 예정일 (필수, null 불가)
+     */
+    public void publishOn(LocalDate date) {
+        this.status = QuizStatus.PUBLISHED;
+        this.quizDate = date;
+    }
+
+    /**
      * 관리자 퀴즈 본문/메타 정보를 수정한다.
      *
      * <p>상태(status)는 본 메서드에서 변경하지 않는다.

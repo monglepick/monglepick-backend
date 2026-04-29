@@ -3,6 +3,8 @@ package com.monglepick.monglepickbackend.admin.service;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ChatSessionDetail;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ChatSessionSummary;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.ChatStatsResponse;
+import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.DailyQuizCount;
+import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.QuizStatsResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminAiOpsDto.QuizSummary;
 import com.monglepick.monglepickbackend.admin.repository.AdminChatSessionRepository;
 import com.monglepick.monglepickbackend.admin.repository.AdminQuizRepository;
@@ -130,6 +132,121 @@ public class AdminAiOpsService {
         return adminQuizRepository
                 .searchByFilters(statusEnum, normalizedMovieId, normalizedKeyword, fromDate, toDate, pageable)
                 .map(this::toQuizSummary);
+    }
+
+    /**
+     * AI 퀴즈 운영 통계 조회 — 2026-04-28 신규.
+     *
+     * <p>관리자 페이지 / 관리자 AI 어시스턴트가 호출한다. quiz_generation 에이전트의
+     * 운영 가시성을 위해 다음 4개 영역의 단순 집계 수치를 한 번에 반환한다.</p>
+     *
+     * <ol>
+     *   <li><b>기간별 누적 건수</b>: 오늘 / 최근 7일 / 최근 30일 created_at 기준</li>
+     *   <li><b>상태별 분포</b>: PENDING / APPROVED / REJECTED / PUBLISHED 4 키 (0건 포함)</li>
+     *   <li><b>검수 통과율</b>: APPROVED / (APPROVED + REJECTED). 모수 0 이면 0.0 (NaN 방지)</li>
+     *   <li><b>최근 14일 일자별 trend</b>: created_at DATE GROUP — 0건 날짜도 시계열로 채움</li>
+     * </ol>
+     *
+     * <p>모든 시각 비교는 서버 LocalDate 기준. 모수 0 / 빈 상태 같은 경계 케이스는
+     * 0L / 0.0 으로 안전 fallback 하여 관리자 AI 의 narrate 가 깨지지 않게 한다.</p>
+     *
+     * @return QuizStatsResponse — 단순 long/double + 14일 trend 배열
+     */
+    public QuizStatsResponse getQuizStats() {
+        log.debug("[AdminAiOps] 퀴즈 운영 통계 조회 요청");
+
+        // ── 1) 기간별 누적 건수 ────────────────────────────────
+        // 자정 기준으로 잘라야 "오늘 0시 이후" 정확히 집계된다 (LocalDateTime.now() 그대로 쓰면
+        // 단순 -7d 가 되어 24시간 윈도우와 7일 자정 윈도우 사이 미세한 오차가 생긴다).
+        LocalDate today = LocalDate.now();
+        LocalDateTime startOfToday = today.atStartOfDay();
+        LocalDateTime start7d = today.minusDays(6).atStartOfDay();      // 오늘 포함 7일
+        LocalDateTime start30d = today.minusDays(29).atStartOfDay();    // 오늘 포함 30일
+
+        long totalToday = adminQuizRepository.countByCreatedAtGreaterThanEqual(startOfToday);
+        long total7d   = adminQuizRepository.countByCreatedAtGreaterThanEqual(start7d);
+        long total30d  = adminQuizRepository.countByCreatedAtGreaterThanEqual(start30d);
+
+        // ── 2) 상태별 분포 (4 키 모두 채움) ──────────────────────
+        // GROUP BY 결과는 "0건" 상태를 포함하지 않으므로 4개 enum 값을 0L 로 미리 깔고 덮어쓴다.
+        Map<String, Long> byStatus = new HashMap<>();
+        for (Quiz.QuizStatus s : Quiz.QuizStatus.values()) {
+            byStatus.put(s.name(), 0L);
+        }
+        for (Object[] row : adminQuizRepository.countGroupByStatus()) {
+            // row[0] = QuizStatus enum, row[1] = Long count
+            Quiz.QuizStatus status = (Quiz.QuizStatus) row[0];
+            Long count = (Long) row[1];
+            byStatus.put(status.name(), count != null ? count : 0L);
+        }
+
+        // ── 3) 검수 통과율 ────────────────────────────────────
+        // 검수 완료 모수 = APPROVED + REJECTED. PENDING / PUBLISHED 는 미평가 상태이므로 제외.
+        // 모수 0 일 때 0.0 / 0L 캐스팅 시 NaN 방지를 위해 명시적으로 0.0 fallback.
+        long approved = byStatus.getOrDefault("APPROVED", 0L);
+        long rejected = byStatus.getOrDefault("REJECTED", 0L);
+        long reviewedTotal = approved + rejected;
+        double approvalRate = reviewedTotal == 0
+                ? 0.0
+                : (double) approved / (double) reviewedTotal;
+
+        // ── 4) 최근 14일 일자별 trend ────────────────────────
+        // 최근 14일 윈도우 (오늘 포함) 시작일.
+        LocalDate trendStartDate = today.minusDays(13);
+        LocalDateTime trendStart = trendStartDate.atStartOfDay();
+
+        // DB 결과를 dateKey -> count Map 으로 적재 (0건 날짜 보충 용).
+        Map<LocalDate, Long> trendMap = new HashMap<>();
+        for (Object[] row : adminQuizRepository.dailyCountSince(trendStart)) {
+            // FUNCTION('DATE', ...) 는 java.sql.Date 로 매핑 — toLocalDate() 변환.
+            // H2 / MySQL Hibernate 6 기준 java.sql.Date 가 표준이지만, 환경에 따라
+            // LocalDate / LocalDateTime 으로 직렬화될 수 있어 모두 흡수한다.
+            LocalDate d = toLocalDate(row[0]);
+            Long count = (Long) row[1];
+            if (d != null) {
+                trendMap.put(d, count != null ? count : 0L);
+            }
+        }
+
+        // 14일 시계열을 오름차순으로 채움 — 0건 날짜도 0L 로 표시되어 차트 X 축이 끊기지 않는다.
+        List<DailyQuizCount> dailyTrend = new java.util.ArrayList<>(14);
+        for (int i = 0; i < 14; i++) {
+            LocalDate d = trendStartDate.plusDays(i);
+            dailyTrend.add(new DailyQuizCount(d, trendMap.getOrDefault(d, 0L)));
+        }
+
+        return new QuizStatsResponse(
+                totalToday,
+                total7d,
+                total30d,
+                byStatus,
+                approvalRate,
+                dailyTrend
+        );
+    }
+
+    /**
+     * Object → LocalDate 변환 헬퍼 — Hibernate 6 의 FUNCTION('DATE', ...) 결과 다형성을 흡수한다.
+     *
+     * <p>드라이버에 따라 java.sql.Date / java.util.Date / LocalDate / LocalDateTime / String
+     * 으로 반환될 수 있으므로 모든 경우를 안전하게 처리한다.</p>
+     */
+    private LocalDate toLocalDate(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof LocalDate ld) return ld;
+        if (raw instanceof LocalDateTime ldt) return ldt.toLocalDate();
+        if (raw instanceof java.sql.Date sd) return sd.toLocalDate();
+        if (raw instanceof java.util.Date ud) {
+            return ud.toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate();
+        }
+        if (raw instanceof String s && !s.isBlank()) {
+            try {
+                return LocalDate.parse(s.length() >= 10 ? s.substring(0, 10) : s);
+            } catch (DateTimeParseException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     // ======================== 챗봇 세션 ========================
