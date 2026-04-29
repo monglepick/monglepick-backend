@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.EnumSet;
 import java.util.Map;
 import java.util.Set;
@@ -162,7 +163,28 @@ public class AdminQuizService {
         switch (target) {
             case APPROVED -> quiz.approve();
             case REJECTED -> quiz.reject();
-            case PUBLISHED -> quiz.publish();
+            case PUBLISHED -> {
+                /*
+                 * PUBLISHED 전이 시 quiz_date 가 null 이면 오늘로 자동 세팅한다 (2026-04-29 회귀 픽스).
+                 *
+                 * 운영 회귀 사례:
+                 *   어드민이 검수 후 PATCH /status → PUBLISHED 만 누르면 status 는 변하지만
+                 *   {@link Quiz#publish()} 가 quiz_date 를 건드리지 않아 NULL 로 남고,
+                 *   사용자 화면 GET /api/v1/quizzes/today (조건: quiz_date = 오늘 AND status = PUBLISHED)
+                 *   에 영원히 노출되지 않는 disconnect 가 발생.
+                 *
+                 * 운영자 멘탈 모델("PUBLISHED 로 올렸으면 오늘부터 노출") + 도메인 invariant
+                 * ("PUBLISHED 면 quiz_date 가 반드시 있어야 한다") 양쪽을 만족시키기 위해
+                 * publishOn() 으로 일원화하고, 사전에 명시적으로 미래 quiz_date 를 지정한 경우는
+                 * 그 값을 그대로 존중한다 (예: 다음 주 출제 예약).
+                 */
+                LocalDate publishDate = quiz.getQuizDate() != null
+                        ? quiz.getQuizDate()
+                        : LocalDate.now();
+                quiz.publishOn(publishDate);
+                log.info("[관리자] PUBLISHED 전이 — quizId={}, quizDate={} (auto={})",
+                        id, publishDate, quiz.getQuizDate() == publishDate);
+            }
             case PENDING -> {
                 // PENDING 도메인 메서드가 없어 reflection 없이 직접 전이 — 임시로 reject 후 별도 메서드 추가가 안전.
                 // 우선 신규 도메인 메서드 추가 없이 처리하기 위해 builder 재생성 패턴은 부적합하므로,

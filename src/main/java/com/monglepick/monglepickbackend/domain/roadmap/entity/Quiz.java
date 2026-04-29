@@ -150,8 +150,16 @@ public class Quiz extends BaseAuditEntity {
 
     /**
      * 퀴즈 상태를 PUBLISHED로 변경한다.
-     * APPROVED 상태의 퀴즈를 실제 출제할 때 호출한다.
+     *
+     * @deprecated <b>도메인 invariant 위반 위험</b>. 본 메서드는 status 만 PUBLISHED 로 변경하고
+     * {@code quiz_date} 는 건드리지 않아, 호출자가 별도로 quiz_date 를 채우지 않으면 사용자 화면
+     * {@code GET /api/v1/quizzes/today} (조건: quiz_date = 오늘 AND status = PUBLISHED) 에 영원히
+     * 노출되지 않는 disconnect 를 만든다. 2026-04-29 운영 회귀의 근본 원인.
+     *
+     * <p>대신 {@link #publishOn(LocalDate)} 을 사용하여 status 와 quiz_date 를 한 번에 atomic
+     * 하게 세팅하라. 호환을 위해 본 메서드는 남겨두지만 신규 호출처 추가 금지.</p>
      */
+    @Deprecated
     public void publish() {
         this.status = QuizStatus.PUBLISHED;
     }
