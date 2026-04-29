@@ -47,9 +47,9 @@ public class UserVerificationService {
             throw new BusinessException(ErrorCode.OCR_EVENT_NOT_ACTIVE);
         }
 
-        // 신뢰도 50% 미만 → 제출 차단 (서버 측 방어선)
+        // 신뢰도 50% 미만 또는 측정 불가(null) → 제출 차단 (서버 측 방어선)
         Double confidence = request.ocrConfidence();
-        if (confidence != null && confidence < CONFIDENCE_MIN) {
+        if (confidence == null || confidence < CONFIDENCE_MIN) {
             log.warn("[OCR 인증 제출] 신뢰도 미달 차단 — userId={}, eventId={}, confidence={}",
                     userId, eventId, confidence);
             throw new BusinessException(ErrorCode.OCR_CONFIDENCE_TOO_LOW);
