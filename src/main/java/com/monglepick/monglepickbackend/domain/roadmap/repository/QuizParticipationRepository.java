@@ -1,8 +1,13 @@
 package com.monglepick.monglepickbackend.domain.roadmap.repository;
 
 import com.monglepick.monglepickbackend.domain.roadmap.entity.QuizParticipation;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
@@ -48,4 +53,68 @@ public interface QuizParticipationRepository extends JpaRepository<QuizParticipa
      * @return 해당 조건의 참여 기록이 있으면 true
      */
     boolean existsByQuiz_QuizIdAndUserIdAndIsCorrect(Long quizId, String userId, Boolean isCorrect);
+
+    // ============================================================
+    // 사용자별 응시 통계 — 2026-04-29 신규 (GET /api/v1/quizzes/me/stats)
+    // ============================================================
+
+    /**
+     * 사용자별 응시 통계 집계 — 총응시/정답수/총획득포인트/마지막응시 시각.
+     *
+     * <p>QuizPage 상단 "내 응시 현황" 카드가 호출하는 단일 쿼리.
+     * 4개 영역을 한 번의 쿼리로 묶어 N+1 / 라운드트립을 줄인다.</p>
+     *
+     * <h3>집계 정의</h3>
+     * <ul>
+     *   <li>총응시 = COUNT(*)</li>
+     *   <li>정답수 = SUM(CASE WHEN isCorrect=true THEN 1 ELSE 0 END)</li>
+     *   <li>총획득포인트 = SUM(CASE WHEN isCorrect=true THEN quiz.rewardPoint ELSE 0 END)
+     *       — 단순 집계라 "최초 정답만 지급" 정책과 미세하게 다를 수 있다 (재제출 시 동일 row UPDATE
+     *       이므로 같은 quiz 가 두 번 카운트되지는 않는다).</li>
+     *   <li>마지막응시시각 = MAX(submittedAt)</li>
+     * </ul>
+     *
+     * <p>응시가 0건이면 모든 값이 0/null 로 반환되므로 호출자가 정답률 계산 시 0/0 NaN 을
+     * 방어해야 한다.</p>
+     *
+     * @param userId 통계 대상 사용자 ID
+     * @return {@code [totalAttempts, correctCount, totalEarnedPoints, lastAttemptedAt]} 배열 1개 행
+     */
+    @Query(
+            "SELECT " +
+            "  COUNT(p), " +
+            "  SUM(CASE WHEN p.isCorrect = true THEN 1 ELSE 0 END), " +
+            "  SUM(CASE WHEN p.isCorrect = true THEN p.quiz.rewardPoint ELSE 0 END), " +
+            "  MAX(p.submittedAt) " +
+            "FROM QuizParticipation p " +
+            "WHERE p.userId = :userId"
+    )
+    Object[] aggregateMyStats(@Param("userId") String userId);
+
+    /**
+     * 사용자별 응시 이력 페이징 조회 — 2026-04-29 신규.
+     *
+     * <p>QuizPage 의 "내 응시 이력" 리스트가 호출. {@code JOIN FETCH p.quiz} 로
+     * Lazy 매핑된 Quiz 까지 한 번에 로드하여 N+1 쿼리를 차단한다.</p>
+     *
+     * <h3>정렬</h3>
+     * <p>JPQL 에 {@code ORDER BY p.submittedAt DESC} 하드코딩 — 가장 최근 응시가 먼저.
+     * 미제출 record (submittedAt=null) 는 NULLS LAST 로 밀려난다 (대부분 DB 기본).</p>
+     *
+     * <h3>countQuery 분리</h3>
+     * <p>Page 의 totalElements 계산은 JOIN FETCH 가 필요 없으므로 별도 countQuery 를
+     * 명시하여 카운트 쿼리에서 fetch join 으로 인한 중복 카운트와 성능 저하를 방지한다.</p>
+     *
+     * @param userId   응시 이력 조회 대상 사용자 ID
+     * @param pageable 페이지 정보 (size 만 적용, sort 는 무시 — 위 ORDER BY 고정)
+     * @return Quiz fetch 된 응시 이력 Page
+     */
+    @Query(
+            value = "SELECT p FROM QuizParticipation p " +
+                    "JOIN FETCH p.quiz " +
+                    "WHERE p.userId = :userId " +
+                    "ORDER BY p.submittedAt DESC",
+            countQuery = "SELECT COUNT(p) FROM QuizParticipation p WHERE p.userId = :userId"
+    )
+    Page<QuizParticipation> findMyHistory(@Param("userId") String userId, Pageable pageable);
 }
