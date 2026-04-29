@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.domain.auth.controller;
 
+import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.UserInfo;
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
 import com.monglepick.monglepickbackend.domain.auth.service.JwtService.JwtRefreshResult;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -53,11 +54,14 @@ public class JwtController {
     /**
      * Access Token 갱신 응답 DTO.
      *
-     * <p>Refresh Token은 쿠키로만 전달하므로 body에는 accessToken만 포함한다.</p>
+     * <p>Refresh Token은 쿠키로만 전달하므로 body에는 포함하지 않는다.
+     * OAuth2 쿠키 교환 직후에도 로컬 로그인과 동일하게 사용자 요약 정보를 내려
+     * 클라이언트 인증 상태의 user.id가 비지 않도록 한다.</p>
      *
      * @param accessToken 새로 발급된 Access Token
+     * @param user        현재 사용자 요약 정보
      */
-    public record RefreshResponseBody(String accessToken) {
+    public record RefreshResponseBody(String accessToken, UserInfo user) {
     }
 
     /**
@@ -66,17 +70,17 @@ public class JwtController {
      * <p>소셜 로그인 성공 후 SocialSuccessHandler가 설정한
      * HttpOnly 쿠키의 Refresh Token을 읽어 새 토큰 쌍을 발급한다.
      * 새 Refresh Token은 HttpOnly 쿠키로 갱신하고,
-     * Access Token만 JSON body로 반환한다.
+     * Access Token과 사용자 요약 정보를 JSON body로 반환한다.
      * 클라이언트의 /cookie 페이지에서 즉시 호출해야 한다.</p>
      *
      * @param request  HTTP 요청 (refreshToken 쿠키 포함)
      * @param response HTTP 응답 (새 refreshToken 쿠키 설정)
-     * @return 200 OK + RefreshResponseBody (accessToken만 body, refreshToken은 쿠키)
+     * @return 200 OK + RefreshResponseBody (accessToken + user body, refreshToken은 쿠키)
      */
     @Operation(
             summary = "소셜 로그인 토큰 교환",
             description = "OAuth2 성공 후 HttpOnly 쿠키의 Refresh Token으로 새 토큰 쌍 발급. "
-                    + "새 Refresh Token은 HttpOnly 쿠키로 갱신, Access Token만 body 반환"
+                    + "새 Refresh Token은 HttpOnly 쿠키로 갱신, Access Token과 사용자 정보는 body 반환"
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "토큰 교환 성공"),
@@ -102,8 +106,8 @@ public class JwtController {
         /* 3. 새 Refresh Token을 HttpOnly 쿠키로 갱신 */
         cookieUtil.addRefreshTokenCookie(response, result.newRefreshToken());
 
-        /* 4. Access Token만 body로 반환 */
-        return ResponseEntity.ok(new RefreshResponseBody(result.newAccessToken()));
+        /* 4. Access Token + 사용자 정보만 body로 반환 */
+        return ResponseEntity.ok(new RefreshResponseBody(result.newAccessToken(), result.user()));
     }
 
     /**
@@ -112,11 +116,11 @@ public class JwtController {
      * <p>HttpOnly 쿠키에서 기존 Refresh Token을 읽어 새 토큰 쌍으로 교환한다.
      * 기존 토큰은 DB 화이트리스트에서 삭제되어 재사용 불가능하다.
      * 새 Refresh Token은 HttpOnly 쿠키로 갱신하고,
-     * Access Token만 JSON body로 반환한다.</p>
+     * Access Token과 사용자 요약 정보를 JSON body로 반환한다.</p>
      *
      * @param request  HTTP 요청 (refreshToken 쿠키 포함)
      * @param response HTTP 응답 (새 refreshToken 쿠키 설정)
-     * @return 200 OK + RefreshResponseBody (accessToken만 body, refreshToken은 쿠키)
+     * @return 200 OK + RefreshResponseBody (accessToken + user body, refreshToken은 쿠키)
      */
     @Operation(
             summary = "Access Token 갱신 (Rotation)",
@@ -147,7 +151,7 @@ public class JwtController {
         /* 3. 새 Refresh Token을 HttpOnly 쿠키로 갱신 */
         cookieUtil.addRefreshTokenCookie(response, result.newRefreshToken());
 
-        /* 4. Access Token만 body로 반환 */
-        return ResponseEntity.ok(new RefreshResponseBody(result.newAccessToken()));
+        /* 4. Access Token + 사용자 정보만 body로 반환 */
+        return ResponseEntity.ok(new RefreshResponseBody(result.newAccessToken(), result.user()));
     }
 }

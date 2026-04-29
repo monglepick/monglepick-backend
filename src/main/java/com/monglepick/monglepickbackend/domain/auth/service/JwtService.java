@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.domain.auth.service;
 
 import com.monglepick.monglepickbackend.domain.auth.entity.RefreshEntity;
 import com.monglepick.monglepickbackend.domain.auth.mapper.RefreshMapper;
+import com.monglepick.monglepickbackend.domain.auth.dto.AuthDto.UserInfo;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -52,8 +53,9 @@ public class JwtService {
      *
      * @param newAccessToken  새로 발급된 Access Token
      * @param newRefreshToken 새로 발급된 Refresh Token (쿠키 전달용)
+     * @param user            현재 사용자 요약 정보
      */
-    public record JwtRefreshResult(String newAccessToken, String newRefreshToken) {
+    public record JwtRefreshResult(String newAccessToken, String newRefreshToken, UserInfo user) {
     }
 
     /**
@@ -92,6 +94,14 @@ public class JwtService {
         /* 4. 새 토큰 쌍 생성 */
         String newAccessToken = jwtTokenProvider.generateAccessToken(userId, user.getUserRole().name());
         String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
+        UserInfo userInfo = new UserInfo(
+                user.getUserId(),
+                user.getEmail(),
+                user.getNickname(),
+                user.getProfileImage(),
+                user.getProvider().name(),
+                user.getUserRole().name()
+        );
 
         /* 5. 기존 토큰 삭제 + 새 토큰 저장 (토큰 로테이션) */
         removeRefresh(refreshToken);
@@ -99,8 +109,8 @@ public class JwtService {
 
         log.info("Refresh Token 갱신 완료 — userId: {}", userId);
 
-        /* newAccessToken: body 반환용, newRefreshToken: 쿠키 설정용 (Controller에서 분리 처리) */
-        return new JwtRefreshResult(newAccessToken, newRefreshToken);
+        /* newAccessToken/user: body 반환용, newRefreshToken: 쿠키 설정용 (Controller에서 분리 처리) */
+        return new JwtRefreshResult(newAccessToken, newRefreshToken, userInfo);
     }
 
     /**
