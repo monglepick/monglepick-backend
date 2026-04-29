@@ -1244,16 +1244,36 @@ public class StatsDto {
      * @param totalAttendance      전체 출석 체크 레코드 수 (중복 포함 — 날짜별 1건)
      * @param todayAttendance      오늘 출석 체크 수
      * @param totalActivityUsers   활동 진행 레코드 보유 사용자 수 (user_activity_progress 행 수)
+     * @param activityUsers        활동 진행 사용자 수 (프론트 호환 필드)
      * @param totalWishlists       전체 위시리스트 추가 수
+     * @param totalWishlist        전체 위시리스트 추가 수 (프론트 호환 필드)
      * @param avgStreakDays        전체 사용자의 현재 연속 출석일 평균 (소수점 1자리)
      */
     public record EngagementOverviewResponse(
             long totalAttendance,
             long todayAttendance,
             long totalActivityUsers,
+            long activityUsers,
             long totalWishlists,
+            long totalWishlist,
             double avgStreakDays
-    ) {}
+    ) {
+        public EngagementOverviewResponse(long totalAttendance,
+                                          long todayAttendance,
+                                          long totalActivityUsers,
+                                          long totalWishlists,
+                                          double avgStreakDays) {
+            this(
+                    totalAttendance,
+                    todayAttendance,
+                    totalActivityUsers,
+                    totalActivityUsers,
+                    totalWishlists,
+                    totalWishlists,
+                    avgStreakDays
+            );
+        }
+    }
 
     /**
      * 활동별 참여 현황 응답.
@@ -1293,13 +1313,19 @@ public class StatsDto {
      *
      * @param range      구간 라벨 (예: "1일", "2-3일", "4-7일")
      * @param userCount  해당 구간에 속하는 사용자 수
+     * @param count      해당 구간에 속하는 사용자 수 (프론트 차트 호환 필드)
      * @param percentage 전체 대비 비율 (0.0~100.0)
      */
     public record StreakBucket(
             String range,
             long userCount,
+            long count,
             double percentage
-    ) {}
+    ) {
+        public StreakBucket(String range, long userCount, double percentage) {
+            this(range, userCount, userCount, percentage);
+        }
+    }
 
     // ══════════════════════════════════════════════
     // 13. 콘텐츠 성과 분석

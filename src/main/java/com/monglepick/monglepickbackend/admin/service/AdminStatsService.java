@@ -2298,7 +2298,7 @@ public class AdminStatsService {
      * <ul>
      *   <li>totalAttendance: user_attendance 전체 레코드 수 (날짜별 1건이므로 실질적 총 출석일 수)</li>
      *   <li>todayAttendance: 오늘(LocalDate.now()) 출석 체크 수</li>
-     *   <li>totalActivityUsers: user_activity_progress 레코드 수 (활동 참여한 적 있는 사용자의 활동별 행 수)</li>
+     *   <li>totalActivityUsers: user_activity_progress 레코드를 가진 고유 사용자 수</li>
      *   <li>totalWishlists: user_wishlists 전체 레코드 수</li>
      *   <li>avgStreakDays: 사용자별 최신 streak 평균, 소수점 1자리 반올림</li>
      * </ul>
@@ -2310,8 +2310,8 @@ public class AdminStatsService {
         /* 오늘 출석 수 */
         long todayAttendance = userAttendanceRepository.countByCheckDate(LocalDate.now());
 
-        /* 활동 진행 레코드 수 (사용자 × 활동유형 행 수) */
-        long totalActivityUsers = userActivityProgressRepository.count();
+        /* 활동 진행 사용자 수 (사용자 × 활동유형 행 수가 아니라 고유 사용자 수) */
+        long totalActivityUsers = userActivityProgressRepository.countDistinctUsers();
 
         /* 총 위시리스트 수 */
         long totalWishlists = userWishlistRepository.count();

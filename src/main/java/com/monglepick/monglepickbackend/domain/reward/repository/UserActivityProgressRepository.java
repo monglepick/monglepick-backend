@@ -78,6 +78,17 @@ public interface UserActivityProgressRepository extends JpaRepository<UserActivi
      */
     List<UserActivityProgress> findAllByActionType(String actionType);
 
+    /**
+     * 활동 진행 레코드를 가진 고유 사용자 수를 집계한다.
+     *
+     * <p>관리자 통계 "활동 사용자" KPI는 사용자 수 지표이므로
+     * user_activity_progress 행 수가 아니라 DISTINCT userId 기준으로 계산한다.</p>
+     *
+     * @return 1개 이상 활동 진행 레코드가 있는 고유 사용자 수
+     */
+    @Query("SELECT COUNT(DISTINCT uap.userId) FROM UserActivityProgress uap")
+    long countDistinctUsers();
+
     // ══════════════════════════════════════════════
     // 관리자 통계용 집계 쿼리 (AdminStatsService 섹션 12 — 사용자 참여도)
     // ══════════════════════════════════════════════
