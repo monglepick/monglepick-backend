@@ -725,7 +725,7 @@ public class AdminUserService {
                 .forEach(post -> activities.add(new ActivityResponse(
                         "커뮤니티 작성", //"POST" 대신 한국 레이블
                         post.getTitle(),
-                        post.getCategory() != null ? post.getCategory().name() : null,
+                        post.getCategory() != null ? toKoreanPostCategory(post.getCategory().name()) : null,
                         post.getPostId(),
                         post.getCreatedAt()
                 )));

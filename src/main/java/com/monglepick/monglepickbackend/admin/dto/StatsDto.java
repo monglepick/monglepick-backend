@@ -44,7 +44,8 @@ public class StatsDto {
      *
      * @param dau            일간 활성 사용자 수 (오늘 로그인한 사용자)
      * @param mau            월간 활성 사용자 수 (최근 30일 내 로그인)
-     * @param newUsersWeek   이번 주 신규 가입자 수 (최근 7일)
+     * @param newUsersWeek   기간 내 신규 가입자 수 (기본 최근 7일)
+     * @param newUsers       기간 내 신규 가입자 수 (프론트 호환 필드)
      * @param totalReviews   전체 리뷰 수
      * @param avgRating      전체 평균 평점 (1.0~5.0, reviews 테이블 기반)
      * @param totalPosts     전체 게시글 수 (PUBLISHED 상태만)
@@ -53,10 +54,20 @@ public class StatsDto {
             long dau,
             long mau,
             long newUsersWeek,
+            long newUsers,
             long totalReviews,
             double avgRating,
             long totalPosts
-    ) {}
+    ) {
+        public OverviewResponse(long dau,
+                                long mau,
+                                long newUsersWeek,
+                                long totalReviews,
+                                double avgRating,
+                                long totalPosts) {
+            this(dau, mau, newUsersWeek, newUsersWeek, totalReviews, avgRating, totalPosts);
+        }
+    }
 
     // ──────────────────────────────────────────────
     // 2. 일별 추이 차트
