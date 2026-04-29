@@ -17,6 +17,7 @@ import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
 import com.monglepick.monglepickbackend.domain.reward.entity.PointsHistory;
 import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import com.monglepick.monglepickbackend.domain.userwatchhistory.service.UserWatchHistoryService;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -81,6 +82,9 @@ public class ReviewService {
      */
     private final PointsHistoryRepository pointsHistoryRepository;
 
+    /** 업적 서비스 — review_count_10, genre_explorer 업적 달성 체크 */
+    private final AchievementService achievementService;
+
     /**
      * 영화 리뷰를 작성한다. 같은 사용자가 같은 영화에 중복 리뷰를 작성할 수 없다.
      */
@@ -138,6 +142,25 @@ public class ReviewService {
                         rewardResult.policyName()
                 );
             }
+        }
+
+        // review_count_10 업적 — 리뷰 10개 이상 달성 시 1회 지급
+        if (reviewCount >= 10) {
+            try {
+                achievementService.checkAndGrant(userId, "review_count_10", "default");
+            } catch (Exception e) {
+                log.warn("review_count_10 업적 체크 실패 (리뷰 작성은 정상 처리): userId={}, error={}", userId, e.getMessage());
+            }
+        }
+
+        // genre_explorer 업적 — 서로 다른 5개 장르 탐험 시 1회 지급
+        try {
+            long distinctGenreCount = reviewMapper.countDistinctExploredGenres(userId);
+            if (distinctGenreCount >= 5) {
+                achievementService.checkAndGrant(userId, "genre_explorer", "default");
+            }
+        } catch (Exception e) {
+            log.warn("genre_explorer 업적 체크 실패 (리뷰 작성은 정상 처리): userId={}, error={}", userId, e.getMessage());
         }
 
         // recommendation_impact.rated 업데이트 (퍼널 완성)

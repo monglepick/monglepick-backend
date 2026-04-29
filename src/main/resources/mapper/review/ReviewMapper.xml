@@ -326,7 +326,7 @@
                r.contents    AS content,
                r.created_at  AS createdAt
         FROM reviews r
-        LEFT JOIN movies m ON r.movie_id = m.movie_id
+        LEFT JOIN movies m ON r.movie_id = m.movie_id COLLATE utf8mb4_unicode_ci
         WHERE r.user_id    = #{userId}
           AND r.is_deleted = false
           AND r.created_at >= #{since}
@@ -464,6 +464,23 @@
         FROM reviews
         WHERE created_at >= #{start}
           AND created_at  &lt; #{end}
+    </select>
+
+    <!--
+        genre_explorer 업적용 — 사용자가 리뷰한 영화의 고유 장르 수.
+        movies.genres JSON 배열(예: ["액션","SF"])을 JSON_TABLE로 확장 후
+        DISTINCT 집계. 소프트 삭제된 리뷰 제외.
+        MySQL 8.0+ JSON_TABLE 함수 사용.
+    -->
+    <select id="countDistinctExploredGenres" resultType="long">
+        SELECT COUNT(DISTINCT jt.genre)
+        FROM reviews r
+        JOIN movies m ON r.movie_id = m.movie_id COLLATE utf8mb4_unicode_ci,
+        JSON_TABLE(m.genres, '$[*]' COLUMNS (genre VARCHAR(100) PATH '$')) jt
+        WHERE r.user_id = #{userId}
+          AND r.is_deleted = false
+          AND m.genres IS NOT NULL
+          AND JSON_LENGTH(m.genres) > 0
     </select>
 
 </mapper>

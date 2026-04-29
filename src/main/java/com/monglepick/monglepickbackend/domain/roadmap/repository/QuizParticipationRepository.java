@@ -117,4 +117,16 @@ public interface QuizParticipationRepository extends JpaRepository<QuizParticipa
             countQuery = "SELECT COUNT(p) FROM QuizParticipation p WHERE p.userId = :userId"
     )
     Page<QuizParticipation> findMyHistory(@Param("userId") String userId, Pageable pageable);
+
+    /**
+     * 특정 사용자가 정답 처리한 퀴즈 참여 수를 집계한다.
+     *
+     * <p>업적 진행률 소급 계산에서 quiz_perfect / quiz_count_* 계열의
+     * 기존 데이터 반영에 사용한다.</p>
+     *
+     * @param userId 사용자 ID
+     * @param isCorrect 정답 여부 (true 고정으로 사용)
+     * @return 해당 조건의 참여 수
+     */
+    long countByUserIdAndIsCorrect(String userId, Boolean isCorrect);
 }

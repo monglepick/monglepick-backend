@@ -21,6 +21,14 @@ import java.util.List;
 public interface FavDirectorRepository extends JpaRepository<FavDirector, Long> {
 
     /**
+     * 특정 사용자의 선호 감독 등록 수를 집계한다.
+     *
+     * @param userId 사용자 ID
+     * @return 해당 사용자의 선호 감독 수
+     */
+    long countByUserId(String userId);
+
+    /**
      * 특정 사용자의 선호 감독 목록을 전체 조회한다.
      *
      * @param userId 사용자 ID

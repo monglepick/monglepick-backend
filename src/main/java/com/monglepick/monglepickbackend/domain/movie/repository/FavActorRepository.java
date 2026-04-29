@@ -21,6 +21,14 @@ import java.util.List;
 public interface FavActorRepository extends JpaRepository<FavActor, Long> {
 
     /**
+     * 특정 사용자의 선호 배우 등록 수를 집계한다.
+     *
+     * @param userId 사용자 ID
+     * @return 해당 사용자의 선호 배우 수
+     */
+    long countByUserId(String userId);
+
+    /**
      * 특정 사용자의 선호 배우 목록을 전체 조회한다.
      *
      * @param userId 사용자 ID

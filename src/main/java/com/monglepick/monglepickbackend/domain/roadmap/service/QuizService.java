@@ -15,6 +15,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizRepository
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
+import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -78,6 +79,9 @@ public class QuizService {
 
     /** 리워드 서비스 — QUIZ_CORRECT 포인트 지급 위임 (REQUIRES_NEW 독립 트랜잭션) */
     private final RewardService rewardService;
+
+    /** 업적 서비스 — quiz_perfect 업적 달성 체크 */
+    private final AchievementService achievementService;
 
     /**
      * JSON 파싱용 ObjectMapper (스레드 안전, 클래스 로딩 시 1회 초기화).
@@ -207,6 +211,13 @@ public class QuizService {
         //    alreadyCorrect=true이면 이번 제출이 정답이라도 리워드를 건너뛴다
         if (isCorrect && !alreadyCorrect) {
             grantQuizReward(userId, quizId);
+            // quiz_perfect 업적 — 최초 퀴즈 정답 달성 시 1회 지급
+            try {
+                achievementService.checkAndGrant(userId, "quiz_perfect", "default");
+            } catch (Exception e) {
+                log.warn("quiz_perfect 업적 체크 실패 (퀴즈 제출은 정상 처리): userId={}, quizId={}, error={}",
+                        userId, quizId, e.getMessage());
+            }
         }
 
         // ⑦ 응답 반환 — rewardPoint는 정답 최초 지급인 경우에만 실제 값, 나머지는 0

@@ -15,6 +15,7 @@ import com.monglepick.monglepickbackend.domain.reward.entity.PointItem;
 import com.monglepick.monglepickbackend.domain.reward.entity.UserItem;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserItemRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
@@ -53,6 +54,8 @@ public class PostService {
     private final PlaylistMapper playlistMapper;
     /** 리워드 서비스 — POST_REWARD 정책 지급/회수 */
     private final RewardService rewardService;
+    /** 업적 서비스 — post_count_* / playlist_share_first 업적 달성 체크 */
+    private final AchievementService achievementService;
     /**
      * 보유 아이템 리포지토리 — 작성자 EQUIPPED 아바타·배지 조회용 (2026-04-27 신설).
      *
@@ -220,6 +223,14 @@ public class PostService {
                         rewardResult.policyName()
                 );
             }
+        }
+
+        // CSV/관리자 등록 기반 커뮤니티 업적 — 게시글 수, 플레이리스트 첫 공유 등
+        try {
+            achievementService.checkPostAchievements(userId, category);
+        } catch (Exception e) {
+            log.warn("게시글 업적 체크 실패 (게시글 작성은 정상 처리): userId={}, category={}, error={}",
+                    userId, category, e.getMessage());
         }
 
         Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;

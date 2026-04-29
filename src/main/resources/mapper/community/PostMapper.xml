@@ -231,6 +231,15 @@
           AND is_deleted = false
     </select>
 
+    <select id="countByUserIdAndCategoryAndStatus" resultType="long">
+        SELECT COUNT(*)
+        FROM posts
+        WHERE user_id = #{userId}
+          AND category = #{category}
+          AND status = #{status}
+          AND is_deleted = false
+    </select>
+
     <!-- ═══ Post 쓰기 , 이미지 업로드 ═══ -->
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="postId">

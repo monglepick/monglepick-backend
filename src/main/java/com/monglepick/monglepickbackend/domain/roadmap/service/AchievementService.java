@@ -1,24 +1,38 @@
 package com.monglepick.monglepickbackend.domain.roadmap.service;
 
+import com.monglepick.monglepickbackend.domain.community.entity.Post;
+import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
+import com.monglepick.monglepickbackend.domain.community.ocrevent.UserVerificationRepository;
+import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
+import com.monglepick.monglepickbackend.domain.movie.repository.FavActorRepository;
+import com.monglepick.monglepickbackend.domain.movie.repository.FavDirectorRepository;
+import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationLogRepository;
+import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
 import com.monglepick.monglepickbackend.domain.roadmap.controller.AchievementController.AchievementResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.AchievementType;
+import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserAchievement;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.AchievementTypeRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipationRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserAchievementRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
-import com.monglepick.monglepickbackend.global.exception.BusinessException;
-import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * 업적 서비스 — 업적 달성 감지, 리워드 지급, 달성 이력 관리.
@@ -58,6 +72,33 @@ public class AchievementService {
 
     /** 리워드 서비스 — 업적 달성 포인트 지급 위임 */
     private final RewardService rewardService;
+
+    /** 리뷰 Mapper — review_count_10 / genre_explorer 실시간 진행률 계산 */
+    private final ReviewMapper reviewMapper;
+
+    /** 커뮤니티 Mapper — post_count_* / comment_count_* / playlist_share_first 진행률 계산 */
+    private final PostMapper postMapper;
+
+    /** 코스 진행 Repository — course_complete / course_count_* 진행률 계산 */
+    private final UserCourseProgressRepository userCourseProgressRepository;
+
+    /** 퀴즈 참여 Repository — quiz_perfect / quiz_count_* 진행률 계산 */
+    private final QuizParticipationRepository quizParticipationRepository;
+
+    /** 추천 로그 Repository — recommendation_* 진행률 계산 */
+    private final RecommendationLogRepository recommendationLogRepository;
+
+    /** OCR 인증 Repository — ocr_* 진행률 계산 */
+    private final UserVerificationRepository userVerificationRepository;
+
+    /** 온보딩 선호 배우 Repository — onboard_complete 진행률 계산 */
+    private final FavActorRepository favActorRepository;
+
+    /** 온보딩 선호 감독 Repository — onboard_complete 진행률 계산 */
+    private final FavDirectorRepository favDirectorRepository;
+
+    /** 조회 API의 소급 달성 처리를 별도 트랜잭션으로 분리하기 위한 트랜잭션 매니저 */
+    private final PlatformTransactionManager transactionManager;
 
     // (2026-04-08) JPA/MyBatis 하이브리드 §15.4 적용:
     // UserAchievement 가 String userId 직접 보관으로 변경되어 User 엔티티 lookup 불필요.
@@ -157,6 +198,36 @@ public class AchievementService {
     }
 
     /**
+     * 게시글 작성 후 CSV/관리자 등록 기반 커뮤니티 업적을 확인한다.
+     *
+     * <p>achievementCode가 {@code post_count_}로 시작하는 활성 업적은
+     * requiredCount와 사용자의 게시글 수를 비교해 자동 달성 처리한다.
+     * PLAYLIST_SHARE 게시글 작성 시에는 {@code playlist_share_first}도 함께 확인한다.</p>
+     */
+    @Transactional
+    public void checkPostAchievements(String userId, Post.Category category) {
+        checkEligibleCountAchievements(userId, type -> {
+            String code = normalizeAchievementCode(type.getAchievementCode());
+            return code != null && (code.startsWith("post_count_")
+                    || (category == Post.Category.PLAYLIST_SHARE && "playlist_share_first".equals(code)));
+        });
+    }
+
+    /**
+     * 댓글 작성 후 CSV/관리자 등록 기반 댓글 업적을 확인한다.
+     *
+     * <p>achievementCode가 {@code comment_count_}로 시작하는 활성 업적은
+     * requiredCount와 사용자의 유효 댓글 수를 비교해 자동 달성 처리한다.</p>
+     */
+    @Transactional
+    public void checkCommentAchievements(String userId) {
+        checkEligibleCountAchievements(userId, type -> {
+            String code = normalizeAchievementCode(type.getAchievementCode());
+            return code != null && code.startsWith("comment_count_");
+        });
+    }
+
+    /**
      * 업적 유형 전체(또는 특정 카테고리)에 대해 사용자 달성 여부를 포함한 진행률 목록을 반환한다.
      *
      * <h4>처리 흐름</h4>
@@ -182,30 +253,32 @@ public class AchievementService {
      * @return 업적 유형별 달성 여부 + 진행률이 포함된 응답 DTO 목록
      * @throws BusinessException {@link ErrorCode#USER_NOT_FOUND} 사용자가 존재하지 않는 경우
      */
+    @Transactional
     public List<AchievementResponse> getAchievementsWithProgress(String userId, @Nullable String category) {
 
         // ① 카테고리 조건에 맞는 활성 업적 유형 목록 조회
-        //    JPA/MyBatis 하이브리드 §15.4 — User 엔티티 lookup 제거 (JWT 인증 단계에서 검증 완료)
         List<AchievementType> types;
-        if (category == null || category.isBlank()) {
-            // 카테고리 파라미터 없음 → 전체 활성 업적 유형 조회
+        if (isAllCategory(category)) {
             types = achievementTypeRepo.findByIsActiveTrue();
             log.debug("업적 유형 전체 조회: {}건", types.size());
         } else {
-            // 특정 카테고리만 조회
             types = achievementTypeRepo.findByCategoryAndIsActiveTrue(category);
             log.debug("업적 유형 카테고리 조회: category={}, {}건", category, types.size());
         }
 
-        // ② 사용자의 달성 이력 조회 → achievementTypeId Set으로 변환 (O(1) 조회)
+        // ② 사용자의 달성 이력 → achievementTypeId 맵 (최신 기록 우선)
         List<UserAchievement> userAchievements = userAchievementRepo.findAllByUserId(userId);
-
-        // achievementTypeId → UserAchievement 맵 (같은 타입을 여러 키로 달성 가능하므로 최신 기록만 보관)
-        // 달성 여부는 "해당 타입을 하나라도 달성했는지"를 기준으로 판정한다
-        java.util.Map<Long, UserAchievement> achievedMap = new java.util.LinkedHashMap<>();
+        Map<Long, UserAchievement> achievedMap = new LinkedHashMap<>();
         for (UserAchievement ua : userAchievements) {
+            if (ua == null || ua.getAchievementType() == null
+                    || ua.getAchievementType().getAchievementTypeId() == null) {
+                log.warn("업적 달성 이력의 마스터 연결 누락 (조회 제외): userId={}, userAchievementId={}, legacyCode={}",
+                        userId,
+                        ua != null ? ua.getUserAchievementId() : null,
+                        ua != null ? ua.getAchievementTypeCode() : null);
+                continue;
+            }
             Long typeId = ua.getAchievementType().getAchievementTypeId();
-            // 이미 있으면 더 최신 기록으로 교체 (achievedAt 기준)
             achievedMap.merge(typeId, ua, (existing, incoming) -> {
                 if (incoming.getAchievedAt() != null && (existing.getAchievedAt() == null
                         || incoming.getAchievedAt().isAfter(existing.getAchievedAt()))) {
@@ -215,47 +288,251 @@ public class AchievementService {
             });
         }
 
-        // ISO 날짜 포맷 (프론트엔드 파싱 호환)
         DateTimeFormatter isoFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
+        List<AchievementResponse> result = new ArrayList<>();
 
-        // ④ AchievementType 목록을 AchievementResponse DTO로 변환
-        return types.stream()
-                .map(type -> {
-                    Long typeId = type.getAchievementTypeId();
-                    boolean achieved = achievedMap.containsKey(typeId);
+        for (AchievementType type : types) {
+            Long typeId = type.getAchievementTypeId();
+            boolean achieved = achievedMap.containsKey(typeId);
 
-                    // maxProgress: requiredCount가 null이거나 0이면 1(단일 달성형)로 처리
-                    int maxProgress = (type.getRequiredCount() != null && type.getRequiredCount() > 0)
-                            ? type.getRequiredCount()
-                            : 1;
+            int maxProgress = resolveMaxProgress(type);
 
-                    // progress: 달성 시 maxProgress, 미달성 시 0 (중간 진행률 미구현)
-                    int progress = achieved ? maxProgress : 0;
+            int progress;
+            LocalDateTime grantedAt = null;
 
-                    // achievedAt: 달성 시 ISO 문자열, 미달성 시 null
-                    String achievedAt = null;
-                    if (achieved) {
-                        UserAchievement ua = achievedMap.get(typeId);
-                        if (ua.getAchievedAt() != null) {
-                            achievedAt = ua.getAchievedAt().format(isoFormatter);
-                        }
+            if (achieved) {
+                // 이미 달성 — 진행률 = maxProgress
+                progress = maxProgress;
+                UserAchievement ua = achievedMap.get(typeId);
+                if (ua != null && ua.getAchievedAt() != null) {
+                    grantedAt = ua.getAchievedAt();
+                }
+            } else {
+                // ③ 실시간 진행률 계산 (achievementCode별 도메인 데이터 조회)
+                progress = computeRealProgress(userId, type.getAchievementCode(), maxProgress);
+
+                // ④ 기존 데이터로 이미 달성 조건 충족 → 소급 달성 처리
+                if (progress >= maxProgress) {
+                    try {
+                        grantedAt = autoGrantIfEligibleInNewTransaction(userId, type);
+                        achieved = (grantedAt != null);
+                    } catch (Exception e) {
+                        log.error("업적 소급 달성 처리 실패 (목록 응답은 유지): userId={}, code={}, error={}",
+                                userId, type.getAchievementCode(), e.getMessage(), e);
                     }
+                }
+            }
 
-                    return new AchievementResponse(
-                            typeId,
-                            type.getAchievementCode(),
-                            type.getAchievementName(),
-                            type.getDescription(),
-                            type.getCategory(),
-                            type.getIconUrl(),
-                            type.getRewardPoints(),
-                            maxProgress,   // requiredCount (maxProgress 역할)
-                            achieved,
-                            progress,
-                            maxProgress,
-                            achievedAt
-                    );
-                })
-                .toList();
+            String achievedAtStr = (achieved && grantedAt != null)
+                    ? grantedAt.format(isoFormatter) : null;
+
+            result.add(new AchievementResponse(
+                    typeId,
+                    type.getAchievementCode(),
+                    type.getAchievementName(),
+                    type.getDescription(),
+                    type.getCategory(),
+                    type.getIconUrl(),
+                    type.getRewardPoints(),
+                    maxProgress,
+                    achieved,
+                    achieved ? maxProgress : progress,
+                    maxProgress,
+                    achievedAtStr
+            ));
+        }
+
+        return result;
+    }
+
+    /**
+     * achievementCode별 현재 실제 진행 수를 반환한다.
+     * 카운트 기반 업적만 계산하며, 이벤트성(quiz_perfect, course_complete)은 0 반환.
+     */
+    private int computeRealProgress(String userId, String achievementCode, int maxProgress) {
+        if (achievementCode == null || achievementCode.isBlank()) {
+            return 0;
+        }
+        achievementCode = normalizeAchievementCode(achievementCode);
+
+        if (achievementCode.startsWith("post_count_") || hasNumericSuffix(achievementCode, "post_")) {
+            return (int) Math.min(
+                    postMapper.countByUserIdAndStatus(userId, PostStatus.PUBLISHED.name()),
+                    maxProgress
+            );
+        }
+        if (achievementCode.startsWith("review_count_")) {
+            return (int) Math.min(reviewMapper.countByUserId(userId), maxProgress);
+        }
+        if (achievementCode.startsWith("comment_count_") || hasNumericSuffix(achievementCode, "comment_")) {
+            return (int) Math.min(
+                    postMapper.countCommentsByUserIdAndIsDeletedFalse(userId),
+                    maxProgress
+            );
+        }
+        if (achievementCode.startsWith("course_count_") || hasNumericSuffix(achievementCode, "course_complete_")) {
+            return countCompletedCourses(userId, maxProgress);
+        }
+        if (achievementCode.startsWith("quiz_count_")) {
+            return countCorrectQuizzes(userId, maxProgress);
+        }
+        if (hasNumericSuffix(achievementCode, "recommendation_")) {
+            return (int) Math.min(recommendationLogRepository.countByUserId(userId), maxProgress);
+        }
+        if (hasNumericSuffix(achievementCode, "ocr_")) {
+            return (int) Math.min(userVerificationRepository.countByUserId(userId), maxProgress);
+        }
+
+        return switch (achievementCode) {
+            case "genre_explorer" -> (int) Math.min(reviewMapper.countDistinctExploredGenres(userId), maxProgress);
+            case "course_complete" -> countCompletedCourses(userId, maxProgress);
+            case "quiz_perfect", "quiz_first_correct" -> countCorrectQuizzes(userId, maxProgress);
+            case "onboard_complete" -> computeOnboardCompleteProgress(userId, maxProgress);
+            case "playlist_share_first" -> (int) Math.min(
+                    postMapper.countByUserIdAndCategoryAndStatus(
+                            userId,
+                            Post.Category.PLAYLIST_SHARE.name(),
+                            PostStatus.PUBLISHED.name()
+                    ),
+                    maxProgress
+            );
+            default -> 0;
+        };
+    }
+
+    private int computeOnboardCompleteProgress(String userId, int maxProgress) {
+        boolean hasActor = favActorRepository.countByUserId(userId) > 0;
+        boolean hasDirector = favDirectorRepository.countByUserId(userId) > 0;
+        return hasActor && hasDirector ? maxProgress : 0;
+    }
+
+    private boolean isAllCategory(@Nullable String category) {
+        if (category == null || category.isBlank()) {
+            return true;
+        }
+        String normalized = category.trim();
+        return "ALL".equalsIgnoreCase(normalized)
+                || "전체".equals(normalized)
+                || "*".equals(normalized);
+    }
+
+    private int countCompletedCourses(String userId, int maxProgress) {
+        return (int) Math.min(
+                userCourseProgressRepository.countByUserIdAndStatus(userId, CourseProgressStatus.COMPLETED),
+                maxProgress
+        );
+    }
+
+    private int countCorrectQuizzes(String userId, int maxProgress) {
+        return (int) Math.min(
+                quizParticipationRepository.countByUserIdAndIsCorrect(userId, true),
+                maxProgress
+        );
+    }
+
+    private void checkEligibleCountAchievements(String userId, java.util.function.Predicate<AchievementType> filter) {
+        List<AchievementType> types = achievementTypeRepo.findByIsActiveTrue();
+        for (AchievementType type : types) {
+            if (!filter.test(type)) {
+                continue;
+            }
+            int maxProgress = resolveMaxProgress(type);
+            int progress = computeRealProgress(userId, type.getAchievementCode(), maxProgress);
+            if (progress >= maxProgress) {
+                autoGrantIfEligible(userId, type);
+            }
+        }
+    }
+
+    private int resolveMaxProgress(AchievementType type) {
+        if (type.getRequiredCount() != null && type.getRequiredCount() > 0) {
+            return type.getRequiredCount();
+        }
+
+        String code = normalizeAchievementCode(type.getAchievementCode());
+        if (code == null) {
+            return 1;
+        }
+
+        int underscore = code.lastIndexOf('_');
+        if (underscore >= 0 && underscore + 1 < code.length()) {
+            try {
+                int parsed = Integer.parseInt(code.substring(underscore + 1));
+                return Math.max(parsed, 1);
+            } catch (NumberFormatException ignored) {
+                return 1;
+            }
+        }
+
+        return 1;
+    }
+
+    private String normalizeAchievementCode(String achievementCode) {
+        if (achievementCode == null) {
+            return null;
+        }
+        return achievementCode.trim().toLowerCase().replace('-', '_');
+    }
+
+    private boolean hasNumericSuffix(String achievementCode, String prefix) {
+        if (achievementCode == null || !achievementCode.startsWith(prefix)) {
+            return false;
+        }
+        String suffix = achievementCode.substring(prefix.length());
+        if (suffix.isBlank()) {
+            return false;
+        }
+        for (int i = 0; i < suffix.length(); i++) {
+            if (!Character.isDigit(suffix.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 소급 달성 처리 — 이미 조건을 충족했지만 아직 UserAchievement가 없는 경우 INSERT + 리워드 지급.
+     *
+     * @return 달성 처리된 시각 (이미 달성 기록이 있거나 INSERT 성공 시), 실패 시 null
+     */
+    private LocalDateTime autoGrantIfEligibleInNewTransaction(String userId, AchievementType type) {
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return transactionTemplate.execute(status -> autoGrantIfEligible(userId, type));
+    }
+
+    private LocalDateTime autoGrantIfEligible(String userId, AchievementType type) {
+        boolean alreadyAchieved = userAchievementRepo
+                .findByUserIdAndAchievementTypeAndAchievementKey(userId, type, "default")
+                .isPresent();
+        if (alreadyAchieved) {
+            return LocalDateTime.now();
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        UserAchievement achievement = UserAchievement.builder()
+                .userId(userId)
+                .achievementTypeCode(type.getAchievementCode())
+                .achievementType(type)
+                .achievementKey("default")
+                .achievedAt(now)
+                .build();
+        userAchievementRepo.save(achievement);
+        log.info("업적 소급 달성 처리: userId={}, code={}", userId, type.getAchievementCode());
+
+        if (type.getRewardPoints() != null && type.getRewardPoints() > 0) {
+            try {
+                rewardService.grantRewardWithAmount(
+                        userId,
+                        "ACHIEVEMENT_UNLOCK",
+                        "achievement_" + type.getAchievementCode(),
+                        type.getRewardPoints()
+                );
+            } catch (Exception e) {
+                log.warn("업적 소급 리워드 지급 실패 (업적 INSERT는 유지): userId={}, code={}, error={}",
+                        userId, type.getAchievementCode(), e.getMessage());
+            }
+        }
+        return now;
     }
 }
