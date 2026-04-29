@@ -244,6 +244,9 @@ public enum ErrorCode {
     /** 유저 인증 — 같은 이벤트에 중복 인증 제출 시도. */
     DUPLICATE_OCR_VERIFICATION(HttpStatus.CONFLICT, "OCR004", "이미 해당 이벤트에 인증을 제출했습니다"),
 
+    /** 유저 인증 — OCR 신뢰도가 기준(50%) 미만이어서 제출 불가. */
+    OCR_CONFIDENCE_TOO_LOW(HttpStatus.UNPROCESSABLE_ENTITY, "OCR005", "OCR 신뢰도가 낮아 제출할 수 없습니다. 다른 이미지를 업로드해주세요."),
+
     /** 관리자 — 인기 검색어 키워드를 찾을 수 없음. */
     POPULAR_SEARCH_NOT_FOUND(HttpStatus.NOT_FOUND, "PSK001", "인기 검색어 항목을 찾을 수 없습니다"),
 
