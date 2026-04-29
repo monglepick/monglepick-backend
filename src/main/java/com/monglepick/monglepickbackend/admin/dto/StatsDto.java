@@ -1075,21 +1075,26 @@ public class StatsDto {
     /**
      * 전환 퍼널 응답.
      *
-     * <p>6단계 퍼널을 통해 신규 가입자가 결제까지 이어지는 전환율을 측정한다.
+     * <p>5단계 퍼널을 통해 신규 가입자가 결제까지 이어지는 전환율을 측정한다.
      * 각 단계는 이전 단계 대비 전환율과 1단계(가입) 대비 전환율을 모두 제공한다.</p>
      *
-     * @param period 분석 기간 문자열 (예: "30d")
-     * @param steps  6단계 퍼널 리스트
+     * <p>v3.6 (2026-04-28): "구독 전환" 단계 제거 — 결제(payment_orders COMPLETED)
+     * 안에 구독 결제가 포함되어 있어 단계가 사실상 중복이었다. 5단계로 단순화.</p>
+     *
+     * @param period                 분석 기간 문자열 (예: "30d")
+     * @param steps                  5단계 퍼널 리스트
+     * @param totalConversionRate    가입 → 결제 전체 전환율 (0.0~100.0, 마지막 단계 conversionFromTop 와 동일)
      */
     public record FunnelConversionResponse(
             String period,
-            List<FunnelStep> steps
+            List<FunnelStep> steps,
+            double totalConversionRate
     ) {}
 
     /**
      * 퍼널 단계 단건.
      *
-     * @param step              단계 번호 (1~6)
+     * @param step              단계 번호 (1~5)
      * @param label             단계 라벨 (예: "신규 가입", "AI 채팅 사용")
      * @param count             해당 단계 달성 사용자 수 (고유)
      * @param conversionFromPrev 전 단계 대비 전환율 (0.0~100.0, 단계 1은 100.0)
@@ -1110,20 +1115,28 @@ public class StatsDto {
     /**
      * 이탈 위험 개요 KPI 응답.
      *
-     * <p>전체 사용자를 위험도 점수(0~100)로 분류한 결과를 제공한다.
-     * 점수 계산 기준:
+     * <p>전체 사용자(최대 1000명 샘플)를 위험도 점수(0~75)로 분류한 결과를 제공한다.</p>
+     *
+     * <p>v3.6 (2026-04-28) 변경:
      * <ul>
-     *   <li>로그인 공백 7일+: +10점, 14일+: +25점, 30일+: +40점</li>
+     *   <li>"구독 미보유" 점수 제거 — 무료 사용자가 대부분이라 변별력 없음</li>
+     *   <li>최대 점수: 95 → 75 (40 + 15 + 20)</li>
+     *   <li>구간 재조정: 안전 0~14 / 낮음 15~29 / 중간 30~49 / 높음 50~75</li>
+     * </ul>
+     * </p>
+     *
+     * <p>점수 계산 기준:
+     * <ul>
+     *   <li>로그인 공백 7일+: +10점, 14일+: +25점, 30일+: +40점 (가장 높은 구간만 적용)</li>
      *   <li>포인트 잔액 0 + 가입 7일 이상: +15점</li>
-     *   <li>구독 미보유: +10점</li>
      *   <li>AI 세션 없음 (가입 14일 이상): +20점</li>
      * </ul>
      * </p>
      *
-     * @param noRisk     위험 없음 (0~24점) 사용자 수
-     * @param lowRisk    낮은 위험 (25~49점) 사용자 수
-     * @param mediumRisk 중간 위험 (50~74점) 사용자 수
-     * @param highRisk   높은 위험 (75~100점) 사용자 수
+     * @param noRisk     안전 (0~14점) 사용자 수
+     * @param lowRisk    낮은 위험 (15~29점) 사용자 수
+     * @param mediumRisk 중간 위험 (30~49점) 사용자 수
+     * @param highRisk   높은 위험 (50~75점) 사용자 수
      * @param totalAnalyzed 분석된 전체 사용자 수 (최대 1000명 샘플)
      */
     public record ChurnRiskOverviewResponse(
@@ -1140,17 +1153,24 @@ public class StatsDto {
      * <p>구체적인 이탈 위험 신호별 사용자 수를 제공하여
      * 운영팀이 타깃 리텐션 캠페인을 기획할 수 있도록 한다.</p>
      *
-     * @param inactive7days     7일+ 미로그인 사용자 수
-     * @param inactive14days    14일+ 미로그인 사용자 수
-     * @param inactive30days    30일+ 미로그인 사용자 수
-     * @param zeroPointUsers    포인트 잔액 0 사용자 수
-     * @param expiredNoRenewal  구독 만료 후 미갱신 사용자 수
+     * <p>v3.6 (2026-04-28) 변경:
+     * <ul>
+     *   <li>"구독 만료 후 미갱신" 신호 제거 — 무료 사용자가 대부분이라 변별력 없음</li>
+     *   <li>"AI 채팅 미사용 (가입 14일 이상)" 신호 추가 — 점수 산정 기준과 정합</li>
+     * </ul>
+     * </p>
+     *
+     * @param inactive7days       7일+ 미로그인 사용자 수
+     * @param inactive14days      14일+ 미로그인 사용자 수
+     * @param inactive30days      30일+ 미로그인 사용자 수
+     * @param zeroPointUsers      포인트 잔액 0 사용자 수
+     * @param noAiUsageOver14days AI 채팅 사용 이력이 없는 가입 14일 이상 사용자 수
      */
     public record ChurnRiskSignalsResponse(
             long inactive7days,
             long inactive14days,
             long inactive30days,
             long zeroPointUsers,
-            long expiredNoRenewal
+            long noAiUsageOver14days
     ) {}
 }

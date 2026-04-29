@@ -553,15 +553,18 @@ public class AdminStatsController {
     // ──────────────────────────────────────────────
 
     /**
-     * 6단계 전환 퍼널을 조회한다.
+     * 5단계 전환 퍼널을 조회한다.
      *
-     * <p>신규 가입 → 첫 활동 → AI 채팅 → 리뷰 작성 → 구독 → 결제 순서의
-     * 전환율을 분석한다. 각 단계별 전 단계 대비 전환율과 1단계 대비 전환율을 제공한다.</p>
+     * <p>신규 가입 → 첫 활동 → AI 채팅 → 리뷰 작성 → 결제 순서의 전환율을 분석한다.
+     * 각 단계별 전 단계 대비 전환율(conversionFromPrev)과 1단계 대비 전환율(conversionFromTop) 을 제공하고,
+     * 응답 최상단에 가입→결제 totalConversionRate 도 함께 반환한다.</p>
+     *
+     * <p>v3.6 (2026-04-28): 기존 "구독 전환" 단계가 결제 단계와 사실상 중복이라 제거 — 6단계 → 5단계.</p>
      *
      * @param period 분석 기간 (예: "7d", "30d", "90d", 기본값 "30d")
      */
     @Operation(summary = "전환 퍼널",
-               description = "가입→첫활동→AI채팅→리뷰→구독→결제 6단계 전환율 분석")
+               description = "가입→첫활동→AI채팅→리뷰→결제 5단계 전환율 분석 + 전체 전환율")
     @GetMapping("/funnel/conversion")
     public ResponseEntity<ApiResponse<FunnelConversionResponse>> getFunnelConversion(
             @Parameter(description = "분석 기간 (7d/30d/90d)", example = "30d")
@@ -577,15 +580,16 @@ public class AdminStatsController {
     /**
      * 이탈 위험 개요 KPI를 조회한다.
      *
-     * <p>최대 1000명 샘플을 로드하여 위험도 점수(0~100)를 계산하고
-     * 없음(0-24) / 낮음(25-49) / 중간(50-74) / 높음(75+) 4구간으로 분류한다.</p>
+     * <p>최대 1000명 샘플을 로드하여 위험도 점수(0~75)를 계산하고
+     * 안전(0~14) / 낮음(15~29) / 중간(30~49) / 높음(50~75) 4구간으로 분류한다.</p>
      *
      * <p>점수 기준: 30일+ 미로그인(40점), 14일+ 미로그인(25점), 7일+ 미로그인(10점),
-     * 포인트 잔액 0 + 가입 7일 이상(15점), AI 세션 없음 + 가입 14일 이상(20점),
-     * 구독 미보유(10점).</p>
+     * 포인트 잔액 0 + 가입 7일 이상(15점), AI 세션 없음 + 가입 14일 이상(20점).</p>
+     *
+     * <p>v3.6 (2026-04-28): "구독 미보유" 점수 제거 (변별력 부족). 최대 95 → 75 점, 구간 재조정.</p>
      */
     @Operation(summary = "이탈 위험 개요",
-               description = "위험도 점수 기반 4구간(없음/낮음/중간/높음) 사용자 수 (최대 1000명 샘플)")
+               description = "위험도 점수 기반 4구간(안전/낮음/중간/높음) 사용자 수 (최대 1000명 샘플)")
     @GetMapping("/churn-risk/overview")
     public ResponseEntity<ApiResponse<ChurnRiskOverviewResponse>> getChurnRiskOverview() {
         log.debug("[admin-stats-api] GET /churn-risk/overview");
@@ -596,10 +600,13 @@ public class AdminStatsController {
      * 이탈 위험 신호 집계를 조회한다.
      *
      * <p>7일/14일/30일+ 미로그인 사용자 수, 포인트 잔액 0 사용자 수,
-     * 구독 만료 후 미갱신 사용자 수를 반환한다.</p>
+     * AI 채팅 미사용 (가입 14일 이상) 사용자 수를 반환한다.</p>
+     *
+     * <p>v3.6 (2026-04-28): "구독 만료 후 미갱신" 신호 제거 (무료 사용자 다수, 변별력 없음).
+     * "AI 채팅 미사용" 신호 추가 — 점수 산정 기준과 화면 정합 회복.</p>
      */
     @Operation(summary = "이탈 위험 신호",
-               description = "미로그인 기간별 사용자 수 + 포인트 잔액 0 + 구독 만료 미갱신 집계")
+               description = "미로그인 기간별 사용자 수 + 포인트 잔액 0 + AI 채팅 미사용 14일+ 집계")
     @GetMapping("/churn-risk/signals")
     public ResponseEntity<ApiResponse<ChurnRiskSignalsResponse>> getChurnRiskSignals() {
         log.debug("[admin-stats-api] GET /churn-risk/signals");
