@@ -2104,38 +2104,38 @@ public class AdminStatsService {
         /* 단계 4: 리뷰 작성 고유 사용자 수 */
         long step4 = reviewMapper.countDistinctUserByCreatedAtBetween(start, end);
 
-        /* 단계 5: 구독 전환 고유 사용자 수 */
-        long step5 = userSubscriptionRepository.countDistinctUserByCreatedAtBetween(start, end);
-
-        /* 단계 6: 결제 전환 고유 사용자 수 (COMPLETED 주문) */
-        long step6 = paymentOrderRepository.countByStatusAndCreatedAtBetween(
+        /*
+         * 단계 5: 결제 전환 고유 사용자 수 (COMPLETED 주문).
+         * v3.6 (2026-04-28): 기존 6단계에서 "구독 전환" 단계를 제거하고 5단계로 단순화.
+         * payment_orders COMPLETED 안에 구독 결제(monthly/yearly)와 이용권 결제가 모두 포함되므로
+         * "결제" 단계가 유료 전환의 단일 지표로 충분하다 (단계 중복 제거).
+         */
+        long step5 = paymentOrderRepository.countByStatusAndCreatedAtBetween(
                 PaymentOrder.OrderStatus.COMPLETED, start, end);
 
         /*
          * 단계 2: 첫 활동 사용자 수.
          * 이상적으로는 (AI OR 리뷰 OR 위시리스트) DISTINCT userId 이지만
          * 3개 테이블 cross-join 없이는 정확한 합집합이 어렵다.
-         * 실용적 근사: 3가지 중 최대값을 첫 활동 사용자 수로 사용한다
-         * (단계 1과 단계 3 사이의 합리적 상한선).
-         * step1 을 초과하지 않도록 min(step1, max(step3, step4, step5)) 적용.
+         * 실용적 근사: AI 채팅 / 리뷰 작성 중 최대값을 첫 활동 사용자 수로 사용한다.
+         * step1 을 초과하지 않도록 min(step1, max(step3, step4)) 적용.
          */
-        long step2 = step1 > 0 ? Math.min(step1, Math.max(step3, Math.max(step4, step5))) : 0L;
+        long step2 = step1 > 0 ? Math.min(step1, Math.max(step3, step4)) : 0L;
 
-        /* 단계별 배열로 처리하여 전환율 일괄 계산 */
-        long[] counts = {step1, step2, step3, step4, step5, step6};
+        /* 단계별 배열로 처리하여 전환율 일괄 계산 (5단계) */
+        long[] counts = {step1, step2, step3, step4, step5};
         String[] labels = {
                 "신규 가입",
                 "첫 활동",
                 "AI 채팅 사용",
                 "리뷰 작성",
-                "구독 전환",
-                "결제 전환"
+                "결제"
         };
 
         List<FunnelStep> steps = new ArrayList<>();
         for (int i = 0; i < counts.length; i++) {
             long count = counts[i];
-            /* 전 단계 대비 전환율: 단계 1은 100.0, 이후는 전 단계 / 현 단계 */
+            /* 전 단계 대비 전환율: 단계 1은 100.0, 이후는 현 단계 / 전 단계 */
             double fromPrev;
             if (i == 0) {
                 fromPrev = 100.0;
@@ -2153,9 +2153,14 @@ public class AdminStatsService {
             steps.add(new FunnelStep(i + 1, labels[i], count, fromPrev, fromTop));
         }
 
-        log.debug("[admin-stats] 전환 퍼널 — 기간={}일, 가입={}, AI={}, 리뷰={}, 구독={}, 결제={}",
-                days, step1, step3, step4, step5, step6);
-        return new FunnelConversionResponse(period, steps);
+        /* 전체 전환율(가입 → 결제) — 마지막 단계 conversionFromTop */
+        double totalConversionRate = step1 > 0
+                ? Math.round((double) step5 / step1 * 1000.0) / 10.0
+                : 0.0;
+
+        log.debug("[admin-stats] 전환 퍼널 — 기간={}일, 가입={}, 첫활동={}, AI={}, 리뷰={}, 결제={}, 전체={}%",
+                days, step1, step2, step3, step4, step5, totalConversionRate);
+        return new FunnelConversionResponse(period, steps, totalConversionRate);
     }
 
     // ══════════════════════════════════════════════
@@ -2166,18 +2171,23 @@ public class AdminStatsService {
      * 이탈 위험 개요 KPI를 반환한다.
      *
      * <p>전체 사용자(최대 1000명 샘플)의 위험도 점수를 Java에서 계산하여
-     * 4구간(없음/낮음/중간/높음)으로 분류한다.</p>
+     * 4구간(안전/낮음/중간/높음)으로 분류한다.</p>
      *
-     * <h4>점수 계산 기준 (최대 95점)</h4>
+     * <h4>점수 계산 기준 (최대 75점) — v3.6 (2026-04-28) 재조정</h4>
      * <ul>
      *   <li>로그인 공백 7일+: 10점 / 14일+: 25점 / 30일+: 40점 (누적 아님, 가장 높은 구간 적용)</li>
      *   <li>포인트 잔액 0 + 가입 7일 이상: 15점</li>
      *   <li>AI 세션 없음 (가입 14일 이상): 20점</li>
-     *   <li>구독 미보유: 10점</li>
+     * </ul>
+     *
+     * <h4>구간 재조정</h4>
+     * <ul>
+     *   <li>안전: 0~14점 / 낮음: 15~29점 / 중간: 30~49점 / 높음: 50~75점</li>
+     *   <li>이전 (95점 만점)에서는 "구독 미보유 +10점"이 포함되어 있었으나 v3.6 에서 제거</li>
+     *   <li>이유: 무료 사용자가 압도적 다수라 "구독 미보유" 신호는 변별력이 없음</li>
      * </ul>
      *
      * <p>AI 세션 없음 판정: ChatSessionArchive.userId 전체 목록을 Set으로 캐싱하여 O(1) 조회.</p>
-     * <p>구독 보유 판정: UserSubscription ACTIVE 상태 userId Set으로 캐싱.</p>
      * <p>포인트 잔액: UserPoint.balance를 userId → balance Map으로 캐싱.</p>
      *
      * @return 위험도 4구간별 사용자 수 + 분석된 전체 사용자 수
@@ -2194,16 +2204,8 @@ public class AdminStatsService {
 
         /*
          * 2. 보조 데이터 Set/Map 캐싱 (N+1 방지).
-         * 전체 ACTIVE 구독 userId Set
+         * AI 세션 보유 userId Set (isDeleted 무관 — 사용 이력 기준)
          */
-        java.util.Set<String> activeSubUserIds = userSubscriptionRepository
-                .findAll()
-                .stream()
-                .filter(s -> UserSubscription.Status.ACTIVE.equals(s.getStatus()))
-                .map(UserSubscription::getUserId)
-                .collect(Collectors.toSet());
-
-        /* AI 세션 보유 userId Set (isDeleted 무관 — 사용 이력 기준) */
         java.util.Set<String> aiSessionUserIds = adminChatSessionRepository
                 .findAll(PageRequest.of(0, 5000))
                 .getContent()
@@ -2222,7 +2224,7 @@ public class AdminStatsService {
                         ))
                 : Collections.emptyMap();
 
-        /* 3. 사용자별 위험도 점수 계산 */
+        /* 3. 사용자별 위험도 점수 계산 (구독 미보유 점수 제거 — 최대 75점) */
         long noRisk = 0, lowRisk = 0, mediumRisk = 0, highRisk = 0;
 
         for (User user : users) {
@@ -2251,24 +2253,19 @@ public class AdminStatsService {
                 score += 20;
             }
 
-            /* 구독 미보유: +10점 */
-            if (!activeSubUserIds.contains(user.getUserId())) {
-                score += 10;
-            }
-
-            /* 구간 분류 */
-            if (score < 25) {
+            /* 구간 분류 (재조정: 0~14 / 15~29 / 30~49 / 50+) */
+            if (score < 15) {
                 noRisk++;
-            } else if (score < 50) {
+            } else if (score < 30) {
                 lowRisk++;
-            } else if (score < 75) {
+            } else if (score < 50) {
                 mediumRisk++;
             } else {
                 highRisk++;
             }
         }
 
-        log.debug("[admin-stats] 이탈 위험 — 분석={}명, 없음={}, 낮음={}, 중간={}, 높음={}",
+        log.debug("[admin-stats] 이탈 위험 — 분석={}명, 안전={}, 낮음={}, 중간={}, 높음={}",
                 users.size(), noRisk, lowRisk, mediumRisk, highRisk);
         return new ChurnRiskOverviewResponse(noRisk, lowRisk, mediumRisk, highRisk, users.size());
     }
@@ -2279,12 +2276,15 @@ public class AdminStatsService {
      * <p>운영팀이 리텐션 캠페인 타깃을 설정할 수 있도록
      * 구체적인 이탈 위험 신호별 사용자 수를 집계한다.</p>
      *
-     * <h4>집계 항목</h4>
+     * <h4>집계 항목 — v3.6 (2026-04-28) 재구성</h4>
      * <ul>
      *   <li>7일/14일/30일+ 미로그인: UserMapper.countByLastLoginAtBefore()</li>
      *   <li>포인트 잔액 0: UserPointRepository.countZeroBalanceUsers()</li>
-     *   <li>구독 만료 후 미갱신: UserSubscriptionRepository.countExpiredWithoutRenewal() — 30일 이전 만료 기준</li>
+     *   <li>AI 채팅 미사용 (가입 14일 이상): User.createdAt 14일 이전인 사용자 중 ChatSessionArchive 에 userId 없는 수</li>
      * </ul>
+     *
+     * <p>변경: 기존 "구독 만료 후 미갱신" 신호 제거 — 무료 사용자가 압도적이라 변별력이 없었음.
+     * 대신 점수 산정 기준에 이미 들어 있던 "AI 채팅 미사용" 신호를 노출하여 산정 기준과 화면 정합 회복.</p>
      */
     public ChurnRiskSignalsResponse getChurnRiskSignals() {
         LocalDateTime now = LocalDateTime.now();
@@ -2299,12 +2299,28 @@ public class AdminStatsService {
         /* 포인트 잔액 0 사용자 수 */
         long zeroPoint = userPointRepository.countZeroBalanceUsers();
 
-        /* 구독 만료 후 미갱신 사용자 수 (30일 이전 만료 기준) */
-        long expiredNoRenewal = userSubscriptionRepository
-                .countExpiredWithoutRenewal(now.minusDays(30));
+        /*
+         * AI 채팅 미사용 (가입 14일 이상) 사용자 수 집계.
+         * AI 세션 사용 이력이 있는 userId Set 을 한 번 캐싱한 뒤,
+         * 가입 14일 이상 사용자 전수 검사하여 Set 에 없는 사용자 수를 카운트한다.
+         * (UserMapper.findAllLimited(1000) 샘플 기반 — getChurnRiskOverview 와 동일 정책)
+         */
+        java.util.Set<String> aiSessionUserIds = adminChatSessionRepository
+                .findAll(PageRequest.of(0, 5000))
+                .getContent()
+                .stream()
+                .map(session -> session.getUserId())
+                .collect(Collectors.toSet());
 
-        log.debug("[admin-stats] 이탈 신호 — 7일미로그인={}, 14일={}, 30일={}, 잔액0={}, 만료미갱신={}",
-                inactive7, inactive14, inactive30, zeroPoint, expiredNoRenewal);
-        return new ChurnRiskSignalsResponse(inactive7, inactive14, inactive30, zeroPoint, expiredNoRenewal);
+        LocalDateTime joinedBefore = now.minusDays(14);
+        long noAiUsageOver14days = userMapper.findAllLimited(1000)
+                .stream()
+                .filter(u -> u.getCreatedAt() != null && u.getCreatedAt().isBefore(joinedBefore))
+                .filter(u -> !aiSessionUserIds.contains(u.getUserId()))
+                .count();
+
+        log.debug("[admin-stats] 이탈 신호 — 7일미로그인={}, 14일={}, 30일={}, 잔액0={}, AI미사용14일+={}",
+                inactive7, inactive14, inactive30, zeroPoint, noAiUsageOver14days);
+        return new ChurnRiskSignalsResponse(inactive7, inactive14, inactive30, zeroPoint, noAiUsageOver14days);
     }
 }
