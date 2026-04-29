@@ -383,6 +383,20 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/ocr-events/**").permitAll()
 
                 /*
+                 * 퀴즈 공개 조회 EP — 비로그인 허용 (2026-04-29 회귀 픽스).
+                 *
+                 * QuizController Javadoc 명세상 "오늘의 퀴즈"(/today) 와 "영화별 퀴즈"(/movie/{movieId})
+                 * 는 비로그인 사용자도 조회 가능한 공개 EP 였으나, SecurityConfig 에 permitAll 매처가
+                 * 누락되어 .anyRequest().authenticated() 폴스루로 401 을 반환하던 회귀를 차단한다.
+                 *
+                 * 정답이 응답에 포함되지 않으므로 노출 위험 없음. 정답 제출(/quizzes/{id}/submit) 과
+                 * 본인 통계/이력(/me/stats, /me/history) 은 매처를 두지 않아 기본 정책(authenticated)
+                 * 에 위임 — JWT 필수 상태 유지.
+                 */
+                .requestMatchers(HttpMethod.GET, "/api/v1/quizzes/today").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/quizzes/movie/**").permitAll()
+
+                /*
                  * 채팅 추천 칩 — Public 노출 (환영 화면) + 클릭 트래킹.
                  * 와일드카드(/chat/suggestions/**)를 회피하고 path 단위로 명시하여
                  * Admin EP(/api/v1/admin/chat-suggestions)가 열리지 않도록 한다.
