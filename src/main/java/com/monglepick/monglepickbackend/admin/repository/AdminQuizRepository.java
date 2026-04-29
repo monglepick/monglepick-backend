@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * 관리자 전용 퀴즈 리포지토리.
@@ -101,4 +104,80 @@ public interface AdminQuizRepository extends JpaRepository<Quiz, Long> {
             @Param("toDate") LocalDate toDate,
             Pageable pageable
     );
+
+    // ============================================================
+    // 통계 집계 — 2026-04-28 신규 (GET /admin/ai/quiz/stats)
+    // ============================================================
+
+    /**
+     * 특정 시각 이후 생성된 퀴즈 건수.
+     *
+     * <p>created_at &gt;= since (inclusive). status 무관 — 누적 생성량 집계용.
+     * Service 레이어에서 오늘/7일/30일 윈도우를 같은 메서드로 호출한다.</p>
+     *
+     * @param since 기준 시각 (inclusive)
+     * @return 해당 기간 생성된 퀴즈 건수
+     */
+    long countByCreatedAtGreaterThanEqual(LocalDateTime since);
+
+    /**
+     * 상태별 퀴즈 건수 그룹 집계.
+     *
+     * <p>JPQL 의 GROUP BY 결과를 {@code Object[]{status, count}} 배열로 반환.
+     * Service 레이어가 Map<String, Long> 으로 변환해 응답 DTO 에 담는다.
+     * 빈 상태(0건)는 결과에 포함되지 않으므로, 호출자는 누락 키를 0L 로 채워야 한다.</p>
+     *
+     * @return {@code [QuizStatus, Long]} 형식 배열 리스트
+     */
+    @Query("SELECT q.status, COUNT(q) FROM Quiz q GROUP BY q.status")
+    List<Object[]> countGroupByStatus();
+
+    /**
+     * 최근 N 일 일자별 생성 건수 (DATE(created_at) 그룹 집계).
+     *
+     * <p>JPQL {@code FUNCTION('DATE', q.createdAt)} 로 자정 단위 트림 후 GROUP BY.
+     * H2 / MySQL 양쪽에서 호환되는 표준 JPQL 함수 표현식이다.
+     * 0 건인 날짜는 결과에 포함되지 않으므로 Service 가 14일 시계열로 채워준다.</p>
+     *
+     * @param since 시작 시각 (inclusive)
+     * @return {@code [java.sql.Date, Long]} 형식 배열 리스트 (날짜 ASC)
+     */
+    @Query(
+            "SELECT FUNCTION('DATE', q.createdAt), COUNT(q) " +
+            "FROM Quiz q " +
+            "WHERE q.createdAt >= :since " +
+            "GROUP BY FUNCTION('DATE', q.createdAt) " +
+            "ORDER BY FUNCTION('DATE', q.createdAt) ASC"
+    )
+    List<Object[]> dailyCountSince(@Param("since") LocalDateTime since);
+
+    // ============================================================
+    // 자동 출제 스케줄러 — 2026-04-29 신규 (QuizPublishScheduler)
+    // ============================================================
+
+    /**
+     * 특정 상태 + quiz_date 조합의 퀴즈 존재 여부 — 멱등성 가드용.
+     *
+     * <p>매일 00:00 KST 배치가 같은 날짜의 PUBLISHED 퀴즈가 이미 있으면 추가 발행을
+     * 스킵하기 위해 사용한다. 같은 시각에 두 번 트리거되거나 운영자가 수동 발행한
+     * 후 배치가 도는 경우에도 중복 발행을 방지한다.</p>
+     *
+     * @param status   확인할 상태 (PUBLISHED 가정)
+     * @param quizDate 확인할 출제일 (오늘)
+     * @return 동일 (status, quiz_date) 조합 row 가 1건 이상 존재하면 true
+     */
+    boolean existsByStatusAndQuizDate(Quiz.QuizStatus status, LocalDate quizDate);
+
+    /**
+     * APPROVED + quiz_date IS NULL 퀴즈 중 가장 오래된 1건 조회 — 자동 발행 후보.
+     *
+     * <p>FIFO 원칙: 검수 통과한 후 가장 오래 대기 중인 퀴즈를 우선 노출한다.
+     * 후보가 없으면 {@link Optional#empty()} 반환 — 호출자가 warn 로그 처리.</p>
+     *
+     * <p>JPA 메서드 명명 규약을 사용해 별도 @Query 없이도 안전하게 LIMIT 1 처리된다.</p>
+     *
+     * @param status APPROVED 가정
+     * @return 자동 발행 후보 1건 (없으면 empty)
+     */
+    Optional<Quiz> findFirstByStatusAndQuizDateIsNullOrderByCreatedAtAsc(Quiz.QuizStatus status);
 }
