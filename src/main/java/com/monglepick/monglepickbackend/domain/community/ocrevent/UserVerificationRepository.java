@@ -14,6 +14,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface UserVerificationRepository extends JpaRepository<UserVerification, Long> {
 
     /**
+     * 특정 사용자의 OCR 실관람 인증 제출 수를 집계한다.
+     *
+     * <p>CSV/관리자 등록 업적 {@code ocr_*} 진행률 계산에 사용한다.</p>
+     *
+     * @param userId 사용자 ID
+     * @return 해당 사용자의 OCR 인증 제출 수
+     */
+    long countByUserId(String userId);
+
+    /**
      * 같은 사용자가 같은 이벤트에 이미 인증을 제출했는지 확인.
      *
      * <p>{@code event_id} 컬럼은 엔티티에서 String 으로 매핑되어 있으므로

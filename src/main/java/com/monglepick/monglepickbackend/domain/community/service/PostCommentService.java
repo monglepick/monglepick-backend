@@ -7,6 +7,7 @@ import com.monglepick.monglepickbackend.domain.community.entity.CommentLike;
 import com.monglepick.monglepickbackend.domain.community.entity.PostComment;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
@@ -45,6 +46,9 @@ public class PostCommentService {
 
     /** 활동 리워드 서비스 — COMMENT_CREATE 리워드 지급 위임 */
     private final RewardService rewardService;
+
+    /** 업적 서비스 — comment_count_* 업적 달성 체크 */
+    private final AchievementService achievementService;
 
     // ─────────────────────────────────────────────
     // 댓글 작성
@@ -94,6 +98,13 @@ public class PostCommentService {
                 request.content().length()
         );
         Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
+
+        // CSV/관리자 등록 기반 댓글 업적 — comment_count_* 계열
+        try {
+            achievementService.checkCommentAchievements(userId);
+        } catch (Exception e) {
+            log.warn("댓글 업적 체크 실패 (댓글 작성은 정상 처리): userId={}, error={}", userId, e.getMessage());
+        }
 
         /*
          * 응답 정합성 보강 — INSERT 후 nickname JOIN 으로 재조회.
