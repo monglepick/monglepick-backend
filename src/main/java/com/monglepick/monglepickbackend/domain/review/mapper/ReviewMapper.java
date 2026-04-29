@@ -223,6 +223,17 @@ public interface ReviewMapper {
             @Param("userId") String userId,
             @Param("since") LocalDateTime since);
 
+    /**
+     * 사용자가 리뷰를 작성한 영화들에서 중복 없는 장르 수를 집계한다 (genre_explorer 업적용).
+     *
+     * <p>movies.genres JSON 배열(예: ["액션","SF"])을 MySQL JSON_TABLE로 펼쳐
+     * DISTINCT 장르 개수를 반환한다. 소프트 삭제된 리뷰는 제외한다.</p>
+     *
+     * @param userId 사용자 ID
+     * @return 해당 사용자가 탐험한 고유 장르 수
+     */
+    long countDistinctExploredGenres(@Param("userId") String userId);
+
     // ═══ ReviewLike ═══
 
     /** ReviewLike 단건 조회 (없으면 null) */

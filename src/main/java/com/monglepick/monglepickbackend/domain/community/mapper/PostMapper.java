@@ -93,6 +93,11 @@ public interface PostMapper {
     long countByUserIdAndStatus(@Param("userId") String userId,
                                  @Param("status") String status);
 
+    /** 사용자 + 카테고리 + 상태별 총 건수 (업적/마이페이지 집계용) */
+    long countByUserIdAndCategoryAndStatus(@Param("userId") String userId,
+                                           @Param("category") String category,
+                                           @Param("status") String status);
+
     // ═══ Post 쓰기 ═══
 
     /** 게시글 등록 (INSERT) — useGeneratedKeys로 postId 자동 세팅 */

@@ -27,6 +27,16 @@ import java.util.Optional;
 public interface RecommendationLogRepository extends JpaRepository<RecommendationLog, Long> {
 
     /**
+     * 특정 사용자의 추천 로그 수를 집계한다.
+     *
+     * <p>CSV/관리자 등록 업적 {@code recommendation_*} 진행률 계산에 사용한다.</p>
+     *
+     * @param userId 사용자 ID
+     * @return 해당 사용자의 추천 로그 수
+     */
+    long countByUserId(String userId);
+
+    /**
      * 지정 시각 이후에 생성된 추천 로그 수를 집계한다.
      *
      * <p>관리자 통계에서 기간 내 총 추천 횟수(totalRecommendations)를 계산할 때 사용한다.</p>
