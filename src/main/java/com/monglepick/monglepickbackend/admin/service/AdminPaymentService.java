@@ -507,10 +507,18 @@ public class AdminPaymentService {
      *
      * <p>도메인 {@link SubscriptionService#extendSubscription(Long, String)}를 그대로 호출한다.</p>
      *
+     * <p><b>트랜잭션</b>: 클래스 레벨 {@code @Transactional(readOnly = true)} 를 쓰기로 오버라이드한다.
+     * 오버라이드 누락 시 inner {@code SubscriptionService#extendSubscription} 의 {@code @Transactional}
+     * 이 REQUIRED 로 외부 read-only 트랜잭션에 합류해버려서 {@code UserSubscription.renew()} 후
+     * 커밋이 readOnly 컨텍스트에서 거부되며 500 (서버 내부 오류) 가 발생한다 (2026-04-29 회귀).
+     * cancelSubscription/compensateOrder 와 동일한 패턴으로 메서드 레벨 {@code @Transactional} 을
+     * 명시한다.</p>
+     *
      * @param subscriptionId 연장할 구독 레코드 ID
      * @param request        연장 요청 DTO (adminNote nullable)
      * @return 연장 응답 DTO
      */
+    @Transactional
     public AdminExtendSubscriptionResponse extendSubscription(
             Long subscriptionId, AdminExtendSubscriptionRequest request
     ) {
