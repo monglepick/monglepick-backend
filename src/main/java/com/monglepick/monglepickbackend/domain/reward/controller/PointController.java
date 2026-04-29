@@ -274,10 +274,10 @@ public class PointController extends BaseController {
     @SecurityRequirement(name = "BearerAuth")
     @GetMapping("/ai-quota")
     public ResponseEntity<AiQuotaStatusResponse> getAiQuotaStatus(Principal principal) {
-        // JWT에서 userId 추출 — resolveUserIdWithServiceKey(principal, null) 로 JWT 전용 경로
-        // null 을 전달하면 ServiceKey 경로에서 "userId 필수" 예외를 던지므로,
-        // 순수 JWT 전용인 resolveUserId 헬퍼를 사용한다
-        String userId = resolveUserId(principal);
+        // ServiceKey 호출(고객센터 봇 진단)과 JWT 호출(클라이언트) 양쪽을 지원.
+        // BaseController 가 ServiceKey 경로에서 X-User-Id 헤더를 자동으로 읽어 식별하므로
+        // 별도 쿼리 파라미터 없이도 BOLA 안전하게 본인 데이터만 반환된다.
+        String userId = resolveUserIdWithServiceKey(principal, null);
         log.debug("GET /api/v1/point/ai-quota — userId={}", userId);
 
         // PointService.getBalance() 와 동일한 방식으로 등급 조회

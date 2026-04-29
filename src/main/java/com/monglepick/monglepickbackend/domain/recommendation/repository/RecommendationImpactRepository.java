@@ -112,4 +112,34 @@ public interface RecommendationImpactRepository extends JpaRepository<Recommenda
      * @return wishlisted = true 인 레코드 수
      */
     long countByWishlistedTrue();
+
+    // ══════════════════════════════════════════════
+    // AI 서비스 통계 V2 — 추천 펀넬 (2026-04-29)
+    // ══════════════════════════════════════════════
+
+    /**
+     * 추천 펀넬 5단계 집계 (기간 필터).
+     *
+     * <p>지정 기간 내 추천 임팩트의 단계별 전환 수를 한 번의 쿼리로 산출한다.
+     * 반환 배열: [recommended, clicked, viewedDetail, wishlisted, watched, rated]</p>
+     *
+     * @param start 시작 시각 (inclusive)
+     * @param end   종료 시각 (exclusive)
+     * @return 펀넬 단계별 카운트 배열 [총, 클릭, 상세, 위시, 시청, 평점]
+     */
+    @Query("""
+            SELECT
+                COUNT(ri),
+                SUM(CASE WHEN ri.clicked = true THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ri.detailViewed = true THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ri.wishlisted = true THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ri.watched = true THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ri.rated = true THEN 1 ELSE 0 END)
+            FROM RecommendationImpact ri
+            WHERE ri.createdAt >= :start AND ri.createdAt < :end
+            """)
+    Object[] aggregateFunnel(
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
 }

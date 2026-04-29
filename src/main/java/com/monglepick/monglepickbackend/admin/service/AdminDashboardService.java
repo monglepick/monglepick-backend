@@ -86,9 +86,9 @@ public class AdminDashboardService {
         // 1. 전체 회원 수 (탈퇴 회원 포함 — 관리자는 전수 파악 필요)
         long totalUsers = userMapper.count();
 
-        // 2. 오늘/어제 신규 가입 수
-        long newUsersToday     = userMapper.countByCreatedAtBetween(todayStart, todayEnd);
-        long newUsersYesterday = userMapper.countByCreatedAtBetween(yesterdayStart, todayStart);
+        // 2. 오늘/어제 신규 가입 수 (필드명: todayNewUsers / yesterdayNewUsers — 프론트와 정렬, 2026-04-29)
+        long todayNewUsers     = userMapper.countByCreatedAtBetween(todayStart, todayEnd);
+        long yesterdayNewUsers = userMapper.countByCreatedAtBetween(yesterdayStart, todayStart);
 
         // 3. 현재 활성 구독 수 (status = ACTIVE)
         long activeSubscriptions = userSubscriptionRepository.countByStatus(UserSubscription.Status.ACTIVE);
@@ -106,25 +106,25 @@ public class AdminDashboardService {
         long pendingReports = adminReportRepository.countByStatus("pending");
 
         // 6. 오늘 AI 채팅 요청 수 — chat_session_archive 의 created_at 기준 카운트
-        //    (Phase 4: 기존 하드코딩 0 제거. "오늘 신규 채팅 세션 수"를 의미한다.
-        //    더 정밀한 턴 기반 측정은 향후 EventLog 통합 시 보강.)
-        long todayChatRequests = adminChatSessionRepository
+        //    "오늘 신규 채팅 세션 수"를 의미. 매 턴 Backend `/session/save` fire-and-forget upsert 가 반영.
+        //    더 정밀한 턴 기반 측정은 향후 EventLog 통합 시 보강.
+        long todayAiChats = adminChatSessionRepository
                 .countByCreatedAtBetween(todayStart, todayEnd);
 
-        log.debug("[대시보드 KPI] totalUsers={}, newUsersToday={}, activeSubscriptions={}, "
-                        + "todayPayment={}원, pendingReports={}",
-                totalUsers, newUsersToday, activeSubscriptions,
-                todayPaymentAmount, pendingReports);
+        log.debug("[대시보드 KPI] totalUsers={}, todayNewUsers={}, activeSubscriptions={}, "
+                        + "todayPayment={}원, pendingReports={}, todayAiChats={}",
+                totalUsers, todayNewUsers, activeSubscriptions,
+                todayPaymentAmount, pendingReports, todayAiChats);
 
         return new DashboardDto.KpiResponse(
                 totalUsers,
-                newUsersToday,
-                newUsersYesterday,
+                todayNewUsers,
+                yesterdayNewUsers,
                 activeSubscriptions,
                 todayPaymentAmount,
                 yesterdayPaymentAmount,
                 pendingReports,
-                todayChatRequests
+                todayAiChats
         );
     }
 

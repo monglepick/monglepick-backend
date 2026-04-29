@@ -170,4 +170,123 @@ public interface RecommendationLogRepository extends JpaRepository<Recommendatio
     Optional<RecommendationLog> findByRecommendationLogIdAndUserId(
             @Param("recommendationLogId") Long recommendationLogId,
             @Param("userId") String userId);
+
+    // ══════════════════════════════════════════════
+    // AI 서비스 통계 V2 — 추천 엔진 KPI/추이/응답시간/모델비교 (2026-04-29)
+    // ══════════════════════════════════════════════
+
+    // 전체 추천 로그 수는 JpaRepository.count() 가 이미 제공 → 별도 메서드 선언 불필요.
+
+    /**
+     * 전체 클릭된 추천 로그 수 (CTR 분자 — 전체 기준).
+     *
+     * @return clicked=true 행 수
+     */
+    long countByClickedTrue();
+
+    /**
+     * source_type='EXTERNAL_DDGS' 인 추천 로그 수 (외부검색 비율).
+     *
+     * @return EXTERNAL_DDGS 비율 분자
+     */
+    long countBySourceType(String sourceType);
+
+    /**
+     * 전체 평균 추천 점수 (RecommendStat.avgScore).
+     *
+     * @return 평균 score (데이터 없으면 null)
+     */
+    @Query("SELECT AVG(r.score) FROM RecommendationLog r")
+    Double findAverageScore();
+
+    /**
+     * 지정 기간 내 추천 로그 수 (일별 추이/CTR 분모).
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 기간 내 추천 호출 수
+     */
+    @Query("""
+            SELECT COUNT(r) FROM RecommendationLog r
+            WHERE r.createdAt >= :start AND r.createdAt < :end
+            """)
+    long countByCreatedAtBetween(
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
+
+    /**
+     * 지정 기간 내 클릭 발생 추천 로그 수 (CTR 분자).
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 기간 내 클릭 수
+     */
+    @Query("""
+            SELECT COUNT(r) FROM RecommendationLog r
+            WHERE r.clicked = true AND r.createdAt >= :start AND r.createdAt < :end
+            """)
+    long countClickedByCreatedAtBetween(
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
+
+    /**
+     * 지정 기간 내 평균 응답시간 (Summary 카드용 — 최근 7일 권장).
+     *
+     * <p>response_time_ms 가 NULL 인 행은 자동 제외 (AVG 동작).</p>
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 평균 응답시간 ms (데이터 없으면 null)
+     */
+    @Query("""
+            SELECT AVG(r.responseTimeMs) FROM RecommendationLog r
+            WHERE r.responseTimeMs IS NOT NULL
+              AND r.createdAt >= :start AND r.createdAt < :end
+            """)
+    Double findAverageLatency(
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
+
+    /**
+     * 지정 기간 내 응답시간 raw 리스트 — Java 정렬로 p50/p95/p99 계산.
+     *
+     * <p>운영 규모 확대 시 SQL PERCENT_RANK() 또는 모니터링 시스템(Prometheus) 으로 이관.
+     * 1차 구현은 단순성/안정성 우선.</p>
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 응답시간 ms 리스트 (오름차순 아님 — 호출자가 정렬)
+     */
+    @Query("""
+            SELECT r.responseTimeMs FROM RecommendationLog r
+            WHERE r.responseTimeMs IS NOT NULL
+              AND r.createdAt >= :start AND r.createdAt < :end
+            """)
+    java.util.List<Integer> findLatenciesByCreatedAtBetween(
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
+
+    /**
+     * 모델 버전별 통계 — count, avg(score), avg(latency), CTR 분자/분모.
+     *
+     * <p>반환 row: [modelVersion, count, avgScore, avgLatency, clickedCount].
+     * NULL 모델 버전은 'unknown' 으로 묶지 않고 그대로 NULL 반환 (서비스 레이어에서 라벨링).</p>
+     *
+     * @return Object[] (modelVersion, count, avgScore, avgLatency, clickedCount) 리스트
+     */
+    @Query("""
+            SELECT r.modelVersion,
+                   COUNT(r),
+                   AVG(r.score),
+                   AVG(r.responseTimeMs),
+                   SUM(CASE WHEN r.clicked = true THEN 1 ELSE 0 END)
+            FROM RecommendationLog r
+            GROUP BY r.modelVersion
+            ORDER BY COUNT(r) DESC
+            """)
+    java.util.List<Object[]> aggregateByModelVersion();
 }
