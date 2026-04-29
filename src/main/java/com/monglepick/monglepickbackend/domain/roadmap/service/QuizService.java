@@ -3,6 +3,8 @@ package com.monglepick.monglepickbackend.domain.roadmap.service;
 // Jackson 3.x: com.fasterxml.jackson → tools.jackson 패키지 경로 변경 (Spring Boot 4.x)
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.MyHistoryItem;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.MyStatsResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.QuizResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitRequest;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitResponse;
@@ -15,6 +17,8 @@ import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -300,5 +304,115 @@ public class QuizService {
                     optionsJson, e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 사용자별 응시 통계 — 2026-04-29 신규
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * 특정 사용자의 퀴즈 응시 통계를 조회한다.
+     *
+     * <p>{@link QuizParticipationRepository#aggregateMyStats} 단일 쿼리로
+     * 총응시/정답수/총획득포인트/마지막응시시각 4개를 집계한다.</p>
+     *
+     * <h4>NaN 방지</h4>
+     * <p>응시 0건일 때 정답률은 0/0 NaN 이 되지 않도록 명시적으로 0.0 반환.</p>
+     *
+     * <h4>누적 포인트의 의미</h4>
+     * <p>quiz.rewardPoint 의 단순 합. 같은 퀴즈 재제출은 UNIQUE(quiz_id, user_id) 제약으로
+     * 같은 row 가 UPDATE 되므로 두 번 카운트되지 않는다. 다만 "최초 정답만 지급" 정책
+     * (QuizService.submitAnswer)과 미세하게 의미가 다를 수 있어, 이 값은 "정답 처리된
+     * 퀴즈들의 reward 합" 으로 이해하는 것이 정확하다.</p>
+     *
+     * @param userId 통계 대상 사용자 ID (JWT 에서 추출)
+     * @return 응시 통계 응답 DTO
+     */
+    public MyStatsResponse getMyStats(String userId) {
+        log.debug("내 퀴즈 응시 통계 조회: userId={}", userId);
+
+        Object[] row = participationRepository.aggregateMyStats(userId);
+
+        // JPA 가 SUM/COUNT 결과를 Number 로 반환 — 안전하게 long 으로 변환.
+        // 응시 0건일 때 row 자체는 null 이 아니지만 SUM 결과는 null 일 수 있으므로 nullSafe 처리.
+        long totalAttempts = nullSafeLong(row != null ? row[0] : null);
+        long correctCount = nullSafeLong(row != null ? row[1] : null);
+        long totalEarnedPoints = nullSafeLong(row != null ? row[2] : null);
+
+        // 마지막 응시 시각 — submittedAt MAX. 미응시면 null.
+        java.time.LocalDateTime lastAt = null;
+        if (row != null && row[3] instanceof java.time.LocalDateTime ldt) {
+            lastAt = ldt;
+        }
+
+        // 정답률 계산 — 모수 0 일 때 0.0 fallback (NaN 방지).
+        double accuracyRate = totalAttempts == 0
+                ? 0.0
+                : (double) correctCount / (double) totalAttempts;
+
+        return new MyStatsResponse(
+                totalAttempts,
+                correctCount,
+                accuracyRate,
+                totalEarnedPoints,
+                lastAt
+        );
+    }
+
+    /**
+     * SUM/COUNT 결과의 null/Number 다형성 흡수 — Hibernate 가 환경에 따라
+     * Long/Integer/BigInteger 등으로 반환할 수 있으므로 모두 long 으로 정규화.
+     */
+    private long nullSafeLong(Object value) {
+        if (value == null) return 0L;
+        if (value instanceof Number n) return n.longValue();
+        return 0L;
+    }
+
+    /**
+     * 사용자별 응시 이력 페이지 조회 — 2026-04-29 신규.
+     *
+     * <p>{@link QuizParticipationRepository#findMyHistory} 가 JOIN FETCH 로 Quiz 까지
+     * 한 번의 쿼리에 로드하므로 변환 단계에서는 추가 lazy 호출이 발생하지 않는다.</p>
+     *
+     * <h4>응답 변환</h4>
+     * <ul>
+     *   <li>{@code Quiz.options} JSON 문자열 → {@code List<String>} 파싱 (실패 시 빈 리스트)</li>
+     *   <li>본인 row 만 노출되므로 {@code correctAnswer} / {@code explanation} 동봉 안전</li>
+     * </ul>
+     *
+     * @param userId   조회 대상 사용자 ID (JWT 추출값)
+     * @param pageable 페이지 정보 (sort 는 무시 — Repository 에서 submittedAt DESC 고정)
+     * @return Page&lt;MyHistoryItem&gt; — 응시 이력 페이지
+     */
+    public Page<MyHistoryItem> getMyHistory(String userId, Pageable pageable) {
+        log.debug("내 퀴즈 응시 이력 조회: userId={}, page={}, size={}",
+                userId, pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<QuizParticipation> page = participationRepository.findMyHistory(userId, pageable);
+
+        return page.map(this::toMyHistoryItem);
+    }
+
+    /**
+     * QuizParticipation → MyHistoryItem 변환 헬퍼.
+     *
+     * <p>Quiz 는 JOIN FETCH 로 이미 영속성 컨텍스트에 로드되어 있어 lazy 로 인한 N+1 발생 없음.
+     * options JSON 파싱은 기존 {@link #parseOptions} 재사용.</p>
+     */
+    private MyHistoryItem toMyHistoryItem(QuizParticipation p) {
+        Quiz q = p.getQuiz();
+        return new MyHistoryItem(
+                q.getQuizId(),
+                q.getMovieId(),
+                q.getQuestion(),
+                parseOptions(q.getOptions()),
+                p.getSelectedOption(),
+                q.getCorrectAnswer(),
+                p.getIsCorrect(),
+                q.getExplanation(),
+                q.getRewardPoint(),
+                p.getSubmittedAt()
+        );
     }
 }

@@ -1,9 +1,11 @@
 package com.monglepick.monglepickbackend.admin.controller;
 
+import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.PublishNowResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.QuizDetailResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.UpdateQuizRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.UpdateStatusRequest;
 import com.monglepick.monglepickbackend.admin.service.AdminQuizService;
+import com.monglepick.monglepickbackend.domain.roadmap.scheduler.QuizPublishScheduler;
 import com.monglepick.monglepickbackend.global.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -34,6 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>PUT    /api/v1/admin/quizzes/{id}        — 퀴즈 본문/메타 수정 (상태 제외)</li>
  *   <li>PATCH  /api/v1/admin/quizzes/{id}/status — 퀴즈 상태 전이</li>
  *   <li>DELETE /api/v1/admin/quizzes/{id}        — 퀴즈 삭제 (PENDING/REJECTED만)</li>
+ *   <li>POST   /api/v1/admin/quizzes/publish-now — 오늘 퀴즈 강제 발행 (스케줄러 수동 트리거, 2026-04-29)</li>
  * </ul>
  *
  * <h3>인증</h3>
@@ -48,6 +52,12 @@ public class AdminQuizController {
 
     /** 관리자 퀴즈 관리 서비스 (수정/상태전이/삭제) */
     private final AdminQuizService adminQuizService;
+
+    /**
+     * 퀴즈 자동 출제 스케줄러 — 운영자 수동 발행 hook.
+     * 매일 00:00 KST 자동 실행 외에, "강제 발행" 버튼이 호출하여 즉시 1건 발행한다.
+     */
+    private final QuizPublishScheduler quizPublishScheduler;
 
     /**
      * 퀴즈 단건 조회.
@@ -125,5 +135,51 @@ public class AdminQuizController {
         log.info("[관리자] 퀴즈 삭제 요청 — quizId={}", id);
         adminQuizService.deleteQuiz(id);
         return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+    }
+
+    /**
+     * 오늘 퀴즈 강제 발행 — 2026-04-29 신규.
+     *
+     * <p>{@link QuizPublishScheduler#manualPublish()} 를 호출하여 즉시 1건을 발행한다.
+     * 매일 00:00 KST 의 자동 발행 외에, 운영자가 검수를 마친 직후 즉시 노출하고 싶을 때 사용.</p>
+     *
+     * <h4>동작</h4>
+     * <ul>
+     *   <li>같은 날짜 PUBLISHED 가 이미 있으면 published=0 + 안내 메시지 (HTTP 200, 멱등)</li>
+     *   <li>APPROVED 후보가 0건이면 published=0 + 안내 메시지 (검수 적체 신호)</li>
+     *   <li>정상 발행 시 published=1 + 성공 메시지</li>
+     * </ul>
+     *
+     * <h4>응답 형태</h4>
+     * <pre>
+     * { "published": 1, "message": "오늘 퀴즈 1건이 발행되었습니다." }
+     * </pre>
+     *
+     * <p>모든 케이스를 200 으로 반환하여 UI 가 토스트로 안내할 수 있게 한다 (404/409 미사용).
+     * 권한: ADMIN.</p>
+     *
+     * @return 200 OK + {@link PublishNowResponse} (published 0 또는 1)
+     */
+    @Operation(
+            summary = "오늘 퀴즈 강제 발행",
+            description = "QuizPublishScheduler.manualPublish() 를 호출하여 APPROVED 1건을 즉시 발행한다. " +
+                    "이미 발행됐거나 후보 0건인 경우에도 200 + published=0 + 안내 메시지로 반환."
+    )
+    @PostMapping("/publish-now")
+    public ResponseEntity<ApiResponse<PublishNowResponse>> publishNow() {
+        log.info("[관리자] 오늘 퀴즈 강제 발행 요청");
+        // 스케줄러의 manualPublish 는 같은 멱등 + FIFO 정책을 사용한다.
+        int published = quizPublishScheduler.manualPublish();
+
+        // UI 토스트에 노출할 한국어 안내 메시지 — published 결과에 따라 분기.
+        String message;
+        if (published == 1) {
+            message = "오늘 퀴즈 1건이 발행되었습니다.";
+        } else {
+            // 0 — 이미 발행됐거나 APPROVED 후보 없음. 운영자가 검수 적체를 확인하도록 안내.
+            message = "오늘 발행할 퀴즈가 없거나, 이미 오늘 출제가 완료되었습니다.";
+        }
+
+        return ResponseEntity.ok(ApiResponse.ok(new PublishNowResponse(published, message)));
     }
 }

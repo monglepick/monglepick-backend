@@ -1,5 +1,7 @@
 package com.monglepick.monglepickbackend.domain.roadmap.service;
 
+import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.MyHistoryItem;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.MyStatsResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.QuizResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitRequest;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitResponse;
@@ -416,6 +418,187 @@ class QuizServiceTest {
             //    (응답 DTO 는 정답 + alreadyCorrect=false 만으로 결정 — 실제 지급 실패는 warn 로그)
             assertThat(res.correct()).isTrue();
             assertThat(res.rewardPoint()).isEqualTo(10);
+        }
+    }
+
+    // ============================================================
+    // 11) getMyStats — 사용자별 응시 통계 (2026-04-29 신규)
+    // ============================================================
+
+    @Nested
+    @DisplayName("getMyStats — 사용자별 응시 통계")
+    class MyStatsTest {
+
+        @Test
+        @DisplayName("정상 응시 — 정답률 / 누적 포인트 / 마지막 응시 시각이 정확히 매핑된다")
+        void aggregatesNormalCase() {
+            // given — Repository 가 [총응시 10, 정답 7, 누적포인트 70, 마지막시각] 반환
+            java.time.LocalDateTime lastAt = java.time.LocalDateTime.of(2026, 4, 29, 12, 30);
+            when(participationRepository.aggregateMyStats("u-stat-1"))
+                    .thenReturn(new Object[]{10L, 7L, 70L, lastAt});
+
+            // when
+            MyStatsResponse res = quizService.getMyStats("u-stat-1");
+
+            // then
+            assertThat(res.totalAttempts()).isEqualTo(10L);
+            assertThat(res.correctCount()).isEqualTo(7L);
+            assertThat(res.totalEarnedPoints()).isEqualTo(70L);
+            assertThat(res.accuracyRate()).isEqualTo(0.7);
+            assertThat(res.lastAttemptedAt()).isEqualTo(lastAt);
+        }
+
+        @Test
+        @DisplayName("응시 0건 — 정답률 0.0 (NaN 방지) + lastAttemptedAt=null")
+        void emptyAttemptsReturnsZero() {
+            // given — SUM 이 null 인 환경 (응시 0건)
+            when(participationRepository.aggregateMyStats("u-stat-2"))
+                    .thenReturn(new Object[]{0L, null, null, null});
+
+            // when
+            MyStatsResponse res = quizService.getMyStats("u-stat-2");
+
+            // then — 모두 0 + 정답률 0.0 (NaN 아님) + lastAt null
+            assertThat(res.totalAttempts()).isEqualTo(0L);
+            assertThat(res.correctCount()).isEqualTo(0L);
+            assertThat(res.totalEarnedPoints()).isEqualTo(0L);
+            assertThat(res.accuracyRate()).isEqualTo(0.0);
+            assertThat(Double.isNaN(res.accuracyRate())).isFalse();
+            assertThat(res.lastAttemptedAt()).isNull();
+        }
+
+        @Test
+        @DisplayName("Number 다형성 — Integer/BigInteger 도 안전하게 long 으로 변환")
+        void handlesNumberPolymorphism() {
+            // given — Hibernate 가 환경에 따라 Integer 로 반환할 수도 있음
+            when(participationRepository.aggregateMyStats("u-stat-3"))
+                    .thenReturn(new Object[]{Integer.valueOf(5), Integer.valueOf(3),
+                            Integer.valueOf(30), null});
+
+            MyStatsResponse res = quizService.getMyStats("u-stat-3");
+
+            assertThat(res.totalAttempts()).isEqualTo(5L);
+            assertThat(res.correctCount()).isEqualTo(3L);
+            assertThat(res.totalEarnedPoints()).isEqualTo(30L);
+            assertThat(res.accuracyRate()).isEqualTo(0.6);
+        }
+    }
+
+    // ============================================================
+    // 12) getMyHistory — 사용자별 응시 이력 페이징 (2026-04-29 신규)
+    // ============================================================
+
+    @Nested
+    @DisplayName("getMyHistory — 사용자별 응시 이력 페이징")
+    class MyHistoryTest {
+
+        @Test
+        @DisplayName("정상 페이지 — Quiz JOIN FETCH 결과를 MyHistoryItem 으로 변환")
+        void returnsHistoryPage() {
+            // given — Quiz + Participation 2건이 페이지로 반환됨
+            Quiz q1 = buildPublishedQuiz(101L, "정답A");
+            Quiz q2 = buildPublishedQuiz(102L, "정답B");
+
+            QuizParticipation p1 = QuizParticipation.builder()
+                    .quizParticipationId(1L)
+                    .quiz(q1)
+                    .userId("u-hist-1")
+                    .selectedOption("정답A")
+                    .isCorrect(true)
+                    .submittedAt(java.time.LocalDateTime.of(2026, 4, 29, 12, 0))
+                    .build();
+
+            QuizParticipation p2 = QuizParticipation.builder()
+                    .quizParticipationId(2L)
+                    .quiz(q2)
+                    .userId("u-hist-1")
+                    .selectedOption("틀린답")
+                    .isCorrect(false)
+                    .submittedAt(java.time.LocalDateTime.of(2026, 4, 29, 11, 0))
+                    .build();
+
+            org.springframework.data.domain.Pageable pageable =
+                    org.springframework.data.domain.PageRequest.of(0, 10);
+            org.springframework.data.domain.Page<QuizParticipation> page =
+                    new org.springframework.data.domain.PageImpl<>(
+                            java.util.List.of(p1, p2), pageable, 2);
+
+            when(participationRepository.findMyHistory("u-hist-1", pageable))
+                    .thenReturn(page);
+
+            // when
+            org.springframework.data.domain.Page<MyHistoryItem> result =
+                    quizService.getMyHistory("u-hist-1", pageable);
+
+            // then
+            assertThat(result.getTotalElements()).isEqualTo(2);
+            assertThat(result.getContent()).hasSize(2);
+            MyHistoryItem first = result.getContent().get(0);
+            assertThat(first.quizId()).isEqualTo(101L);
+            assertThat(first.selectedOption()).isEqualTo("정답A");
+            assertThat(first.correctAnswer()).isEqualTo("정답A");
+            assertThat(first.isCorrect()).isTrue();
+            assertThat(first.options()).containsExactly("A", "B", "C", "D");
+            assertThat(first.explanation()).isEqualTo("해설입니다.");
+            assertThat(first.rewardPoint()).isEqualTo(10);
+
+            MyHistoryItem second = result.getContent().get(1);
+            assertThat(second.isCorrect()).isFalse();
+            assertThat(second.selectedOption()).isEqualTo("틀린답");
+        }
+
+        @Test
+        @DisplayName("빈 결과 — 응시 0건 사용자에게는 빈 페이지 반환")
+        void returnsEmptyPage() {
+            org.springframework.data.domain.Pageable pageable =
+                    org.springframework.data.domain.PageRequest.of(0, 10);
+            org.springframework.data.domain.Page<QuizParticipation> empty =
+                    new org.springframework.data.domain.PageImpl<>(
+                            java.util.List.of(), pageable, 0);
+
+            when(participationRepository.findMyHistory("u-empty", pageable)).thenReturn(empty);
+
+            org.springframework.data.domain.Page<MyHistoryItem> result =
+                    quizService.getMyHistory("u-empty", pageable);
+
+            assertThat(result.getTotalElements()).isEqualTo(0);
+            assertThat(result.getContent()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("options JSON 깨짐 — 빈 리스트 fallback (warn 로그만)")
+        void brokenOptionsJsonFallsBackToEmpty() {
+            // given — options 가 깨진 JSON 인 Quiz
+            Quiz broken = Quiz.builder()
+                    .quizId(999L)
+                    .movieId("m")
+                    .question("q")
+                    .correctAnswer("a")
+                    .options("not-a-json")  // 깨진 JSON
+                    .rewardPoint(10)
+                    .status(Quiz.QuizStatus.PUBLISHED)
+                    .build();
+            QuizParticipation p = QuizParticipation.builder()
+                    .quizParticipationId(99L)
+                    .quiz(broken)
+                    .userId("u-broken")
+                    .selectedOption("x")
+                    .isCorrect(false)
+                    .submittedAt(java.time.LocalDateTime.now())
+                    .build();
+
+            org.springframework.data.domain.Pageable pageable =
+                    org.springframework.data.domain.PageRequest.of(0, 10);
+            when(participationRepository.findMyHistory("u-broken", pageable))
+                    .thenReturn(new org.springframework.data.domain.PageImpl<>(
+                            java.util.List.of(p), pageable, 1));
+
+            org.springframework.data.domain.Page<MyHistoryItem> result =
+                    quizService.getMyHistory("u-broken", pageable);
+
+            // 변환은 성공하고 options 만 빈 리스트로 fallback
+            assertThat(result.getContent()).hasSize(1);
+            assertThat(result.getContent().get(0).options()).isEmpty();
         }
     }
 }

@@ -103,4 +103,19 @@ public class AdminQuizDto {
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {}
+
+    /**
+     * 오늘 퀴즈 강제 발행 응답 DTO — 2026-04-29 신규.
+     *
+     * <p>POST /api/v1/admin/quizzes/publish-now 응답.
+     * 이미 발행됐거나 후보 0건인 경우에도 HTTP 200 + published=0 으로 반환하여
+     * UI 가 일관된 토스트 패턴으로 안내한다.</p>
+     *
+     * @param published 이번 호출로 발행된 건수 (0 또는 1)
+     * @param message   UI 토스트에 노출할 한국어 안내 메시지
+     */
+    public record PublishNowResponse(
+            int published,
+            String message
+    ) {}
 }

@@ -1,5 +1,7 @@
 package com.monglepick.monglepickbackend.domain.roadmap.controller;
 
+import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.MyHistoryItem;
+import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.MyStatsResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.QuizResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitRequest;
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitResponse;
@@ -14,6 +16,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +38,8 @@ import java.util.List;
  *   <li>GET  /api/v1/quizzes/movie/{movieId} — 영화별 PUBLISHED 퀴즈 목록 (공개)</li>
  *   <li>GET  /api/v1/quizzes/today           — 오늘 날짜 PUBLISHED 퀴즈 목록 (공개)</li>
  *   <li>POST /api/v1/quizzes/{quizId}/submit — 정답 제출 및 채점 (JWT 필수)</li>
+ *   <li>GET  /api/v1/quizzes/me/stats        — 사용자별 응시 통계 (JWT 필수, 2026-04-29)</li>
+ *   <li>GET  /api/v1/quizzes/me/history      — 사용자별 응시 이력 페이징 (JWT 필수, 2026-04-29)</li>
  * </ul>
  *
  * <h3>인증 정책</h3>
@@ -178,6 +185,90 @@ public class QuizController extends BaseController {
         log.info("퀴즈 정답 제출: userId={}, quizId={}", userId, quizId);
 
         SubmitResponse response = quizService.submitAnswer(userId, quizId, request);
+        return ResponseEntity.ok(response);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 내 응시 통계 (2026-04-29 신규)
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * 로그인 사용자 본인의 퀴즈 응시 통계를 조회한다.
+     *
+     * <p>QuizPage 상단의 "내 응시 현황" 카드가 호출하는 단일 EP. 4 KPI 박스
+     * (총응시·정답률·획득포인트·마지막응시일) 를 한 번의 요청으로 채울 수 있도록
+     * Service 레이어에서 단일 쿼리로 집계 후 정답률은 NaN 안전하게 계산해 반환한다.</p>
+     *
+     * <h4>응답 필드 설명</h4>
+     * <ul>
+     *   <li>{@code totalAttempts}      — 총 응시 횟수 (재제출은 1회로 카운트)</li>
+     *   <li>{@code correctCount}       — 정답 처리된 응시 수</li>
+     *   <li>{@code accuracyRate}       — 정답률 [0.0~1.0], 응시 0건이면 0.0</li>
+     *   <li>{@code totalEarnedPoints}  — 정답 quiz.rewardPoint 의 누적 합</li>
+     *   <li>{@code lastAttemptedAt}    — 마지막 응시 시각 (없으면 null)</li>
+     * </ul>
+     *
+     * @param principal JWT 인증 정보 (필수)
+     * @return 200 OK — 응시 통계 DTO
+     * @apiNote 401 Unauthorized: 미인증 사용자
+     */
+    @Operation(
+            summary = "내 퀴즈 응시 통계",
+            description = "로그인 사용자 본인의 응시 횟수·정답률·획득 포인트·마지막 응시 시각을 반환합니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "응시 통계 조회 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요 — JWT 토큰 없음")
+    })
+    @GetMapping("/me/stats")
+    public ResponseEntity<MyStatsResponse> getMyStats(Principal principal) {
+        /* JWT 에서 userId 추출 — 미인증 시 BusinessException(UNAUTHORIZED) 발생 */
+        String userId = resolveUserId(principal);
+
+        log.debug("내 퀴즈 응시 통계 요청: userId={}", userId);
+
+        MyStatsResponse response = quizService.getMyStats(userId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 로그인 사용자 본인의 퀴즈 응시 이력을 페이징으로 조회한다.
+     *
+     * <p>QuizPage 의 "내 응시 이력" 리스트가 호출. 정렬은 Repository 에서
+     * {@code submittedAt DESC} 로 고정되어 있어 가장 최근 응시가 먼저 나온다.</p>
+     *
+     * <h4>응답 row</h4>
+     * <p>{@link MyHistoryItem} — quizId/movieId/question/options/selectedOption/correctAnswer/
+     * isCorrect/explanation/rewardPoint/submittedAt. 본인 row 만 노출되므로 정답·해설 동봉 안전.</p>
+     *
+     * @param principal JWT 인증 정보 (필수)
+     * @param pageable  페이지 정보 (기본 size=10, 최대 50)
+     * @return 200 OK — 응시 이력 Page
+     * @apiNote 401 Unauthorized: 미인증 사용자
+     */
+    @Operation(
+            summary = "내 퀴즈 응시 이력",
+            description = "로그인 사용자 본인의 응시 이력을 submittedAt DESC 로 페이징 반환합니다. " +
+                    "본인 응시이므로 정답/해설을 동봉합니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "응시 이력 조회 성공 (없으면 빈 페이지)"),
+            @ApiResponse(responseCode = "401", description = "인증 필요 — JWT 토큰 없음")
+    })
+    @GetMapping("/me/history")
+    public ResponseEntity<Page<MyHistoryItem>> getMyHistory(
+            Principal principal,
+            @PageableDefault(size = 10) Pageable pageable
+    ) {
+        /* JWT 에서 userId 추출 — 미인증 시 BusinessException(UNAUTHORIZED) 발생 */
+        String userId = resolveUserId(principal);
+
+        log.debug("내 퀴즈 응시 이력 요청: userId={}, page={}, size={}",
+                userId, pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<MyHistoryItem> response = quizService.getMyHistory(userId, pageable);
         return ResponseEntity.ok(response);
     }
 }

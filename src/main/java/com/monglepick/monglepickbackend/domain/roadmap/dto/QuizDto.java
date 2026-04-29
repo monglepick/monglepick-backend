@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.entity.Quiz;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -111,5 +112,69 @@ public class QuizDto {
             boolean correct,
             String explanation,
             int rewardPoint
+    ) {}
+
+    /**
+     * 사용자별 퀴즈 응시 통계 응답 DTO — 2026-04-29 신규.
+     *
+     * <p>{@code GET /api/v1/quizzes/me/stats} 응답.
+     * QuizPage 상단 "내 응시 현황" 카드가 4 KPI 박스로 렌더한다.</p>
+     *
+     * <h4>필드</h4>
+     * <ul>
+     *   <li>{@code totalAttempts}      — 총 응시 횟수 (재제출은 1회로 카운트, UNIQUE 제약 덕)</li>
+     *   <li>{@code correctCount}       — 정답 처리된 응시 수</li>
+     *   <li>{@code accuracyRate}       — 정답률 [0.0~1.0], 모수 0 시 0.0 (NaN 방지)</li>
+     *   <li>{@code totalEarnedPoints}  — 정답으로 획득한 누적 포인트 (quiz.rewardPoint 합)</li>
+     *   <li>{@code lastAttemptedAt}    — 마지막 응시 시각 (없으면 null)</li>
+     * </ul>
+     *
+     * @param totalAttempts     총 응시 횟수
+     * @param correctCount      정답 수
+     * @param accuracyRate      정답률 (0.0~1.0)
+     * @param totalEarnedPoints 누적 획득 포인트
+     * @param lastAttemptedAt   마지막 응시 시각 (nullable)
+     */
+    public record MyStatsResponse(
+            long totalAttempts,
+            long correctCount,
+            double accuracyRate,
+            long totalEarnedPoints,
+            LocalDateTime lastAttemptedAt
+    ) {}
+
+    /**
+     * 응시 이력 페이지 1건 응답 DTO — 2026-04-29 신규.
+     *
+     * <p>{@code GET /api/v1/quizzes/me/history} 응답의 각 row.
+     * {@code MyQuizHistoryList} 컴포넌트가 정답/오답 색상 + 해설로 렌더한다.</p>
+     *
+     * <h4>보안 결정</h4>
+     * <p>응시 이력은 본인 row 만 노출하므로 {@code correctAnswer} 와 {@code explanation} 을
+     * 응답에 포함해도 안전하다 (이미 본인은 답을 알고 있는 상태). 이를 통해 클라이언트는
+     * 별도 EP 호출 없이 "내가 무엇을 골랐고 정답은 무엇이었는지" 즉시 표시할 수 있다.</p>
+     *
+     * @param quizId         퀴즈 고유 ID
+     * @param movieId        대상 영화 ID (nullable)
+     * @param question       퀴즈 문제 본문
+     * @param options        선택지 배열
+     * @param selectedOption 사용자가 선택한 답
+     * @param correctAnswer  정답
+     * @param isCorrect      정답 여부
+     * @param explanation    해설 (nullable)
+     * @param rewardPoint    퀴즈 보상 포인트 (응시 시점 quiz.rewardPoint)
+     * @param submittedAt    제출 시각
+     */
+    public record MyHistoryItem(
+            Long quizId,
+            String movieId,
+            String question,
+            List<String> options,
+            String selectedOption,
+            String correctAnswer,
+            Boolean isCorrect,
+            String explanation,
+            Integer rewardPoint,
+            LocalDateTime submittedAt
     ) {}
 }
