@@ -27,6 +27,8 @@ import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStat
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserAchievementRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizAttemptRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipationRepository;
+import com.monglepick.monglepickbackend.domain.support.repository.SupportChatLogRepository;
 import com.monglepick.monglepickbackend.domain.search.entity.PopularSearchKeyword;
 import com.monglepick.monglepickbackend.domain.search.entity.SearchHistory;
 import com.monglepick.monglepickbackend.domain.search.repository.PopularSearchKeywordRepository;
@@ -51,6 +53,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.IsoFields;
 import java.util.ArrayList;
@@ -152,6 +155,12 @@ public class AdminStatsService {
     private final UserAchievementRepository userAchievementRepository;
     /* 퀴즈 시도 — quiz_attempts 테이블 집계 */
     private final QuizAttemptRepository quizAttemptRepository;
+
+    /* ── AI 서비스 통계 V2 (2026-04-29) ── */
+    /* 퀴즈 참여 — quiz_participations 테이블 집계 (정답률·일별 응시 추이) */
+    private final QuizParticipationRepository quizParticipationRepository;
+    /* 고객센터 챗봇 로그 — support_chat_log 테이블 집계 (자동화율·의도 분포·hop) */
+    private final SupportChatLogRepository supportChatLogRepository;
 
     /* Phase 4: Mock 제거 — Movie.genres / UserBehaviorProfile.genreAffinity JSON 파싱 */
     private static final ObjectMapper STATS_OBJECT_MAPPER = new ObjectMapper();
@@ -1635,6 +1644,499 @@ public class AdminStatsService {
         log.debug("[admin-stats] AI 쿼터 — 사용자={}, 평균일일={}, 평균월간={}, 이용권={}, 소진={}",
                 totalQuotaUsers, avgDaily, avgMonthly, totalTokens, exhausted);
         return new AiQuotaStatsResponse(totalQuotaUsers, avgDaily, avgMonthly, totalTokens, exhausted);
+    }
+
+    // ──────────────────────────────────────────────
+    // 10-V2. AI 서비스 분석 — 전면 재설계 (2026-04-29)
+    //
+    // 운영자가 (a) 한눈에 오늘 AI 호출 건강도를 파악하고,
+    // (b) 4개 에이전트(챗·추천·고객센터·퀴즈) 를 분리해서 보고,
+    // (c) 응답 성능·CTR·자동화율 같은 비즈니스 지표를 즉시 얻기 위한 9개 신규 메서드.
+    //
+    // - 모든 시각 계산은 KST(Asia/Seoul) 기준 LocalDate 사용 → 서버 TZ 의존성 제거.
+    // - 발생량 통계(소프트 삭제 무시)는 신규 countAllSessions / sumAllTurns 메서드 사용.
+    // - 등급별 차등 쿼터는 native 쿼리 aggregateQuotaByGrade / countExhaustedUsersByGrade 사용.
+    // ──────────────────────────────────────────────
+
+    /** AI 서비스 통계 KST 시간대 — LocalDate.now(KST) 일관성 보장 (서버 TZ 무관). */
+    private static final ZoneId AI_STATS_ZONE = ZoneId.of("Asia/Seoul");
+
+    /**
+     * AI 서비스 요약 KPI — "오늘 한눈에" 4개 핵심 지표.
+     *
+     * <p>화면 상단 카드 4개에 직결되는 KPI. 운영자가 오늘의 AI 호출 건강도를 즉시 파악한다.
+     * 4 에이전트 합산 호출 + 전일 대비 + 평균 응답시간(7d) + CTR(30d) + 자동화율(30d).</p>
+     *
+     * @return AI 요약 응답 (todayCalls, dayOverDayPct, avgLatencyMs, recommendCtr, supportAutomationRate, activeUsers)
+     */
+    public AiSummaryResponse getAiSummary() {
+        LocalDate today = LocalDate.now(AI_STATS_ZONE);
+        LocalDateTime todayStart = today.atStartOfDay();
+        LocalDateTime tomorrowStart = today.plusDays(1).atStartOfDay();
+        LocalDateTime yesterdayStart = today.minusDays(1).atStartOfDay();
+
+        /* 오늘 4 에이전트 합산 호출량 */
+        long chatTurnsToday = adminChatSessionRepository.sumTurnsByCreatedAtBetween(todayStart, tomorrowStart);
+        long recommendToday = recommendationLogRepository.countByCreatedAtBetween(todayStart, tomorrowStart);
+        long supportToday = supportChatLogRepository.countByCreatedAtBetween(todayStart, tomorrowStart);
+        long quizToday = quizParticipationRepository.countBySubmittedAtBetween(todayStart, tomorrowStart);
+        long todayCalls = chatTurnsToday + recommendToday + supportToday + quizToday;
+
+        /* 어제 4 에이전트 합산 — 전일 대비 비교 */
+        long chatTurnsYday = adminChatSessionRepository.sumTurnsByCreatedAtBetween(yesterdayStart, todayStart);
+        long recommendYday = recommendationLogRepository.countByCreatedAtBetween(yesterdayStart, todayStart);
+        long supportYday = supportChatLogRepository.countByCreatedAtBetween(yesterdayStart, todayStart);
+        long quizYday = quizParticipationRepository.countBySubmittedAtBetween(yesterdayStart, todayStart);
+        long yesterdayCalls = chatTurnsYday + recommendYday + supportYday + quizYday;
+
+        /* 전일 대비 % — 어제 0 이면 0% (직접 비교 불가) */
+        double dayOverDayPct = yesterdayCalls > 0
+                ? Math.round((double) (todayCalls - yesterdayCalls) / yesterdayCalls * 1000.0) / 10.0
+                : 0.0;
+
+        /* 추천 엔진 평균 응답시간 — 최근 7일 (NULL 제외 평균) */
+        LocalDateTime sevenDaysAgo = todayStart.minusDays(7);
+        Double avgLatency = recommendationLogRepository.findAverageLatency(sevenDaysAgo, tomorrowStart);
+        double avgLatencyMs = avgLatency != null ? Math.round(avgLatency * 10.0) / 10.0 : 0.0;
+
+        /* 추천 CTR — 최근 30일 (clicked / total * 100) */
+        LocalDateTime thirtyDaysAgo = todayStart.minusDays(30);
+        long recommend30d = recommendationLogRepository.countByCreatedAtBetween(thirtyDaysAgo, tomorrowStart);
+        long clicked30d = recommendationLogRepository.countClickedByCreatedAtBetween(thirtyDaysAgo, tomorrowStart);
+        double recommendCtr = recommend30d > 0
+                ? Math.round((double) clicked30d / recommend30d * 1000.0) / 10.0
+                : 0.0;
+
+        /* 고객센터 자동화율 — 최근 30일 (1 - needs_human 비율) */
+        Object[] needsHumanRow = supportChatLogRepository.needsHumanRatio(thirtyDaysAgo, tomorrowStart);
+        long supportNeedsHuman = needsHumanRow != null && needsHumanRow.length >= 1 && needsHumanRow[0] != null
+                ? ((Number) needsHumanRow[0]).longValue() : 0L;
+        long supportTotal = needsHumanRow != null && needsHumanRow.length >= 2 && needsHumanRow[1] != null
+                ? ((Number) needsHumanRow[1]).longValue() : 0L;
+        double supportAutomationRate = supportTotal > 0
+                ? Math.round((1.0 - (double) supportNeedsHuman / supportTotal) * 1000.0) / 10.0
+                : 0.0;
+
+        /* 오늘 활성 사용자 — 채팅 세션 시작자 distinct (대표 지표) */
+        long activeUsers = adminChatSessionRepository.countDistinctUserByCreatedAtBetween(todayStart, tomorrowStart);
+
+        log.debug("[admin-stats] AI 요약 — 오늘={}, 전일대비={}%, 응답={}ms, CTR={}%, 자동화={}%, 활성={}",
+                todayCalls, dayOverDayPct, avgLatencyMs, recommendCtr, supportAutomationRate, activeUsers);
+        return new AiSummaryResponse(todayCalls, dayOverDayPct, avgLatencyMs,
+                recommendCtr, supportAutomationRate, activeUsers);
+    }
+
+    /**
+     * 에이전트별 호출량 일별 추이 — 멀티 라인 차트.
+     *
+     * @param period 기간 ("7d", "30d", "90d")
+     * @return DailyAgentTrend 시계열
+     */
+    public AgentTrendsResponse getAgentTrends(String period) {
+        int days = parsePeriodDays(period);
+        LocalDate today = LocalDate.now(AI_STATS_ZONE);
+        List<DailyAgentTrend> trends = new ArrayList<>();
+
+        for (int i = days - 1; i >= 0; i--) {
+            LocalDate date = today.minusDays(i);
+            LocalDateTime dayStart = date.atStartOfDay();
+            LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
+
+            long chatSessions = adminChatSessionRepository.countSessionsByCreatedAtBetween(dayStart, dayEnd);
+            long chatTurns = adminChatSessionRepository.sumTurnsByCreatedAtBetween(dayStart, dayEnd);
+            long recommendCount = recommendationLogRepository.countByCreatedAtBetween(dayStart, dayEnd);
+            long supportSessions = supportChatLogRepository.countByCreatedAtBetween(dayStart, dayEnd);
+            long quizAttempts = quizParticipationRepository.countBySubmittedAtBetween(dayStart, dayEnd);
+
+            trends.add(new DailyAgentTrend(
+                    date.format(DATE_FMT),
+                    chatSessions, chatTurns, recommendCount, supportSessions, quizAttempts
+            ));
+        }
+
+        log.debug("[admin-stats] 에이전트 추이 — {}일", days);
+        return new AgentTrendsResponse(trends);
+    }
+
+    /**
+     * 에이전트별 KPI 요약 — 4개 카드 (챗·추천·고객센터·퀴즈).
+     *
+     * @return AgentSummaryResponse (chat, recommend, support, quiz)
+     */
+    public AgentSummaryResponse getAgentSummary() {
+        LocalDate today = LocalDate.now(AI_STATS_ZONE);
+        LocalDateTime todayStart = today.atStartOfDay();
+        LocalDateTime tomorrowStart = today.plusDays(1).atStartOfDay();
+
+        /* ── 챗 에이전트 KPI ── */
+        long chatTotalSessions = adminChatSessionRepository.countAllSessions();
+        long chatTotalTurns = adminChatSessionRepository.sumAllTurns();
+        double chatAvgTurns = chatTotalSessions > 0
+                ? Math.round((double) chatTotalTurns / chatTotalSessions * 10.0) / 10.0
+                : 0.0;
+        long chatTodaySessions = adminChatSessionRepository.countSessionsByCreatedAtBetween(todayStart, tomorrowStart);
+        String chatTopIntent = computeChatTopIntent();
+        ChatStat chatStat = new ChatStat(chatTotalSessions, chatAvgTurns, chatTodaySessions, chatTopIntent);
+
+        /* ── 추천 엔진 KPI ── */
+        long recommendTotal = recommendationLogRepository.count();
+        long recommendClicked = recommendationLogRepository.countByClickedTrue();
+        long recommendExternal = recommendationLogRepository.countBySourceType("EXTERNAL_DDGS");
+        double recommendCtr = recommendTotal > 0
+                ? Math.round((double) recommendClicked / recommendTotal * 1000.0) / 10.0
+                : 0.0;
+        double externalRatio = recommendTotal > 0
+                ? Math.round((double) recommendExternal / recommendTotal * 1000.0) / 10.0
+                : 0.0;
+        Double avgScoreRaw = recommendationLogRepository.findAverageScore();
+        double avgScore = avgScoreRaw != null ? Math.round(avgScoreRaw * 1000.0) / 1000.0 : 0.0;
+        RecommendStat recommendStat = new RecommendStat(recommendTotal, recommendCtr, externalRatio, avgScore);
+
+        /* ── 고객센터 챗봇 KPI ── */
+        long supportTotal = supportChatLogRepository.count();
+        Object[] supportRatioRow = supportChatLogRepository.needsHumanRatio(null, null);
+        long supportNeedsHuman = supportRatioRow != null && supportRatioRow.length >= 1 && supportRatioRow[0] != null
+                ? ((Number) supportRatioRow[0]).longValue() : 0L;
+        double escalationRate = supportTotal > 0
+                ? Math.round((double) supportNeedsHuman / supportTotal * 1000.0) / 10.0
+                : 0.0;
+        String supportTopIntent = computeSupportTopIntent();
+        Double avgHopRaw = supportChatLogRepository.findAverageHopCount();
+        double avgHop = avgHopRaw != null ? Math.round(avgHopRaw * 100.0) / 100.0 : 0.0;
+        SupportStat supportStat = new SupportStat(supportTotal, escalationRate, supportTopIntent, avgHop);
+
+        /* ── 퀴즈 KPI ── */
+        long quizTotal = quizParticipationRepository.count();
+        long quizCorrect = quizParticipationRepository.countCorrect();
+        double correctRate = quizTotal > 0
+                ? Math.round((double) quizCorrect / quizTotal * 1000.0) / 10.0
+                : 0.0;
+        long quizToday = quizParticipationRepository.countBySubmittedAtBetween(todayStart, tomorrowStart);
+        QuizStat quizStat = new QuizStat(quizTotal, correctRate, quizToday);
+
+        log.debug("[admin-stats] 에이전트 요약 — 챗={}/추천={}/고객센터={}/퀴즈={}",
+                chatTotalSessions, recommendTotal, supportTotal, quizTotal);
+        return new AgentSummaryResponse(chatStat, recommendStat, supportStat, quizStat);
+    }
+
+    /**
+     * 챗 의도 분포 1위 라벨을 계산한다 (페이지네이션으로 의도 합산).
+     *
+     * @return 1위 의도 한글 라벨 (없으면 "-")
+     */
+    private String computeChatTopIntent() {
+        Page<String> page = adminChatSessionRepository.findIntentSummariesPaged(
+                PageRequest.of(0, 10000));
+        Map<String, Long> counts = parseIntentSummaries(page.getContent());
+        return counts.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(e -> chatIntentLabel(e.getKey()))
+                .orElse("-");
+    }
+
+    /**
+     * 고객센터 의도 분포 1위 라벨을 계산한다.
+     *
+     * @return 1위 의도 한글 라벨 (없으면 "-")
+     */
+    private String computeSupportTopIntent() {
+        List<Object[]> rows = supportChatLogRepository.countByIntent(null, null);
+        if (rows.isEmpty()) return "-";
+        Object[] top = rows.get(0);
+        String intentKind = top[0] != null ? top[0].toString() : null;
+        return supportIntentLabel(intentKind);
+    }
+
+    /**
+     * 챗 intent 코드 → 한글 라벨.
+     */
+    private String chatIntentLabel(String intent) {
+        return switch (intent == null ? "" : intent) {
+            case "recommend" -> "영화 추천";
+            case "search"    -> "영화 검색";
+            case "general"   -> "일반 대화";
+            case "relation"  -> "관계 탐색";
+            case "info"      -> "영화 정보";
+            case "theater"   -> "상영관 조회";
+            case "booking"   -> "예매 안내";
+            case ""          -> "-";
+            default          -> intent;
+        };
+    }
+
+    /**
+     * 고객센터 intent 코드 → 한글 라벨 (v4 6종 + unknown).
+     */
+    private String supportIntentLabel(String intent) {
+        return switch (intent == null ? "" : intent) {
+            case "faq"           -> "자주 묻는 질문";
+            case "personal_data" -> "개인 정보 조회";
+            case "policy"        -> "정책 안내";
+            case "redirect"      -> "1:1 유도";
+            case "smalltalk"     -> "일상 대화";
+            case "complaint"     -> "불만/항의";
+            case "unknown"       -> "분류 실패";
+            case ""              -> "-";
+            default              -> intent;
+        };
+    }
+
+    /**
+     * intent_summary JSON 리스트 → 의도별 카운트 합산 맵.
+     */
+    private Map<String, Long> parseIntentSummaries(List<String> summaries) {
+        Map<String, Long> counts = new HashMap<>();
+        for (String json : summaries) {
+            if (json == null || json.isBlank()) continue;
+            try {
+                JsonNode root = STATS_OBJECT_MAPPER.readTree(json);
+                if (root.isObject()) {
+                    for (var entry : root.properties()) {
+                        String intent = entry.getKey().trim();
+                        long count = entry.getValue().asLong(0);
+                        if (!intent.isEmpty() && count > 0) {
+                            counts.merge(intent, count, Long::sum);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.trace("[admin-stats] intentSummary 파싱 실패: {}", json);
+            }
+        }
+        return counts;
+    }
+
+    /**
+     * 응답 시간 분포 — p50/p95/p99 + 일별 시계열.
+     *
+     * @param period 기간 ("7d" 권장 — 1만건 제한)
+     * @return LatencyResponse (p50, p95, p99, daily)
+     */
+    public LatencyResponse getLatencyDistribution(String period) {
+        int days = parsePeriodDays(period);
+        LocalDate today = LocalDate.now(AI_STATS_ZONE);
+        LocalDateTime windowStart = today.minusDays(days - 1L).atStartOfDay();
+        LocalDateTime windowEnd = today.plusDays(1).atStartOfDay();
+
+        /* 전체 기간 raw 응답시간 → 정렬해 percentile 인덱싱 (운영 규모 시 1만건 LIMIT 권장) */
+        List<Integer> latencies = recommendationLogRepository.findLatenciesByCreatedAtBetween(windowStart, windowEnd);
+        List<Integer> sorted = latencies.stream().filter(java.util.Objects::nonNull).sorted().toList();
+        int p50 = percentile(sorted, 50);
+        int p95 = percentile(sorted, 95);
+        int p99 = percentile(sorted, 99);
+
+        /* 일별 p50/p95 */
+        List<DailyLatency> daily = new ArrayList<>();
+        for (int i = days - 1; i >= 0; i--) {
+            LocalDate date = today.minusDays(i);
+            LocalDateTime dayStart = date.atStartOfDay();
+            LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
+            List<Integer> dayList = recommendationLogRepository
+                    .findLatenciesByCreatedAtBetween(dayStart, dayEnd)
+                    .stream().filter(java.util.Objects::nonNull).sorted().toList();
+            daily.add(new DailyLatency(date.format(DATE_FMT), percentile(dayList, 50), percentile(dayList, 95)));
+        }
+
+        log.debug("[admin-stats] 응답시간 — p50={}, p95={}, p99={}, 표본={}",
+                p50, p95, p99, sorted.size());
+        return new LatencyResponse(p50, p95, p99, daily);
+    }
+
+    /**
+     * 정렬된 리스트에서 percentile 추출.
+     *
+     * @param sorted 오름차순 정렬된 리스트
+     * @param pct    백분위 (0~100)
+     * @return percentile 값 (빈 리스트면 0)
+     */
+    private int percentile(List<Integer> sorted, int pct) {
+        if (sorted.isEmpty()) return 0;
+        int idx = (int) Math.ceil(sorted.size() * pct / 100.0) - 1;
+        if (idx < 0) idx = 0;
+        if (idx >= sorted.size()) idx = sorted.size() - 1;
+        return sorted.get(idx);
+    }
+
+    /**
+     * 모델 버전별 비교 — recommendation_log GROUP BY model_version.
+     *
+     * @return ModelComparisonResponse (호출수 내림차순)
+     */
+    public ModelComparisonResponse getModelComparison() {
+        List<Object[]> rows = recommendationLogRepository.aggregateByModelVersion();
+        List<ModelStat> models = new ArrayList<>();
+        for (Object[] row : rows) {
+            String modelVersion = row[0] != null ? row[0].toString() : "unknown";
+            long count = row[1] != null ? ((Number) row[1]).longValue() : 0L;
+            double avgScore = row[2] != null ? Math.round(((Number) row[2]).doubleValue() * 1000.0) / 1000.0 : 0.0;
+            double avgLatency = row[3] != null ? Math.round(((Number) row[3]).doubleValue() * 10.0) / 10.0 : 0.0;
+            long clicked = row[4] != null ? ((Number) row[4]).longValue() : 0L;
+            double ctr = count > 0 ? Math.round((double) clicked / count * 1000.0) / 10.0 : 0.0;
+            models.add(new ModelStat(modelVersion, count, avgScore, avgLatency, ctr));
+        }
+        log.debug("[admin-stats] 모델 비교 — {} 모델", models.size());
+        return new ModelComparisonResponse(models);
+    }
+
+    /**
+     * 추천 펀넬 — 5단계 (recommendation_impact 기반).
+     *
+     * @param period 기간 ("30d" 권장)
+     * @return RecommendationFunnelResponse
+     */
+    public RecommendationFunnelResponse getRecommendationFunnel(String period) {
+        int days = parsePeriodDays(period);
+        LocalDate today = LocalDate.now(AI_STATS_ZONE);
+        LocalDateTime start = today.minusDays(days - 1L).atStartOfDay();
+        LocalDateTime end = today.plusDays(1).atStartOfDay();
+
+        Object[] row = recommendationImpactRepository.aggregateFunnel(start, end);
+        long recommended = row != null && row.length >= 1 && row[0] != null ? ((Number) row[0]).longValue() : 0L;
+        long clicked = row != null && row.length >= 2 && row[1] != null ? ((Number) row[1]).longValue() : 0L;
+        long viewedDetail = row != null && row.length >= 3 && row[2] != null ? ((Number) row[2]).longValue() : 0L;
+        long wishlisted = row != null && row.length >= 4 && row[3] != null ? ((Number) row[3]).longValue() : 0L;
+        long watched = row != null && row.length >= 5 && row[4] != null ? ((Number) row[4]).longValue() : 0L;
+        long rated = row != null && row.length >= 6 && row[5] != null ? ((Number) row[5]).longValue() : 0L;
+
+        double ctr = recommended > 0 ? Math.round((double) clicked / recommended * 1000.0) / 10.0 : 0.0;
+        double watchRate = recommended > 0 ? Math.round((double) watched / recommended * 1000.0) / 10.0 : 0.0;
+
+        log.debug("[admin-stats] 추천 펀넬({}일) — 추천={}/클릭={}/상세={}/찜={}/시청={}/평점={}",
+                days, recommended, clicked, viewedDetail, wishlisted, watched, rated);
+        return new RecommendationFunnelResponse(
+                recommended, clicked, viewedDetail, wishlisted, watched, rated, ctr, watchRate);
+    }
+
+    /**
+     * 고객센터 자동화율 — 추이 + hop 분포.
+     *
+     * @param period 기간 ("30d" 권장)
+     * @return SupportAutomationResponse
+     */
+    public SupportAutomationResponse getSupportAutomation(String period) {
+        int days = parsePeriodDays(period);
+        LocalDate today = LocalDate.now(AI_STATS_ZONE);
+        LocalDateTime start = today.minusDays(days - 1L).atStartOfDay();
+        LocalDateTime end = today.plusDays(1).atStartOfDay();
+
+        /* 기간 합계 */
+        Object[] ratio = supportChatLogRepository.needsHumanRatio(start, end);
+        long escalated = ratio != null && ratio.length >= 1 && ratio[0] != null
+                ? ((Number) ratio[0]).longValue() : 0L;
+        long totalLogs = ratio != null && ratio.length >= 2 && ratio[1] != null
+                ? ((Number) ratio[1]).longValue() : 0L;
+        long autoResolved = totalLogs - escalated;
+        double automationRate = totalLogs > 0
+                ? Math.round((double) autoResolved / totalLogs * 1000.0) / 10.0
+                : 0.0;
+
+        /* 일별 추이 — native dailyCounts 활용 */
+        List<Object[]> dailyRows = supportChatLogRepository.dailyCounts(start, end);
+        Map<String, Object[]> dailyMap = new HashMap<>();
+        for (Object[] r : dailyRows) {
+            String date = r[0] != null ? r[0].toString() : null;
+            if (date != null) dailyMap.put(date, r);
+        }
+
+        /* 빠진 날짜 0 채우기 */
+        List<DailyAutomation> daily = new ArrayList<>();
+        for (int i = days - 1; i >= 0; i--) {
+            LocalDate date = today.minusDays(i);
+            String key = date.format(DATE_FMT);
+            Object[] r = dailyMap.get(key);
+            long dayTotal = r != null && r[1] != null ? ((Number) r[1]).longValue() : 0L;
+            long dayEsc = r != null && r[2] != null ? ((Number) r[2]).longValue() : 0L;
+            double dayRate = dayTotal > 0
+                    ? Math.round((double) (dayTotal - dayEsc) / dayTotal * 1000.0) / 10.0
+                    : 0.0;
+            daily.add(new DailyAutomation(key, dayTotal, dayEsc, dayRate));
+        }
+
+        /* hop 분포 — 0~5 */
+        List<Object[]> hopRows = supportChatLogRepository.hopDistribution();
+        List<HopBucket> hopDistribution = new ArrayList<>();
+        for (Object[] r : hopRows) {
+            int hops = r[0] != null ? ((Number) r[0]).intValue() : 0;
+            long count = r[1] != null ? ((Number) r[1]).longValue() : 0L;
+            hopDistribution.add(new HopBucket(hops, count));
+        }
+
+        log.debug("[admin-stats] 고객센터 자동화({}일) — 총={}/자동={}/유도={}/{}%",
+                days, totalLogs, autoResolved, escalated, automationRate);
+        return new SupportAutomationResponse(
+                totalLogs, autoResolved, escalated, automationRate, daily, hopDistribution);
+    }
+
+    /**
+     * AI 의도 분포 V2 — chat / support 두 채널 분리.
+     *
+     * @return AiIntentDistributionResponseV2 (chat, support)
+     */
+    public AiIntentDistributionResponseV2 getAiIntentDistributionV2() {
+        /* ── chat 채널 — intent_summary JSON 페이지네이션 ── */
+        Page<String> page = adminChatSessionRepository.findIntentSummariesPaged(
+                PageRequest.of(0, 10000));
+        Map<String, Long> chatCounts = parseIntentSummaries(page.getContent());
+        long chatTotal = chatCounts.values().stream().mapToLong(Long::longValue).sum();
+        List<IntentItem> chatIntents = chatCounts.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .map(e -> {
+                    long count = e.getValue();
+                    double pct = chatTotal > 0
+                            ? Math.round((double) count / chatTotal * 1000.0) / 10.0
+                            : 0.0;
+                    return new IntentItem(e.getKey(), chatIntentLabel(e.getKey()), count, pct);
+                })
+                .toList();
+
+        /* ── support 채널 — DB GROUP BY ── */
+        List<Object[]> supportRows = supportChatLogRepository.countByIntent(null, null);
+        long supportTotal = supportRows.stream()
+                .mapToLong(r -> r[1] != null ? ((Number) r[1]).longValue() : 0L)
+                .sum();
+        List<IntentItem> supportIntents = supportRows.stream()
+                .map(r -> {
+                    String intent = r[0] != null ? r[0].toString() : "unknown";
+                    long count = r[1] != null ? ((Number) r[1]).longValue() : 0L;
+                    double pct = supportTotal > 0
+                            ? Math.round((double) count / supportTotal * 1000.0) / 10.0
+                            : 0.0;
+                    return new IntentItem(intent, supportIntentLabel(intent), count, pct);
+                })
+                .toList();
+
+        log.debug("[admin-stats] 의도 분포 V2 — chat {} 종, support {} 종",
+                chatIntents.size(), supportIntents.size());
+        return new AiIntentDistributionResponseV2(chatIntents, supportIntents);
+    }
+
+    /**
+     * AI 쿼터 현황 V2 — 6 등급 차등 기준 적용.
+     *
+     * @return AiQuotaStatsResponseV2 (등급별 분포 포함)
+     */
+    public AiQuotaStatsResponseV2 getAiQuotaStatsV2() {
+        long totalQuotaUsers = userAiQuotaRepository.count();
+        double avgDaily = Math.round(userAiQuotaRepository.avgDailyAiUsed() * 10.0) / 10.0;
+        double avgMonthly = Math.round(userAiQuotaRepository.avgMonthlyCouponUsed() * 10.0) / 10.0;
+        long totalTokens = userAiQuotaRepository.sumPurchasedAiTokens();
+        long exhausted = userAiQuotaRepository.countExhaustedUsersByGrade();
+
+        List<Object[]> rows = userAiQuotaRepository.aggregateQuotaByGrade();
+        List<GradeQuotaBucket> byGrade = new ArrayList<>();
+        for (Object[] row : rows) {
+            String gradeCode = row[0] != null ? row[0].toString() : "NORMAL";
+            String gradeName = row[1] != null ? row[1].toString() : "알갱이";
+            long users = row[2] != null ? ((Number) row[2]).longValue() : 0L;
+            long ex = row[3] != null ? ((Number) row[3]).longValue() : 0L;
+            double avgUsed = row[4] != null ? Math.round(((Number) row[4]).doubleValue() * 10.0) / 10.0 : 0.0;
+            byGrade.add(new GradeQuotaBucket(gradeCode, gradeName, users, ex, avgUsed));
+        }
+
+        log.debug("[admin-stats] AI 쿼터 V2 — 사용자={}, 등급버킷={}, 소진={}",
+                totalQuotaUsers, byGrade.size(), exhausted);
+        return new AiQuotaStatsResponseV2(
+                totalQuotaUsers, avgDaily, avgMonthly, totalTokens, exhausted, byGrade);
     }
 
     // ══════════════════════════════════════════════

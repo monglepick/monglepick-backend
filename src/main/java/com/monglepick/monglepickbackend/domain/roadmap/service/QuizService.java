@@ -342,7 +342,12 @@ public class QuizService {
     public MyStatsResponse getMyStats(String userId) {
         log.debug("내 퀴즈 응시 통계 조회: userId={}", userId);
 
-        Object[] row = participationRepository.aggregateMyStats(userId);
+        // Spring Boot 4 / Hibernate 7 에서는 멀티 SELECT JPQL 결과가 List<Object[]> 로
+        // 반환되어야 정상 매핑된다. 직접 Object[] 로 받으면 [[..]] 로 한 번 더 감싸여
+        // ClassCastException 이 발생한다 (2026-04-29 운영 500 회귀 원인).
+        // 응시 0건이라도 aggregation 은 항상 1행을 돌려주므로 isEmpty 는 방어 차원이다.
+        java.util.List<Object[]> rows = participationRepository.aggregateMyStats(userId);
+        Object[] row = (rows == null || rows.isEmpty()) ? null : rows.get(0);
 
         // JPA 가 SUM/COUNT 결과를 Number 로 반환 — 안전하게 long 으로 변환.
         // 응시 0건일 때 row 자체는 null 이 아니지만 SUM 결과는 null 일 수 있으므로 nullSafe 처리.

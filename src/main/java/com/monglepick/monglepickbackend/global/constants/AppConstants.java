@@ -22,6 +22,16 @@ public final class AppConstants {
     /** AI Agent → Backend 서비스 간 인증 헤더 */
     public static final String HEADER_SERVICE_KEY = "X-Service-Key";
 
+    /**
+     * AI Agent → Backend ServiceKey 호출 시 대상 사용자 ID 를 전달하는 헤더.
+     *
+     * <p>{@link #HEADER_SERVICE_KEY} 와 함께 사용한다. ServiceKey 가 검증된 요청에서
+     * {@link com.monglepick.monglepickbackend.global.controller.BaseController#resolveUserIdWithServiceKey}
+     * 가 컨트롤러 인자에 명시 userId 가 없을 경우 이 헤더를 자동으로 읽어
+     * BOLA(Broken Object Level Authorization) 공격면을 헤더 단일 채널로 좁힌다.</p>
+     */
+    public static final String HEADER_USER_ID = "X-User-Id";
+
     /** 결제 주문 중복 방지를 위한 멱등키 헤더 */
     public static final String HEADER_IDEMPOTENCY_KEY = "Idempotency-Key";
 

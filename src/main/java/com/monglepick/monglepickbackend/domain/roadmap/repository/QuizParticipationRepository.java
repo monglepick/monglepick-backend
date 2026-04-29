@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -77,8 +78,16 @@ public interface QuizParticipationRepository extends JpaRepository<QuizParticipa
      * <p>응시가 0건이면 모든 값이 0/null 로 반환되므로 호출자가 정답률 계산 시 0/0 NaN 을
      * 방어해야 한다.</p>
      *
+     * <h3>반환 타입 주의</h3>
+     * <p>Spring Boot 4 / Hibernate 7 환경에서는 멀티 SELECT JPQL 의 결과를 반드시
+     * {@code List<Object[]>} 로 받아야 한다. 메서드 반환 타입을 {@code Object[]} 로
+     * 선언하면 Hibernate 가 Tuple 결과를 한번 더 배열로 감싸 단일 row 가
+     * {@code [[0L, null, null, null]]} 형태(size=1, element=Object[]) 로 매핑되어
+     * Service 레이어의 {@code (Number) row[0]} 캐스팅이 ClassCastException 을 던진다.
+     * 운영 GET /api/v1/quizzes/me/stats 가 500 으로 회귀했던 직접 원인이다 (2026-04-29).</p>
+     *
      * @param userId 통계 대상 사용자 ID
-     * @return {@code [totalAttempts, correctCount, totalEarnedPoints, lastAttemptedAt]} 배열 1개 행
+     * @return 단일 row 의 컬럼 배열을 담은 List ({@code [totalAttempts, correctCount, totalEarnedPoints, lastAttemptedAt]})
      */
     @Query(
             "SELECT " +
@@ -89,7 +98,7 @@ public interface QuizParticipationRepository extends JpaRepository<QuizParticipa
             "FROM QuizParticipation p " +
             "WHERE p.userId = :userId"
     )
-    Object[] aggregateMyStats(@Param("userId") String userId);
+    List<Object[]> aggregateMyStats(@Param("userId") String userId);
 
     /**
      * 사용자별 응시 이력 페이징 조회 — 2026-04-29 신규.
@@ -129,4 +138,34 @@ public interface QuizParticipationRepository extends JpaRepository<QuizParticipa
      * @return 해당 조건의 참여 수
      */
     long countByUserIdAndIsCorrect(String userId, Boolean isCorrect);
+
+    // ══════════════════════════════════════════════
+    // AI 서비스 통계 V2 — 퀴즈 에이전트 KPI/추이 (2026-04-29)
+    // ══════════════════════════════════════════════
+
+    /**
+     * 정답 수 (전체 정답률 분자).
+     *
+     * @return isCorrect=true 응시 수
+     */
+    @Query("SELECT COUNT(p) FROM QuizParticipation p WHERE p.isCorrect = true")
+    long countCorrect();
+
+    /**
+     * 지정 기간 내 응시 수 (일별 추이/Summary 카드).
+     *
+     * <p>submittedAt 기준 — 미제출(null)은 제외된다.</p>
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 기간 내 응시 수
+     */
+    @Query("""
+        SELECT COUNT(p) FROM QuizParticipation p
+        WHERE p.submittedAt >= :start AND p.submittedAt < :end
+        """)
+    long countBySubmittedAtBetween(
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
 }

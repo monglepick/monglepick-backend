@@ -181,4 +181,80 @@ public interface AdminChatSessionRepository extends JpaRepository<ChatSessionArc
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end
     );
+
+    // ══════════════════════════════════════════════
+    // AI 서비스 통계 V2 — 운영 통계용 (소프트 삭제 무시)
+    //
+    // 운영자 입장에서는 "사용자가 세션을 삭제했어도 발생량은 측정해야" 하므로
+    // isDeleted 필터를 적용하지 않는 신규 집계 메서드를 별도로 두어
+    // 기존 호출자 (사용자 목록 화면 등) 의 의미는 보존한다.
+    // ══════════════════════════════════════════════
+
+    /**
+     * 전체 세션 수 (소프트 삭제 무시) — 운영 통계의 발생량 기준.
+     *
+     * @return 전체 세션 수 (삭제 포함)
+     */
+    @Query("SELECT COUNT(c) FROM ChatSessionArchive c")
+    long countAllSessions();
+
+    /**
+     * 전체 세션의 turn_count 합계 (소프트 삭제 무시).
+     *
+     * @return 누적 턴 수 (삭제 포함)
+     */
+    @Query("SELECT COALESCE(SUM(c.turnCount), 0) FROM ChatSessionArchive c")
+    long sumAllTurns();
+
+    /**
+     * 전체 세션의 추천 영화 수 합계 (소프트 삭제 무시).
+     *
+     * @return 누적 추천 영화 수 (삭제 포함)
+     */
+    @Query("SELECT COALESCE(SUM(c.recommendedMovieCount), 0) FROM ChatSessionArchive c")
+    long sumAllRecommendedMovies();
+
+    /**
+     * 지정 기간 내 세션 수 (소프트 삭제 무시).
+     *
+     * @param start 시작 시각 (inclusive)
+     * @param end   종료 시각 (exclusive)
+     * @return 기간 내 세션 수 (삭제 포함)
+     */
+    @Query("""
+            SELECT COUNT(c) FROM ChatSessionArchive c
+            WHERE c.createdAt >= :start AND c.createdAt < :end
+            """)
+    long countSessionsByCreatedAtBetween(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
+
+    /**
+     * 지정 기간 내 세션의 turn_count 합계 (소프트 삭제 무시).
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 기간 내 누적 턴 수 (삭제 포함)
+     */
+    @Query("""
+            SELECT COALESCE(SUM(c.turnCount), 0) FROM ChatSessionArchive c
+            WHERE c.createdAt >= :start AND c.createdAt < :end
+            """)
+    long sumTurnsByCreatedAtBetween(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
+
+    /**
+     * 의도 집계 — 페이지네이션 가능한 intent_summary 조회 (소프트 삭제 무시).
+     *
+     * <p>{@link #findAllIntentSummaries()} 가 LIMIT 없이 전체를 fetch 하여 OOM 위험이 있던 점을
+     * 보완. 호출자는 Pageable 로 size 제한을 명시한다 (예: PageRequest.of(0, 10000)).</p>
+     *
+     * @param pageable 페이지 정보
+     * @return intent_summary JSON 페이지
+     */
+    @Query("SELECT c.intentSummary FROM ChatSessionArchive c WHERE c.intentSummary IS NOT NULL")
+    Page<String> findIntentSummariesPaged(Pageable pageable);
 }

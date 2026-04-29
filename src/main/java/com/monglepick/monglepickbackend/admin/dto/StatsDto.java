@@ -786,6 +786,322 @@ public class StatsDto {
             long exhaustedUsers
     ) {}
 
+    // ──────────────────────────────────────────────
+    // 10-V2. AI 서비스 분석 — 전면 재설계 (2026-04-29)
+    //
+    // 운영자가 (a) 한눈에 오늘 AI 호출 건강도를 파악하고,
+    // (b) 4개 에이전트(챗·추천·고객센터·퀴즈) 각각의 KPI 를 분리해서 보고,
+    // (c) 응답 성능·CTR·자동화율 등 비즈니스 인사이트를 즉시 얻기 위한 9개 신규 EP DTO.
+    //
+    // 기존 V1 DTO (AiServiceOverviewResponse / AiSessionTrendsResponse / AiIntentDistributionResponse / AiQuotaStatsResponse)
+    // 는 보존하여 breaking change 없이 클라이언트가 점진적으로 신규 EP 로 전환 가능.
+    // ──────────────────────────────────────────────
+
+    /**
+     * AI 서비스 요약 KPI 응답 — "오늘 한눈에" 4개 핵심 지표.
+     *
+     * <p>운영자가 화면 상단에서 오늘의 AI 호출 건강도를 즉시 파악하기 위한 통합 요약.
+     * 4개 에이전트(챗·추천·고객센터·퀴즈)의 호출량을 합산한 총 호출 + 전일 대비 증감률,
+     * 추천 엔진의 평균 응답시간/CTR, 고객센터 자동화율을 한 번에 노출한다.</p>
+     *
+     * @param todayCalls             오늘(KST 기준) 4 에이전트 총 호출 수
+     *                               (chat turns + recommendation_log + support_chat_log + quiz_attempts)
+     * @param dayOverDayPct          전일 대비 호출량 증감률 (%, 음수 가능)
+     * @param avgLatencyMs           추천 엔진 최근 7일 평균 응답시간 (ms, recommendation_log.response_time_ms 평균)
+     * @param recommendCtr           최근 30일 추천 클릭률 (%, recommendation_log clicked / total)
+     * @param supportAutomationRate  최근 30일 고객센터 자동화율 (%, 1 - needs_human 비율)
+     * @param activeUsers            오늘 AI 호출이 1회 이상인 고유 사용자 수
+     */
+    public record AiSummaryResponse(
+            long todayCalls,
+            double dayOverDayPct,
+            double avgLatencyMs,
+            double recommendCtr,
+            double supportAutomationRate,
+            long activeUsers
+    ) {}
+
+    /**
+     * 에이전트별 일별 호출량 추이 응답 — 멀티 라인 차트용.
+     *
+     * @param trends 일별 4 에이전트 호출량 시계열
+     */
+    public record AgentTrendsResponse(
+            List<DailyAgentTrend> trends
+    ) {}
+
+    /**
+     * 에이전트별 일별 호출량 단건.
+     *
+     * @param date            날짜 (yyyy-MM-dd, KST 기준)
+     * @param chatSessions    챗 에이전트 신규 세션 수
+     * @param chatTurns       챗 에이전트 누적 턴 수 (사용자 당일 활동 강도)
+     * @param recommendCount  추천 엔진 호출 수 (recommendation_log)
+     * @param supportSessions 고객센터 챗봇 질의 수 (support_chat_log)
+     * @param quizAttempts    퀴즈 응시 수 (quiz_participations)
+     */
+    public record DailyAgentTrend(
+            String date,
+            long chatSessions,
+            long chatTurns,
+            long recommendCount,
+            long supportSessions,
+            long quizAttempts
+    ) {}
+
+    /**
+     * 에이전트별 KPI 요약 응답 — 4개 카드 grid.
+     *
+     * @param chat      챗 에이전트 KPI (세션·평균턴·오늘·top1 의도)
+     * @param recommend 추천 엔진 KPI (누적·CTR·외부검색비율·평균점수)
+     * @param support   고객센터 챗봇 KPI (질의·1:1유도율·top1 의도·평균hop)
+     * @param quiz      퀴즈 에이전트 KPI (참여·정답률·오늘)
+     */
+    public record AgentSummaryResponse(
+            ChatStat chat,
+            RecommendStat recommend,
+            SupportStat support,
+            QuizStat quiz
+    ) {}
+
+    /**
+     * 챗 에이전트 KPI 단건.
+     *
+     * @param totalSessions 누적 채팅 세션 수
+     * @param avgTurns      세션당 평균 턴 수 (소수 1자리)
+     * @param todaySessions 오늘 신규 세션 수
+     * @param topIntent     의도 분포 1위 (label, recommend·search 등)
+     */
+    public record ChatStat(
+            long totalSessions,
+            double avgTurns,
+            long todaySessions,
+            String topIntent
+    ) {}
+
+    /**
+     * 추천 엔진 KPI 단건.
+     *
+     * @param totalRecommends   누적 추천 호출 수 (recommendation_log)
+     * @param ctr               전체 클릭률 (%, clicked / total)
+     * @param externalRatio     외부 검색(EXTERNAL_DDGS) 사용 비율 (%)
+     * @param avgScore          평균 추천 점수 (Float, 0.0~1.0)
+     */
+    public record RecommendStat(
+            long totalRecommends,
+            double ctr,
+            double externalRatio,
+            double avgScore
+    ) {}
+
+    /**
+     * 고객센터 챗봇 KPI 단건.
+     *
+     * @param totalLogs       누적 질의 수
+     * @param escalationRate  1:1 상담 유도율 (%, needs_human=true 비율)
+     * @param topIntent       의도 분포 1위 (faq/personal_data/policy 등)
+     * @param avgHopCount     평균 ReAct hop 수 (소수 2자리)
+     */
+    public record SupportStat(
+            long totalLogs,
+            double escalationRate,
+            String topIntent,
+            double avgHopCount
+    ) {}
+
+    /**
+     * 퀴즈 에이전트 KPI 단건.
+     *
+     * @param totalAttempts 누적 응시 수 (quiz_participations)
+     * @param correctRate   정답률 (%, isCorrect=true 비율)
+     * @param todayAttempts 오늘 응시 수
+     */
+    public record QuizStat(
+            long totalAttempts,
+            double correctRate,
+            long todayAttempts
+    ) {}
+
+    /**
+     * 응답 시간 분포 응답 — 추천 엔진 한정 (recommendation_log.response_time_ms 기반).
+     *
+     * <p>p50/p95/p99 는 최근 7일치 데이터를 Java 측에서 정렬해 인덱싱(상위 1만건 제한 → 충분히 빠름).
+     * 차후 운영 규모 확대 시 SQL PERCENT_RANK() 또는 별도 모니터링 시스템(Prometheus) 으로 이관.</p>
+     *
+     * @param p50   응답시간 50 percentile (ms)
+     * @param p95   응답시간 95 percentile (ms)
+     * @param p99   응답시간 99 percentile (ms)
+     * @param daily 일별 p50/p95 시계열
+     */
+    public record LatencyResponse(
+            int p50,
+            int p95,
+            int p99,
+            List<DailyLatency> daily
+    ) {}
+
+    /**
+     * 일별 응답시간 단건.
+     *
+     * @param date 날짜
+     * @param p50  당일 p50 (ms, 데이터 없으면 0)
+     * @param p95  당일 p95 (ms, 데이터 없으면 0)
+     */
+    public record DailyLatency(
+            String date,
+            int p50,
+            int p95
+    ) {}
+
+    /**
+     * 모델 버전별 비교 응답 — 추천 엔진 한정.
+     *
+     * <p>recommendation_log.model_version GROUP BY 결과. 어떤 모델이 가장 빠르고/정확한지 운영자가 비교.</p>
+     *
+     * @param models 모델별 통계 (호출수 내림차순)
+     */
+    public record ModelComparisonResponse(
+            List<ModelStat> models
+    ) {}
+
+    /**
+     * 모델 버전별 통계 단건.
+     *
+     * @param modelVersion 모델 식별자 (예: "exaone-4.0-32b", "solar-pro", "hybrid-v2")
+     * @param count        호출 수
+     * @param avgScore     평균 추천 점수 (소수 3자리)
+     * @param avgLatency   평균 응답시간 (ms)
+     * @param ctr          모델 별 클릭률 (%)
+     */
+    public record ModelStat(
+            String modelVersion,
+            long count,
+            double avgScore,
+            double avgLatency,
+            double ctr
+    ) {}
+
+    /**
+     * 추천 펀넬 응답 — 5단계 (recommendation_impact 기반).
+     *
+     * <p>추천 → 클릭 → 상세조회 → 위시리스트 → 시청 → 평점 단계별 사용자 수.
+     * Funnel/가로 BarChart 시각화에 사용.</p>
+     *
+     * @param recommended      총 추천 카드 수 (= recommendation_impact 전체)
+     * @param clicked          clicked=true 수
+     * @param viewedDetail     detailViewed=true 수
+     * @param addedToWishlist  wishlisted=true 수
+     * @param watched          watched=true 수
+     * @param rated            rated=true 수
+     * @param ctr              clicked / recommended (%, 1단계 전환율)
+     * @param watchRate        watched / recommended (%, 4단계 전환율)
+     */
+    public record RecommendationFunnelResponse(
+            long recommended,
+            long clicked,
+            long viewedDetail,
+            long addedToWishlist,
+            long watched,
+            long rated,
+            double ctr,
+            double watchRate
+    ) {}
+
+    /**
+     * 고객센터 자동화율 응답 — support_chat_log 기반 시계열 + hop 분포.
+     *
+     * @param totalLogs        기간 내 총 질의 수
+     * @param autoResolved     자동 해결 수 (needs_human=false)
+     * @param escalated        1:1 유도 수 (needs_human=true)
+     * @param automationRate   자동화율 (%, autoResolved / totalLogs * 100)
+     * @param daily            일별 자동화 추이
+     * @param hopDistribution  ReAct hop 분포 (0~5)
+     */
+    public record SupportAutomationResponse(
+            long totalLogs,
+            long autoResolved,
+            long escalated,
+            double automationRate,
+            List<DailyAutomation> daily,
+            List<HopBucket> hopDistribution
+    ) {}
+
+    /**
+     * 일별 자동화율 단건.
+     *
+     * @param date       날짜
+     * @param total      당일 총 질의
+     * @param escalated  당일 1:1 유도 수
+     * @param rate       당일 자동화율 (%)
+     */
+    public record DailyAutomation(
+            String date,
+            long total,
+            long escalated,
+            double rate
+    ) {}
+
+    /**
+     * ReAct hop 분포 단건.
+     *
+     * @param hops  hop_count 값 (0~5)
+     * @param count 발생 건수
+     */
+    public record HopBucket(
+            int hops,
+            long count
+    ) {}
+
+    /**
+     * AI 쿼터 현황 응답 V2 — 6등급 차등 기준 적용.
+     *
+     * <p>기존 AiQuotaStatsResponse 의 단점(NORMAL 등급 하드코딩 `>= 3`)을 해결.
+     * grades.daily_ai_limit 을 JOIN 하여 등급별 차등 기준으로 소진 사용자를 산정.</p>
+     *
+     * @param totalQuotaUsers      쿼터 레코드 보유 사용자 수
+     * @param avgDailyUsage        일일 평균 AI 사용량 (소수 1자리)
+     * @param avgMonthlyUsage      월간 평균 쿠폰 사용량 (소수 1자리)
+     * @param totalPurchasedTokens 전체 구매 이용권 보유량 합계
+     * @param exhaustedUsers       등급별 daily_ai_limit 소진 사용자 수 (DIAMOND -1 무제한 제외)
+     * @param byGrade              등급별 분포 (NORMAL ~ DIAMOND)
+     */
+    public record AiQuotaStatsResponseV2(
+            long totalQuotaUsers,
+            double avgDailyUsage,
+            double avgMonthlyUsage,
+            long totalPurchasedTokens,
+            long exhaustedUsers,
+            List<GradeQuotaBucket> byGrade
+    ) {}
+
+    /**
+     * 등급별 쿼터 사용 분포 단건.
+     *
+     * @param gradeCode    등급 코드 (NORMAL, BRONZE, ...)
+     * @param gradeName    등급 한글명 (알갱이, 강냉이, ...)
+     * @param totalUsers   해당 등급 사용자 수
+     * @param exhausted    daily_ai_limit 소진 사용자 수
+     * @param avgDailyUsed 평균 일일 사용량 (소수 1자리)
+     */
+    public record GradeQuotaBucket(
+            String gradeCode,
+            String gradeName,
+            long totalUsers,
+            long exhausted,
+            double avgDailyUsed
+    ) {}
+
+    /**
+     * 의도 분포 V2 응답 — chat / support 두 채널 분리.
+     *
+     * @param chat    챗 에이전트 의도 (chat_session_archive.intent_summary 집계)
+     * @param support 고객센터 챗봇 의도 (support_chat_log.intent_kind GROUP BY)
+     */
+    public record AiIntentDistributionResponseV2(
+            List<IntentItem> chat,
+            List<IntentItem> support
+    ) {}
+
     // ══════════════════════════════════════════════
     // 11. 커뮤니티 분석
     // ══════════════════════════════════════════════

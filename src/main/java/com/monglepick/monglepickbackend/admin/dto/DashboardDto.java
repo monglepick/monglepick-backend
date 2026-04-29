@@ -24,24 +24,27 @@ public class DashboardDto {
      *
      * <p>각 지표는 오늘/어제 값을 함께 제공하여 전일 대비 변화율을 프론트에서 계산할 수 있도록 한다.</p>
      *
+     * <p><b>필드명 컨벤션</b> — 시점(today/yesterday) 접두사를 일관되게 적용하여
+     * 프론트엔드 KpiCards 와 동일한 키로 직접 매핑된다. (2026-04-29 정렬)</p>
+     *
      * @param totalUsers              전체 회원 수 (users 테이블 COUNT)
-     * @param newUsersToday           오늘 신규 가입 수 (created_at >= 오늘 00:00:00)
-     * @param newUsersYesterday       어제 신규 가입 수 (전일 비교용)
+     * @param todayNewUsers           오늘 신규 가입 수 (created_at >= 오늘 00:00:00)
+     * @param yesterdayNewUsers       어제 신규 가입 수 (전일 비교용)
      * @param activeSubscriptions     현재 활성 구독 수 (status = 'ACTIVE')
      * @param todayPaymentAmount      오늘 결제 완료 금액 합계 (status = 'COMPLETED', 단위: 원)
      * @param yesterdayPaymentAmount  어제 결제 완료 금액 합계 (전일 비교용, 단위: 원)
      * @param pendingReports          미처리 신고 수 (status = 'pending')
-     * @param todayChatRequests       오늘 AI 채팅 요청 수 (별도 테이블 미구현 시 0 반환)
+     * @param todayAiChats            오늘 AI 채팅 요청 수 — chat_session_archive 의 오늘 created_at 카운트
      */
     public record KpiResponse(
             long totalUsers,
-            long newUsersToday,
-            long newUsersYesterday,
+            long todayNewUsers,
+            long yesterdayNewUsers,
             long activeSubscriptions,
             long todayPaymentAmount,
             long yesterdayPaymentAmount,
             long pendingReports,
-            long todayChatRequests
+            long todayAiChats
     ) {}
 
     // ────────────────────────────────────────────

@@ -4,6 +4,10 @@ import com.monglepick.monglepickbackend.global.constants.AppConstants;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
 import java.security.Principal;
 
 /**
@@ -48,13 +52,22 @@ public abstract class BaseController {
     /**
      * Principal에서 userId를 추출한다 (ServiceKey + JWT 혼합 인증).
      *
-     * <p>ServiceKey 인증인 경우 요청 파라미터의 userId를 사용하고,
-     * JWT 인증인 경우 토큰에서 추출된 userId를 사용한다.</p>
+     * <p>ServiceKey 인증인 경우 다음 우선순위로 대상 사용자 ID 를 결정한다.</p>
+     * <ol>
+     *   <li>컨트롤러가 명시적으로 넘긴 {@code requestUserId} (쿼리 파라미터/바디 필드 등).</li>
+     *   <li>현재 HTTP 요청의 {@link AppConstants#HEADER_USER_ID X-User-Id} 헤더.
+     *       AI Agent 의 {@code support_tools/_base.call_backend_get} 가 사용하는
+     *       표준 채널이며, 모든 ServiceKey 컨트롤러가 일일이 plumbing 하지 않아도
+     *       BaseController 단계에서 자동으로 인식된다.</li>
+     *   <li>둘 다 없으면 INVALID_INPUT 예외.</li>
+     * </ol>
+     *
+     * <p>JWT 인증인 경우 토큰에서 추출된 userId(=principal.getName())를 그대로 사용한다.</p>
      *
      * @param principal     인증된 사용자 정보
-     * @param requestUserId 요청에 포함된 userId (Agent 호출 시 사용, nullable)
+     * @param requestUserId 컨트롤러에서 명시적으로 전달한 userId (없으면 null 가능)
      * @return 확인된 사용자 ID
-     * @throws BusinessException 인증 정보가 없거나, ServiceKey인데 userId 누락
+     * @throws BusinessException 인증 정보가 없거나, ServiceKey 인데 userId 가 어디에도 없는 경우
      */
     protected String resolveUserIdWithServiceKey(Principal principal, String requestUserId) {
         if (principal == null) {
@@ -62,16 +75,36 @@ public abstract class BaseController {
         }
         String principalName = principal.getName();
 
-        // ServiceKey 인증: Agent가 요청 파라미터로 userId를 전달
+        // ServiceKey 인증: 명시 인자 → X-User-Id 헤더 → 예외 순서로 폴백
         if (AppConstants.SERVICE_PRINCIPAL.equals(principalName)) {
-            if (requestUserId == null || requestUserId.isBlank()) {
+            String resolved = (requestUserId != null && !requestUserId.isBlank())
+                    ? requestUserId
+                    : readUserIdHeaderFromCurrentRequest();
+            if (resolved == null || resolved.isBlank()) {
                 throw new BusinessException(ErrorCode.INVALID_INPUT, "서비스 호출 시 userId는 필수입니다");
             }
-            return requestUserId;
+            return resolved;
         }
 
         // JWT 인증: 토큰에서 추출한 userId 사용
         return principalName;
+    }
+
+    /**
+     * 현재 스레드에 바인딩된 HTTP 요청에서 {@code X-User-Id} 헤더 값을 읽는다.
+     *
+     * <p>{@link RequestContextHolder} 가 ServletRequestAttributes 를 가지지 못하는
+     * 비-요청 컨텍스트(스케줄러, 비동기 워커 등)에서는 안전하게 {@code null} 을 반환한다.</p>
+     *
+     * @return 헤더 값 (없거나 비-요청 컨텍스트면 null)
+     */
+    private String readUserIdHeaderFromCurrentRequest() {
+        if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attr)) {
+            return null;
+        }
+        HttpServletRequest request = attr.getRequest();
+        String value = request.getHeader(AppConstants.HEADER_USER_ID);
+        return (value == null || value.isBlank()) ? null : value;
     }
 
     /**

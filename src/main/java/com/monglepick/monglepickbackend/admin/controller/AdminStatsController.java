@@ -412,6 +412,114 @@ public class AdminStatsController {
     }
 
     // ──────────────────────────────────────────────
+    // 7-V2. AI 서비스 — 전면 재설계 (2026-04-29)
+    //
+    // 운영자가 (a) 한눈에 오늘 AI 호출 건강도를 파악하고,
+    // (b) 4개 에이전트(챗·추천·고객센터·퀴즈) 를 분리해서 보고,
+    // (c) 응답 성능·CTR·자동화율 같은 비즈니스 지표를 즉시 얻기 위한 9개 신규 EP.
+    //
+    // 기존 V1 EP(/overview, /trends, /intents, /quota) 는 보존 — breaking change 방지.
+    // 클라이언트 안정 후 deprecate 가능.
+    // ──────────────────────────────────────────────
+
+    /**
+     * AI 서비스 요약 KPI — "오늘 한눈에" 4개 핵심 지표.
+     *
+     * <p>오늘의 4 에이전트 합산 호출량, 전일 대비 %, 평균 응답시간(7d), 추천 CTR(30d),
+     * 고객센터 자동화율(30d), 활성 사용자 수를 한 응답에 묶어 반환한다.</p>
+     */
+    @Operation(summary = "AI 서비스 요약", description = "오늘 호출량/응답시간/CTR/자동화율 통합 KPI")
+    @GetMapping("/ai-service/summary")
+    public ResponseEntity<ApiResponse<AiSummaryResponse>> getAiSummary() {
+        log.debug("[admin-stats-api] GET /ai-service/summary");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAiSummary()));
+    }
+
+    /**
+     * 에이전트별 호출량 일별 추이 — 멀티 라인 차트.
+     */
+    @Operation(summary = "에이전트별 호출 추이", description = "챗/추천/고객센터/퀴즈 일별 호출량")
+    @GetMapping("/ai-service/agent-trends")
+    public ResponseEntity<ApiResponse<AgentTrendsResponse>> getAgentTrends(
+            @RequestParam(defaultValue = "30d") String period) {
+        log.debug("[admin-stats-api] GET /ai-service/agent-trends — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAgentTrends(period)));
+    }
+
+    /**
+     * 에이전트별 KPI 요약 — 4개 카드 (챗·추천·고객센터·퀴즈).
+     */
+    @Operation(summary = "에이전트별 KPI", description = "4 에이전트 각각의 핵심 지표")
+    @GetMapping("/ai-service/agent-summary")
+    public ResponseEntity<ApiResponse<AgentSummaryResponse>> getAgentSummary() {
+        log.debug("[admin-stats-api] GET /ai-service/agent-summary");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAgentSummary()));
+    }
+
+    /**
+     * 응답 시간 분포 — p50/p95/p99 + 일별 시계열 (추천 엔진 한정).
+     */
+    @Operation(summary = "응답시간 분포", description = "추천 엔진 응답시간 percentile + 일별 시계열")
+    @GetMapping("/ai-service/latency")
+    public ResponseEntity<ApiResponse<LatencyResponse>> getLatencyDistribution(
+            @RequestParam(defaultValue = "7d") String period) {
+        log.debug("[admin-stats-api] GET /ai-service/latency — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getLatencyDistribution(period)));
+    }
+
+    /**
+     * 모델 버전별 비교 — recommendation_log GROUP BY model_version.
+     */
+    @Operation(summary = "모델 버전별 비교", description = "model_version 별 호출수/평균점수/응답시간/CTR")
+    @GetMapping("/ai-service/model-comparison")
+    public ResponseEntity<ApiResponse<ModelComparisonResponse>> getModelComparison() {
+        log.debug("[admin-stats-api] GET /ai-service/model-comparison");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getModelComparison()));
+    }
+
+    /**
+     * 추천 펀넬 — 5단계 (recommendation_impact 기반).
+     */
+    @Operation(summary = "추천 펀넬", description = "추천→클릭→상세→찜→시청→평점 5단계 전환율")
+    @GetMapping("/ai-service/recommendation-funnel")
+    public ResponseEntity<ApiResponse<RecommendationFunnelResponse>> getRecommendationFunnel(
+            @RequestParam(defaultValue = "30d") String period) {
+        log.debug("[admin-stats-api] GET /ai-service/recommendation-funnel — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getRecommendationFunnel(period)));
+    }
+
+    /**
+     * 고객센터 자동화율 — 추이 + hop 분포.
+     */
+    @Operation(summary = "고객센터 자동화율", description = "1:1 유도 비율, 일별 자동화율, ReAct hop 분포")
+    @GetMapping("/ai-service/support-automation")
+    public ResponseEntity<ApiResponse<SupportAutomationResponse>> getSupportAutomation(
+            @RequestParam(defaultValue = "30d") String period) {
+        log.debug("[admin-stats-api] GET /ai-service/support-automation — period={}", period);
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getSupportAutomation(period)));
+    }
+
+    /**
+     * AI 의도 분포 V2 — chat / support 두 채널 분리.
+     */
+    @Operation(summary = "AI 의도 분포 V2", description = "챗 에이전트 / 고객센터 의도 분리 응답")
+    @GetMapping("/ai-service/intents-v2")
+    public ResponseEntity<ApiResponse<AiIntentDistributionResponseV2>> getAiIntentDistributionV2() {
+        log.debug("[admin-stats-api] GET /ai-service/intents-v2");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAiIntentDistributionV2()));
+    }
+
+    /**
+     * AI 쿼터 현황 V2 — 6 등급 차등 기준.
+     */
+    @Operation(summary = "AI 쿼터 현황 V2", description = "6 등급 daily_ai_limit 차등 기준 + 등급별 분포")
+    @GetMapping("/ai-service/quota-v2")
+    public ResponseEntity<ApiResponse<AiQuotaStatsResponseV2>> getAiQuotaStatsV2() {
+        log.debug("[admin-stats-api] GET /ai-service/quota-v2");
+        return ResponseEntity.ok(ApiResponse.ok(adminStatsService.getAiQuotaStatsV2()));
+    }
+
+    // ──────────────────────────────────────────────
     // 8. 커뮤니티
     // ──────────────────────────────────────────────
 

@@ -133,4 +133,46 @@ public interface SupportChatLogRepository extends JpaRepository<SupportChatLog, 
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to
     );
+
+    // ══════════════════════════════════════════════
+    // AI 서비스 통계 V2 — 고객센터 KPI/자동화율 (2026-04-29)
+    // ══════════════════════════════════════════════
+
+    /**
+     * 평균 ReAct hop_count — 고객센터 챗봇 효율성 지표.
+     *
+     * @return 평균 hop (데이터 없으면 null)
+     */
+    @Query("SELECT AVG(l.hopCount) FROM SupportChatLog l")
+    Double findAverageHopCount();
+
+    /**
+     * ReAct hop 분포 — 0~5 버킷 카운트 (HopBucket 응답).
+     *
+     * <p>반환 row: [hops, count]. ORDER BY hops ASC.</p>
+     *
+     * @return Object[] (hops, count) 리스트
+     */
+    @Query("""
+        SELECT l.hopCount, COUNT(l) FROM SupportChatLog l
+        GROUP BY l.hopCount
+        ORDER BY l.hopCount ASC
+        """)
+    List<Object[]> hopDistribution();
+
+    /**
+     * 지정 기간 내 챗봇 질의 수 (Summary/추이용).
+     *
+     * @param start 시작 시각
+     * @param end   종료 시각
+     * @return 기간 내 질의 수
+     */
+    @Query("""
+        SELECT COUNT(l) FROM SupportChatLog l
+        WHERE l.createdAt >= :start AND l.createdAt < :end
+        """)
+    long countByCreatedAtBetween(
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end
+    );
 }

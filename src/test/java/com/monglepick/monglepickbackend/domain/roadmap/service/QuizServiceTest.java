@@ -432,10 +432,14 @@ class QuizServiceTest {
         @Test
         @DisplayName("정상 응시 — 정답률 / 누적 포인트 / 마지막 응시 시각이 정확히 매핑된다")
         void aggregatesNormalCase() {
-            // given — Repository 가 [총응시 10, 정답 7, 누적포인트 70, 마지막시각] 반환
+            // given — Repository 가 List<Object[]> 1행으로 [총응시 10, 정답 7, 누적포인트 70, 마지막시각] 반환
+            // (Spring Boot 4 / Hibernate 7 에서 멀티 SELECT JPQL 결과는 반드시 List<Object[]>)
+            // List.of(Object[]) 는 Object... 가변인자로 해석되어 List<Object> 가 되므로
+            // singletonList 로 명시적 List<Object[]> 를 만든다.
             java.time.LocalDateTime lastAt = java.time.LocalDateTime.of(2026, 4, 29, 12, 30);
             when(participationRepository.aggregateMyStats("u-stat-1"))
-                    .thenReturn(new Object[]{10L, 7L, 70L, lastAt});
+                    .thenReturn(java.util.Collections.singletonList(
+                            new Object[]{10L, 7L, 70L, lastAt}));
 
             // when
             MyStatsResponse res = quizService.getMyStats("u-stat-1");
@@ -451,9 +455,11 @@ class QuizServiceTest {
         @Test
         @DisplayName("응시 0건 — 정답률 0.0 (NaN 방지) + lastAttemptedAt=null")
         void emptyAttemptsReturnsZero() {
-            // given — SUM 이 null 인 환경 (응시 0건)
+            // given — SUM 이 null 인 환경 (응시 0건). aggregation 은 항상 1행이 나오므로
+            // List 는 정확히 1개 row 를 담는다.
             when(participationRepository.aggregateMyStats("u-stat-2"))
-                    .thenReturn(new Object[]{0L, null, null, null});
+                    .thenReturn(java.util.Collections.singletonList(
+                            new Object[]{0L, null, null, null}));
 
             // when
             MyStatsResponse res = quizService.getMyStats("u-stat-2");
@@ -472,8 +478,9 @@ class QuizServiceTest {
         void handlesNumberPolymorphism() {
             // given — Hibernate 가 환경에 따라 Integer 로 반환할 수도 있음
             when(participationRepository.aggregateMyStats("u-stat-3"))
-                    .thenReturn(new Object[]{Integer.valueOf(5), Integer.valueOf(3),
-                            Integer.valueOf(30), null});
+                    .thenReturn(java.util.Collections.singletonList(
+                            new Object[]{Integer.valueOf(5), Integer.valueOf(3),
+                                    Integer.valueOf(30), null}));
 
             MyStatsResponse res = quizService.getMyStats("u-stat-3");
 

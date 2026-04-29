@@ -91,4 +91,61 @@ public interface UserAiQuotaRepository extends JpaRepository<UserAiQuota, Long> 
     /** 일일 무료 한도 소진 사용자 수 (dailyAiUsed >= 3, 기본 NORMAL 등급 한도) */
     @Query("SELECT COUNT(q) FROM UserAiQuota q WHERE q.dailyAiUsed >= 3")
     long countExhaustedUsers();
+
+    // ══════════════════════════════════════════════
+    // AI 서비스 통계 V2 — 6 등급 차등 기준 적용 (2026-04-29)
+    //
+    // grades.daily_ai_limit 을 LEFT JOIN 하여 실제 등급별 한도 기준으로 소진 판정.
+    // -1 (DIAMOND, 무제한) 은 절대 소진 카운트에서 제외.
+    // user_points 가 없는 사용자는 NORMAL 등급(한도=3) 으로 간주 (COALESCE).
+    // Native SQL 사용 — JPQL 의 LEFT JOIN ON 호환성 회피 + 운영 정확성 우선.
+    // ══════════════════════════════════════════════
+
+    /**
+     * 등급별 한도 기준으로 일일 무료 한도 소진 사용자 수.
+     *
+     * @return 등급별 daily_ai_limit 도달 사용자 수 (DIAMOND -1 무제한 제외)
+     */
+    @Query(value = """
+            SELECT COALESCE(SUM(
+                CASE WHEN COALESCE(g.daily_ai_limit, 3) <> -1
+                      AND q.daily_ai_used >= COALESCE(g.daily_ai_limit, 3)
+                     THEN 1 ELSE 0 END
+            ), 0)
+            FROM user_ai_quota q
+            LEFT JOIN user_points up ON up.user_id = q.user_id
+            LEFT JOIN grades g ON g.grade_id = up.grade_id
+            """, nativeQuery = true)
+    long countExhaustedUsersByGrade();
+
+    /**
+     * 등급별 사용자 분포 — gradeCode/gradeName/totalUsers/exhausted/avgDailyUsed.
+     *
+     * <p>반환 row: [gradeCode, gradeName, totalUsers, exhausted, avgDailyUsed].
+     * sort_order ASC 정렬 (NORMAL → DIAMOND).</p>
+     *
+     * <p>user_points 가 없는 사용자는 'NORMAL' 등급 + 한도 3 으로 간주된다 (NULL 그룹 → COALESCE).</p>
+     *
+     * @return Object[] (gradeCode, gradeName, totalUsers, exhausted, avgDailyUsed) 리스트
+     */
+    @Query(value = """
+            SELECT
+                COALESCE(g.grade_code, 'NORMAL') AS grade_code,
+                COALESCE(g.grade_name, '알갱이') AS grade_name,
+                COUNT(q.user_ai_quota_id) AS total_users,
+                SUM(
+                    CASE WHEN COALESCE(g.daily_ai_limit, 3) <> -1
+                          AND q.daily_ai_used >= COALESCE(g.daily_ai_limit, 3)
+                         THEN 1 ELSE 0 END
+                ) AS exhausted,
+                AVG(q.daily_ai_used) AS avg_used
+            FROM user_ai_quota q
+            LEFT JOIN user_points up ON up.user_id = q.user_id
+            LEFT JOIN grades g ON g.grade_id = up.grade_id
+            GROUP BY COALESCE(g.grade_code, 'NORMAL'),
+                     COALESCE(g.grade_name, '알갱이'),
+                     COALESCE(g.sort_order, 1)
+            ORDER BY COALESCE(g.sort_order, 1) ASC
+            """, nativeQuery = true)
+    java.util.List<Object[]> aggregateQuotaByGrade();
 }
