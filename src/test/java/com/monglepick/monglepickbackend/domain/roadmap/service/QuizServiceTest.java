@@ -200,9 +200,6 @@ class QuizServiceTest {
         void correctFirstTimeGrantsReward() {
             Quiz quiz = buildPublishedQuiz(1L, "정답");
             when(quizRepository.findById(1L)).thenReturn(Optional.of(quiz));
-            when(participationRepository
-                    .existsByQuiz_QuizIdAndUserIdAndIsCorrect(1L, "u1", true))
-                    .thenReturn(false);
             when(participationRepository.findByQuiz_QuizIdAndUserId(1L, "u1"))
                     .thenReturn(Optional.empty());
 
@@ -240,9 +237,6 @@ class QuizServiceTest {
         void wrongAnswerSkipsReward() {
             Quiz quiz = buildPublishedQuiz(2L, "정답");
             when(quizRepository.findById(2L)).thenReturn(Optional.of(quiz));
-            when(participationRepository
-                    .existsByQuiz_QuizIdAndUserIdAndIsCorrect(2L, "u2", true))
-                    .thenReturn(false);
             when(participationRepository.findByQuiz_QuizIdAndUserId(2L, "u2"))
                     .thenReturn(Optional.empty());
 
@@ -370,9 +364,6 @@ class QuizServiceTest {
         void trimAndIgnoreCase() {
             Quiz quiz = buildPublishedQuiz(6L, "Parasite");
             when(quizRepository.findById(6L)).thenReturn(Optional.of(quiz));
-            when(participationRepository
-                    .existsByQuiz_QuizIdAndUserIdAndIsCorrect(anyLong(), anyString(), eq(true)))
-                    .thenReturn(false);
             when(participationRepository.findByQuiz_QuizIdAndUserId(anyLong(), anyString()))
                     .thenReturn(Optional.empty());
 
@@ -395,9 +386,6 @@ class QuizServiceTest {
         void rewardFailureDoesNotPropagate() {
             Quiz quiz = buildPublishedQuiz(7L, "정답");
             when(quizRepository.findById(7L)).thenReturn(Optional.of(quiz));
-            when(participationRepository
-                    .existsByQuiz_QuizIdAndUserIdAndIsCorrect(7L, "u7", true))
-                    .thenReturn(false);
             when(participationRepository.findByQuiz_QuizIdAndUserId(7L, "u7"))
                     .thenReturn(Optional.empty());
             // grantReward 가 예외를 던지는 시나리오
