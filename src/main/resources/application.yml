@@ -408,4 +408,20 @@ toss:
     secret-key: ${TOSS_SECRET_KEY:REPLACE_WITH_TOSS_SECRET_KEY}
     client-key: ${TOSS_CLIENT_KEY:REPLACE_WITH_TOSS_CLIENT_KEY}
     base-url: ${TOSS_BASE_URL:https://api.tosspayments.com/v1}
+    ## Mock 모드 — 가상 사용자 시뮬레이션 등 평가/데모용으로 Toss API 호출을 우회한다.
+    ## 활성화 시 PaymentService.confirmPayment 가 실제 Toss API 호출 없이 SUCCESS 응답을 모방하여
+    ## payment_orders.status=COMPLETED 로 진행. 운영 트래픽에는 절대 활성화 금지.
+    ## 상세: docs/progress/data_pipeline.md (시뮬레이션 가이드)
+    mock-mode: ${TOSS_MOCK_MODE:false}
+
+## -------------------------------------------------------------------------
+## MyBatis 설정 — Enum 안전 변환
+## -------------------------------------------------------------------------
+## SafeEnumTypeHandler 를 default 로 등록하여 모든 @Enumerated(EnumType.STRING) 컬럼이
+## 빈 문자열 / invalid enum name 을 만나도 ResultMapException 으로 admin/Client 화면이 깨지지
+## 않게 한다. Invalid 값은 null 로 변환되고 WARN 로그만 남는다.
+## 상세: SafeEnumTypeHandler javadoc 참조.
+mybatis:
+  configuration:
+    default-enum-type-handler: com.monglepick.monglepickbackend.global.mybatis.SafeEnumTypeHandler
 
