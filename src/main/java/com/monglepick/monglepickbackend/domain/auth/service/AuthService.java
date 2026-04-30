@@ -31,6 +31,7 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -54,6 +55,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AuthService extends DefaultOAuth2UserService implements UserDetailsService {
+
+    private static final String SOCIAL_NICKNAME_PREFIX = "몽글유저";
+    private static final String SOCIAL_NICKNAME_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final int SOCIAL_NICKNAME_RANDOM_LENGTH = 6;
+    private static final int SOCIAL_NICKNAME_MAX_ATTEMPTS = 10;
+    private static final SecureRandom SOCIAL_NICKNAME_RANDOM = new SecureRandom();
 
     /** 사용자 조회/등록/수정 — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
     private final UserMapper userMapper;
@@ -350,18 +357,17 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
 
         User user;
         if (existingUser != null) {
-            /* 기존 사용자: 닉네임 업데이트 (도메인 메서드로 in-memory 변경 후 MyBatis update 명시 호출) */
+            /* 기존 사용자: 소셜 제공자 이름으로 앱 닉네임을 덮어쓰지 않는다. */
             user = existingUser;
-            user.updateNickname(nickname);
-            userMapper.update(user);
             log.info("소셜 로그인 — 기존 사용자: userId={}, provider={}", user.getUserId(), provider);
         } else {
             /* 신규 사용자: 생성 + 포인트 레코드 초기화(잔액 0) + 가입 보너스 지급 */
             String userId = UUID.randomUUID().toString();
+            String generatedNickname = generateSocialDefaultNickname();
             user = User.builder()
                     .userId(userId)
                     .email(email)
-                    .nickname(nickname)
+                    .nickname(generatedNickname)
                     .provider(provider)
                     .providerId(providerId)
                     .requiredTerm(true)
@@ -408,5 +414,30 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         );
 
         return new AuthResponse(accessToken, refreshToken, userInfo, signupBonusPoints);
+    }
+
+    /**
+     * 신규 소셜 가입자용 기본 닉네임을 생성한다.
+     *
+     * <p>소셜 제공자가 내려준 name/profile nickname은 실명일 수 있으므로 저장하지 않고,
+     * 앱 내부 형식의 랜덤 닉네임을 사용한다.</p>
+     */
+    private String generateSocialDefaultNickname() {
+        for (int attempt = 0; attempt < SOCIAL_NICKNAME_MAX_ATTEMPTS; attempt++) {
+            String nickname = SOCIAL_NICKNAME_PREFIX + randomNicknameSuffix();
+            if (!userMapper.existsByNickname(nickname)) {
+                return nickname;
+            }
+        }
+        return SOCIAL_NICKNAME_PREFIX + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    private String randomNicknameSuffix() {
+        StringBuilder suffix = new StringBuilder(SOCIAL_NICKNAME_RANDOM_LENGTH);
+        for (int i = 0; i < SOCIAL_NICKNAME_RANDOM_LENGTH; i++) {
+            int index = SOCIAL_NICKNAME_RANDOM.nextInt(SOCIAL_NICKNAME_CHARS.length());
+            suffix.append(SOCIAL_NICKNAME_CHARS.charAt(index));
+        }
+        return suffix.toString();
     }
 }

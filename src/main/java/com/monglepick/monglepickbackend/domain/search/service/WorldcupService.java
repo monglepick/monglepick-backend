@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.domain.search.service;
 
 import com.monglepick.monglepickbackend.domain.movie.entity.Movie;
 import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupCategoryOptionResponse;
 import com.monglepick.monglepickbackend.domain.search.dto.WorldcupMatchDto;
@@ -62,6 +63,7 @@ public class WorldcupService {
     private final WorldcupCategoryRepository worldcupCategoryRepo;
     private final WorldcupMovieQueryRepository worldcupMovieQueryRepo;
     private final RewardService rewardService;
+    private final AchievementService achievementService;
 
     /**
      * 사용자에게 노출할 월드컵 카테고리 목록을 반환한다.
@@ -439,10 +441,20 @@ public class WorldcupService {
                 "worldcup_first",
                 0
         );
+        checkOnboardCompleteSafely(session.getUserId(), session.getSessionId());
 
         log.info("월드컵 게임 완료: sessionId={}, userId={}, winnerMovieId={}",
                 session.getSessionId(), session.getUserId(), finalWinner);
         return WorldcupPickResponse.gameComplete(session.getSessionId(), finalWinner);
+    }
+
+    private void checkOnboardCompleteSafely(String userId, Long sessionId) {
+        try {
+            achievementService.checkOnboardComplete(userId);
+        } catch (Exception e) {
+            log.warn("월드컵 완료 후 온보딩 업적 체크 실패 (월드컵 완료는 정상 처리): userId={}, sessionId={}, error={}",
+                    userId, sessionId, e.getMessage());
+        }
     }
 
     private record CandidatePoolInfo(
