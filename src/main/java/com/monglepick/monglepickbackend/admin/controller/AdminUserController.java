@@ -30,6 +30,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -87,8 +88,8 @@ public class AdminUserController {
     /**
      * 사용자 목록을 조회한다.
      *
-     * <p>keyword, status, role 파라미터를 조합하여 필터링한다.
-     * 파라미터를 생략하면 전체 사용자(탈퇴 제외)를 반환한다.</p>
+     * <p>keyword, status, role, deletedFilter 파라미터를 조합하여 필터링한다.
+     * deletedFilter를 생략하면 탈퇴하지 않은 사용자만 반환한다.</p>
      *
      * <h4>정렬 기본값</h4>
      * <p>가입 일시(createdAt) 내림차순 — 최근 가입 회원이 먼저 표시된다.</p>
@@ -96,6 +97,7 @@ public class AdminUserController {
      * @param keyword 닉네임 또는 이메일 검색 키워드 (생략 가능)
      * @param status  계정 상태 필터: ACTIVE, SUSPENDED, LOCKED (생략 가능)
      * @param role    역할 필터: USER, ADMIN (생략 가능)
+     * @param deletedFilter 삭제 필터: NOT_DELETED, DELETED, ALL (기본값 NOT_DELETED)
      * @param page    페이지 번호 (0부터 시작, 기본값 0)
      * @param size    페이지 크기 (기본값 20, 최대 100)
      * @return 필터 조건에 맞는 사용자 목록 페이지
@@ -103,8 +105,8 @@ public class AdminUserController {
     @Operation(
             summary = "사용자 목록 조회",
             description = "닉네임/이메일 키워드, 계정 상태(ACTIVE/SUSPENDED/LOCKED), " +
-                    "역할(USER/ADMIN) 필터를 조합하여 사용자 목록을 페이징 조회한다. " +
-                    "탈퇴 회원(is_deleted=true)은 항상 제외된다."
+                    "역할(USER/ADMIN), 삭제 필터(NOT_DELETED/DELETED/ALL)를 조합하여 사용자 목록을 페이징 조회한다. " +
+                    "deletedFilter 생략 시 탈퇴 회원(is_deleted=true)은 제외된다."
     )
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "조회 성공")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "유효하지 않은 status 또는 role 값")
@@ -119,6 +121,9 @@ public class AdminUserController {
             @Parameter(description = "역할 필터 (USER, ADMIN)")
             @RequestParam(required = false) String role,
 
+            @Parameter(description = "삭제 필터 (NOT_DELETED, DELETED, ALL)", example = "NOT_DELETED")
+            @RequestParam(required = false) String deletedFilter,
+
             @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
             @RequestParam(defaultValue = "0") int page,
 
@@ -131,10 +136,10 @@ public class AdminUserController {
         // 기본 정렬: 가입 일시 내림차순 (최근 가입 회원이 먼저)
         Pageable pageable = PageRequest.of(page, safeSize, Sort.by("createdAt").descending());
 
-        log.debug("[AdminUserController] 사용자 목록 조회 — keyword={}, status={}, role={}, page={}, size={}",
-                keyword, status, role, page, safeSize);
+        log.debug("[AdminUserController] 사용자 목록 조회 — keyword={}, status={}, role={}, deletedFilter={}, page={}, size={}",
+                keyword, status, role, deletedFilter, page, safeSize);
 
-        Page<UserListResponse> result = adminUserService.getUsers(keyword, status, role, pageable);
+        Page<UserListResponse> result = adminUserService.getUsers(keyword, status, role, deletedFilter, pageable);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }
 
@@ -142,7 +147,7 @@ public class AdminUserController {
      * 특정 사용자의 상세 정보를 조회한다.
      *
      * <p>기본 프로필 + 포인트/등급 + 활동 통계(게시글·리뷰·댓글 건수)를 반환한다.
-     * 탈퇴한 사용자(is_deleted=true)는 404로 응답한다.</p>
+     * 탈퇴한 사용자(is_deleted=true)도 관리자 식별/복구를 위해 조회 가능하다.</p>
      *
      * @param userId 조회할 사용자 ID (VARCHAR(50))
      * @return 사용자 상세 응답 DTO
@@ -272,6 +277,37 @@ public class AdminUserController {
 
         adminUserService.activateUser(userId);
         return ResponseEntity.ok(ApiResponse.ok("계정이 복구되었습니다."));
+    }
+
+    /**
+     * 탈퇴 처리된 사용자 계정을 복구한다.
+     *
+     * <p>is_deleted/deleted_at을 초기화하고 status를 ACTIVE로 되돌린다.
+     * 정지 복구(/activate)와 구분되는 탈퇴 복구 전용 엔드포인트이다.</p>
+     *
+     * @param userId 복구할 탈퇴 사용자 ID
+     * @return 성공 메시지 응답
+     */
+    @Operation(
+            summary = "탈퇴 계정 복구",
+            description = "탈퇴 처리된 사용자(is_deleted=true)를 관리자 권한으로 복구한다. " +
+                    "is_deleted=false, deleted_at=null, status=ACTIVE로 변경하고 재가입 제한 이력을 정리한다."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "탈퇴 계정 복구 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "탈퇴한 사용자가 아님"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "사용자를 찾을 수 없음")
+    })
+    @PreAuthorize("hasRole('ADMIN')")
+    @PatchMapping("/{userId}/restore-withdrawal")
+    public ResponseEntity<ApiResponse<String>> restoreWithdrawnUser(
+            @Parameter(description = "복구할 탈퇴 사용자 ID", example = "user_abc123")
+            @PathVariable String userId
+    ) {
+        log.info("[AdminUserController] 탈퇴 계정 복구 요청 — userId={}", userId);
+
+        adminUserService.restoreWithdrawnUser(userId);
+        return ResponseEntity.ok(ApiResponse.ok("탈퇴 계정이 복구되었습니다."));
     }
 
     // ──────────────────────────────────────────────

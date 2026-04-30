@@ -145,6 +145,25 @@ public class UserController {
     }
 
     /**
+     * 회원 탈퇴 API.
+     *
+     * <p>사용자 row는 삭제하지 않고 {@code is_deleted=true}, {@code deleted_at=now()}로 표시한다.
+     * 서비스 레이어에서 탈퇴 식별자 HMAC 기록과 refresh token 전체 삭제를 함께 처리한다.</p>
+     */
+    @Operation(summary = "회원 탈퇴", description = "현재 로그인 사용자를 soft delete 처리하고 Refresh Token을 모두 무효화한다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "회원 탈퇴 성공"),
+            @ApiResponse(responseCode = "404", description = "사용자를 찾을 수 없거나 이미 탈퇴한 사용자")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @DeleteMapping
+    public ResponseEntity<Void> withdraw(@AuthenticationPrincipal String userId) {
+        log.info("회원 탈퇴 요청 - userId: {}", userId);
+        userService.withdraw(userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * 시청 이력 조회 API (마이페이지 통합 경로)
      *
      * <p>로그인한 사용자의 시청 이력을 최신순으로 페이징 조회한다.

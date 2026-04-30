@@ -133,6 +133,12 @@ public enum ErrorCode {
     /** 관리자에 의해 정지된 계정. 유효한 JWT가 있어도 API 접근 차단. */
     ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "A011", "정지된 계정입니다. 관리자에게 문의하세요."),
 
+    /** 탈퇴 처리된 계정. 유효한 JWT가 있어도 API 접근 차단. */
+    ACCOUNT_WITHDRAWN(HttpStatus.FORBIDDEN, "A012", "탈퇴한 계정입니다."),
+
+    /** 탈퇴 후 재가입 제한 기간 내 동일 이메일/소셜 계정으로 가입 시도. */
+    WITHDRAWN_REJOIN_BLOCKED(HttpStatus.CONFLICT, "A013", "탈퇴 후 30일 동안 동일 계정으로 재가입할 수 없습니다."),
+
     // ─────────────────────────────────────────────
     // 공통 (G0xx)
     // ─────────────────────────────────────────────

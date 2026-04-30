@@ -11,6 +11,7 @@ import com.monglepick.monglepickbackend.domain.reward.service.PointService;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.domain.user.service.WithdrawnUserIdentityService;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
@@ -30,6 +31,7 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -54,6 +56,12 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class AuthService extends DefaultOAuth2UserService implements UserDetailsService {
 
+    private static final String SOCIAL_NICKNAME_PREFIX = "몽글유저";
+    private static final String SOCIAL_NICKNAME_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final int SOCIAL_NICKNAME_RANDOM_LENGTH = 6;
+    private static final int SOCIAL_NICKNAME_MAX_ATTEMPTS = 10;
+    private static final SecureRandom SOCIAL_NICKNAME_RANDOM = new SecureRandom();
+
     /** 사용자 조회/등록/수정 — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
@@ -62,6 +70,8 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
 
     /** C-2: Refresh Token DB 저장을 위한 JwtService 의존성 추가 */
     private final JwtService jwtService;
+    /** 탈퇴 후 30일 재가입 제한 확인 서비스 */
+    private final WithdrawnUserIdentityService withdrawnUserIdentityService;
 
     /**
      * R-1: 회원가입 보너스 지급을 위한 RewardService 주입.
@@ -93,6 +103,8 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     @Transactional
     public AuthResponse signup(SignupRequest request) {
         log.info("로컬 회원가입 요청 — email: {}", request.email());
+
+        withdrawnUserIdentityService.assertEmailNotBlocked(request.email());
 
         if (userMapper.existsByEmail(request.email())) {
             throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS);
@@ -150,7 +162,7 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
      */
     public void checkEmailExists(PasswordCheckRequest request) {
         User user = userMapper.findByEmail(request.email());
-        if (user == null || user.getProvider() != User.Provider.LOCAL) {
+        if (user == null || user.isDeleted() || user.getProvider() != User.Provider.LOCAL) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
     }
@@ -164,7 +176,7 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     @Transactional
     public void resetPassword(PasswordResetRequest request) {
         User user = userMapper.findByEmail(request.email());
-        if (user == null || user.getProvider() != User.Provider.LOCAL) {
+        if (user == null || user.isDeleted() || user.getProvider() != User.Provider.LOCAL) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         String newHash = passwordEncoder.encode(request.newPassword());
@@ -188,6 +200,11 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         User user = userMapper.findByEmail(email);
         if (user == null) {
             throw new UsernameNotFoundException("사용자를 찾을 수 없습니다: " + email);
+        }
+
+        if (user.isDeleted()) {
+            log.warn("[AuthService] 탈퇴 계정 로그인 차단 — email={}", email);
+            throw new UsernameNotFoundException("탈퇴한 계정입니다.");
         }
 
         /* 소셜 로그인 사용자는 로컬 로그인 불가 */
@@ -319,25 +336,38 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         /* provider+providerId로 기존 사용자 조회 (MyBatis — Provider enum을 String으로 전달) */
         User existingUser = userMapper.findByProviderAndProviderId(provider.name(), providerId);
 
+        if (existingUser != null && existingUser.isDeleted()) {
+            log.warn("소셜 로그인 — 탈퇴 계정 차단: userId={}, provider={}",
+                    existingUser.getUserId(), provider);
+            throw new OAuth2AuthenticationException("탈퇴한 계정입니다.");
+        }
+
         /* 이메일 중복 확인 (다른 제공자로 가입된 이메일인지) */
         if (existingUser == null && email != null && userMapper.existsByEmail(email)) {
             throw new OAuth2AuthenticationException("이미 해당 이메일로 가입된 계정이 있습니다.");
         }
 
+        if (existingUser == null) {
+            try {
+                withdrawnUserIdentityService.assertProviderNotBlocked(provider.name(), providerId);
+            } catch (BusinessException e) {
+                throw new OAuth2AuthenticationException(e.getMessage());
+            }
+        }
+
         User user;
         if (existingUser != null) {
-            /* 기존 사용자: 닉네임 업데이트 (도메인 메서드로 in-memory 변경 후 MyBatis update 명시 호출) */
+            /* 기존 사용자: 소셜 제공자 이름으로 앱 닉네임을 덮어쓰지 않는다. */
             user = existingUser;
-            user.updateNickname(nickname);
-            userMapper.update(user);
             log.info("소셜 로그인 — 기존 사용자: userId={}, provider={}", user.getUserId(), provider);
         } else {
             /* 신규 사용자: 생성 + 포인트 레코드 초기화(잔액 0) + 가입 보너스 지급 */
             String userId = UUID.randomUUID().toString();
+            String generatedNickname = generateSocialDefaultNickname();
             user = User.builder()
                     .userId(userId)
                     .email(email)
-                    .nickname(nickname)
+                    .nickname(generatedNickname)
                     .provider(provider)
                     .providerId(providerId)
                     .requiredTerm(true)
@@ -384,5 +414,30 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         );
 
         return new AuthResponse(accessToken, refreshToken, userInfo, signupBonusPoints);
+    }
+
+    /**
+     * 신규 소셜 가입자용 기본 닉네임을 생성한다.
+     *
+     * <p>소셜 제공자가 내려준 name/profile nickname은 실명일 수 있으므로 저장하지 않고,
+     * 앱 내부 형식의 랜덤 닉네임을 사용한다.</p>
+     */
+    private String generateSocialDefaultNickname() {
+        for (int attempt = 0; attempt < SOCIAL_NICKNAME_MAX_ATTEMPTS; attempt++) {
+            String nickname = SOCIAL_NICKNAME_PREFIX + randomNicknameSuffix();
+            if (!userMapper.existsByNickname(nickname)) {
+                return nickname;
+            }
+        }
+        return SOCIAL_NICKNAME_PREFIX + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    private String randomNicknameSuffix() {
+        StringBuilder suffix = new StringBuilder(SOCIAL_NICKNAME_RANDOM_LENGTH);
+        for (int i = 0; i < SOCIAL_NICKNAME_RANDOM_LENGTH; i++) {
+            int index = SOCIAL_NICKNAME_RANDOM.nextInt(SOCIAL_NICKNAME_CHARS.length());
+            suffix.append(SOCIAL_NICKNAME_CHARS.charAt(index));
+        }
+        return suffix.toString();
     }
 }

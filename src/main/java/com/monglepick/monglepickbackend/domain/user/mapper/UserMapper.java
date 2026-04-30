@@ -63,6 +63,12 @@ public interface UserMapper {
     /** 사용자 정보 수정 (UPDATE) — 닉네임, 프로필 이미지, 비밀번호, 상태 등 변경 가능 필드 일괄 */
     void update(User user);
 
+    /** 회원 탈퇴 soft delete 처리 */
+    int softDeleteUser(@Param("userId") String userId, @Param("deletedAt") LocalDateTime deletedAt);
+
+    /** 탈퇴 계정 관리자 복구 처리 */
+    int restoreWithdrawnUser(@Param("userId") String userId);
+
     /** 최종 로그인 시각 갱신 (단건 UPDATE — 전체 UPDATE 오버헤드 회피) */
     void updateLastLoginAt(@Param("userId") String userId);
 

@@ -345,6 +345,10 @@ app:
     secret: ${JWT_SECRET:monglepick-dev-jwt-secret-key-must-be-at-least-256-bits-long-for-hs256}
     access-token-expiry: 3600000
     refresh-token-expiry: 604800000
+  withdrawal:
+    ## 탈퇴 후 재가입 제한용 HMAC 키. 운영 환경에서는 WITHDRAWAL_HMAC_SECRET 별도 설정 권장.
+    hmac-secret: ${WITHDRAWAL_HMAC_SECRET:${JWT_SECRET:monglepick-dev-jwt-secret-key-must-be-at-least-256-bits-long-for-hs256}}
+    rejoin-block-days: ${WITHDRAWAL_REJOIN_BLOCK_DAYS:30}
   oauth:
     ## 소셜 로그인 성공/실패 시 프론트엔드 리다이렉트 URL
     redirect-url: ${OAUTH_REDIRECT_URL:http://localhost:5173/cookie}
@@ -404,5 +408,4 @@ toss:
     secret-key: ${TOSS_SECRET_KEY:REPLACE_WITH_TOSS_SECRET_KEY}
     client-key: ${TOSS_CLIENT_KEY:REPLACE_WITH_TOSS_CLIENT_KEY}
     base-url: ${TOSS_BASE_URL:https://api.tosspayments.com/v1}
-
 

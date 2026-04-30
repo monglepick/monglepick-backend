@@ -39,6 +39,8 @@ public class UserManagementDto {
      * @param userRole      역할 (USER, ADMIN)
      * @param status        계정 상태 (ACTIVE, SUSPENDED, LOCKED)
      * @param provider      로그인 제공자 (LOCAL, GOOGLE, KAKAO, NAVER)
+     * @param isDeleted     탈퇴 여부
+     * @param deletedAt     탈퇴 일시
      * @param createdAt     가입 일시
      * @param lastLoginAt   최종 로그인 일시 (미로그인 시 null)
      */
@@ -49,6 +51,8 @@ public class UserManagementDto {
             String userRole,
             String status,
             String provider,
+            boolean isDeleted,
+            LocalDateTime deletedAt,
             LocalDateTime createdAt,
             LocalDateTime lastLoginAt
     ) {}
@@ -66,6 +70,8 @@ public class UserManagementDto {
      * @param status           계정 상태 (ACTIVE, SUSPENDED, LOCKED)
      * @param provider         로그인 제공자 (LOCAL, GOOGLE, KAKAO, NAVER)
      * @param profileImageUrl  프로필 이미지 URL (없으면 null)
+     * @param isDeleted        탈퇴 여부
+     * @param deletedAt        탈퇴 일시
      * @param pointBalance     현재 포인트 잔액 (user_points.balance)
      * @param totalEarned      누적 획득 포인트 (user_points.total_earned)
      * @param gradeCode        등급 코드 (NORMAL, BRONZE, SILVER, GOLD, PLATINUM, DIAMOND)
@@ -86,6 +92,8 @@ public class UserManagementDto {
             String status,
             String provider,
             String profileImageUrl,
+            boolean isDeleted,
+            LocalDateTime deletedAt,
             Integer pointBalance,
             Integer totalEarned,
             String gradeCode,
