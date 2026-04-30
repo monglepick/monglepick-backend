@@ -11,6 +11,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipat
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
+import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -62,6 +63,7 @@ class QuizServiceTest {
     @Mock private QuizRepository quizRepository;
     @Mock private QuizParticipationRepository participationRepository;
     @Mock private RewardService rewardService;
+    @Mock private AchievementService achievementService;
 
     @InjectMocks private QuizService quizService;
 
@@ -110,7 +112,7 @@ class QuizServiceTest {
                     .thenReturn(List.of(q1, q2));
 
             // when
-            List<QuizResponse> result = quizService.getMovieQuizzes("movie-1");
+            List<QuizResponse> result = quizService.getMovieQuizzes("movie-1", null);
 
             // then — 응답에 정답이 노출되지 않는 record 인지 컴파일 시점에 보장됨.
             //         options 파싱이 List<String> 4개로 동작하는지 검증.
@@ -126,7 +128,7 @@ class QuizServiceTest {
         void emptyResultWhenNoQuiz() {
             when(quizRepository.findByMovieIdAndStatus(anyString(), eq(Quiz.QuizStatus.PUBLISHED)))
                     .thenReturn(List.of());
-            assertThat(quizService.getMovieQuizzes("movie-X")).isEmpty();
+            assertThat(quizService.getMovieQuizzes("movie-X", null)).isEmpty();
         }
 
         @Test
@@ -140,7 +142,7 @@ class QuizServiceTest {
             when(quizRepository.findByMovieIdAndStatus(anyString(), eq(Quiz.QuizStatus.PUBLISHED)))
                     .thenReturn(List.of(broken));
 
-            List<QuizResponse> result = quizService.getMovieQuizzes("m");
+            List<QuizResponse> result = quizService.getMovieQuizzes("m", null);
             assertThat(result).hasSize(1);
             assertThat(result.get(0).options()).isEmpty();
         }
@@ -161,7 +163,7 @@ class QuizServiceTest {
             when(quizRepository.findByQuizDateAndStatus(eq(LocalDate.now()), eq(Quiz.QuizStatus.PUBLISHED)))
                     .thenReturn(List.of(today));
 
-            List<QuizResponse> result = quizService.getTodayQuizzes();
+            List<QuizResponse> result = quizService.getTodayQuizzes(null);
             assertThat(result).hasSize(1);
             assertThat(result.get(0).quizId()).isEqualTo(10L);
         }
@@ -257,12 +259,12 @@ class QuizServiceTest {
     // ============================================================
 
     @Nested
-    @DisplayName("submitAnswer — 이미 정답 기록 있는 재제출")
+    @DisplayName("submitAnswer — 이미 제출한 퀴즈 재제출 차단")
     class SubmitDuplicateTest {
 
         @Test
-        @DisplayName("alreadyCorrect=true 이면 정답이라도 grantReward 미호출 + rewardPoint=0")
-        void duplicateCorrectAnswerSkipsReward() {
+        @DisplayName("이미 제출 기록이 있으면 QUIZ_ALREADY_SUBMITTED 예외가 발생한다")
+        void duplicateSubmitThrowsAlreadySubmitted() {
             Quiz quiz = buildPublishedQuiz(3L, "정답");
             QuizParticipation existing = QuizParticipation.builder()
                     .quizParticipationId(100L)
@@ -273,17 +275,16 @@ class QuizServiceTest {
                     .build();
 
             when(quizRepository.findById(3L)).thenReturn(Optional.of(quiz));
-            when(participationRepository
-                    .existsByQuiz_QuizIdAndUserIdAndIsCorrect(3L, "u3", true))
-                    .thenReturn(true);  // 이미 정답 기록 존재
             when(participationRepository.findByQuiz_QuizIdAndUserId(3L, "u3"))
                     .thenReturn(Optional.of(existing));
 
-            SubmitResponse res = quizService.submitAnswer("u3", 3L, new SubmitRequest("정답"));
+            assertThatThrownBy(() ->
+                    quizService.submitAnswer("u3", 3L, new SubmitRequest("정답"))
+            ).isInstanceOf(BusinessException.class)
+             .hasFieldOrPropertyWithValue("errorCode", ErrorCode.QUIZ_ALREADY_SUBMITTED);
 
-            assertThat(res.correct()).isTrue();          // 채점은 정답
-            assertThat(res.rewardPoint()).isEqualTo(0);  // 리워드는 미지급
             verify(rewardService, never()).grantReward(anyString(), anyString(), anyString(), anyInt());
+            verify(participationRepository, never()).save(any());
         }
     }
 
@@ -327,12 +328,12 @@ class QuizServiceTest {
     // ============================================================
 
     @Nested
-    @DisplayName("submitAnswer — 재제출")
+    @DisplayName("submitAnswer — 재제출 차단")
     class SubmitResubmitTest {
 
         @Test
-        @DisplayName("기존 참여 기록이 있으면 INSERT 가 아닌 submit() update 경로로 동작")
-        void resubmitTriggersSubmitOnExistingRecord() {
+        @DisplayName("오답 후 재제출 시도해도 QUIZ_ALREADY_SUBMITTED 예외가 발생한다")
+        void resubmitAfterWrongAnswerThrowsAlreadySubmitted() {
             Quiz quiz = buildPublishedQuiz(5L, "정답");
             QuizParticipation existing = QuizParticipation.builder()
                     .quizParticipationId(200L)
@@ -343,24 +344,16 @@ class QuizServiceTest {
                     .build();
 
             when(quizRepository.findById(5L)).thenReturn(Optional.of(quiz));
-            when(participationRepository
-                    .existsByQuiz_QuizIdAndUserIdAndIsCorrect(5L, "u5", true))
-                    .thenReturn(false);
             when(participationRepository.findByQuiz_QuizIdAndUserId(5L, "u5"))
                     .thenReturn(Optional.of(existing));
 
-            SubmitResponse res = quizService.submitAnswer("u5", 5L, new SubmitRequest("정답"));
+            assertThatThrownBy(() ->
+                    quizService.submitAnswer("u5", 5L, new SubmitRequest("정답"))
+            ).isInstanceOf(BusinessException.class)
+             .hasFieldOrPropertyWithValue("errorCode", ErrorCode.QUIZ_ALREADY_SUBMITTED);
 
-            // 기존 record 의 도메인 메서드가 호출되었는지 (필드 업데이트로 검증)
-            assertThat(existing.getSelectedOption()).isEqualTo("정답");
-            assertThat(existing.getIsCorrect()).isTrue();
-            assertThat(existing.getSubmittedAt()).isNotNull();
-
-            // 신규 INSERT 가 호출되지 않아야 함 — JPA dirty checking 으로 update.
             verify(participationRepository, never()).save(any());
-
-            assertThat(res.correct()).isTrue();
-            assertThat(res.rewardPoint()).isEqualTo(10);  // 이전 isCorrect=false 였으므로 이번이 최초 정답
+            verify(rewardService, never()).grantReward(anyString(), anyString(), anyString(), anyInt());
         }
     }
 
