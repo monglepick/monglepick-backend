@@ -6,6 +6,7 @@ import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.UpdateStatusReque
 import com.monglepick.monglepickbackend.admin.repository.AdminQuizRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.Quiz;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.Quiz.QuizStatus;
+import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipationRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,9 @@ public class AdminQuizService {
 
     /** 관리자 전용 퀴즈 리포지토리 (페이징 + 상태 필터) — AdminAiOpsService와 공유 */
     private final AdminQuizRepository adminQuizRepository;
+
+    /** 삭제 전 FK 참여 기록 존재 여부 확인용 */
+    private final QuizParticipationRepository participationRepository;
 
     /**
      * 허용된 상태 전이 맵.
@@ -237,6 +241,12 @@ public class AdminQuizService {
                     id, quiz.getStatus());
             throw new BusinessException(ErrorCode.INVALID_QUIZ_STATUS_TRANSITION,
                     quiz.getStatus() + " 상태 퀴즈는 삭제할 수 없습니다. REJECTED 로 전환하세요.");
+        }
+
+        if (participationRepository.existsByQuiz_QuizId(id)) {
+            log.warn("[관리자] 참여 기록이 있는 퀴즈 삭제 시도 차단 — quizId={}", id);
+            throw new BusinessException(ErrorCode.INVALID_QUIZ_STATUS_TRANSITION,
+                    "참여 기록이 있는 퀴즈는 삭제할 수 없습니다. 참여 이력이 보존되어야 합니다.");
         }
 
         adminQuizRepository.delete(quiz);
