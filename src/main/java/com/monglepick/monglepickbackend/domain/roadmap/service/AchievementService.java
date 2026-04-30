@@ -4,8 +4,8 @@ import com.monglepick.monglepickbackend.domain.community.entity.Post;
 import com.monglepick.monglepickbackend.domain.community.entity.PostStatus;
 import com.monglepick.monglepickbackend.domain.community.ocrevent.UserVerificationRepository;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
-import com.monglepick.monglepickbackend.domain.movie.repository.FavActorRepository;
-import com.monglepick.monglepickbackend.domain.movie.repository.FavDirectorRepository;
+import com.monglepick.monglepickbackend.domain.movie.repository.FavGenreRepository;
+import com.monglepick.monglepickbackend.domain.movie.repository.FavMovieRepository;
 import com.monglepick.monglepickbackend.domain.recommendation.repository.RecommendationLogRepository;
 import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
 import com.monglepick.monglepickbackend.domain.roadmap.controller.AchievementController.AchievementResponse;
@@ -17,6 +17,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipat
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserAchievementRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.domain.search.repository.WorldcupResultRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.Nullable;
@@ -91,11 +92,14 @@ public class AchievementService {
     /** OCR 인증 Repository — ocr_* 진행률 계산 */
     private final UserVerificationRepository userVerificationRepository;
 
-    /** 온보딩 선호 배우 Repository — onboard_complete 진행률 계산 */
-    private final FavActorRepository favActorRepository;
+    /** 월드컵 결과 Repository — onboard_complete 진행률 계산 */
+    private final WorldcupResultRepository worldcupResultRepository;
 
-    /** 온보딩 선호 감독 Repository — onboard_complete 진행률 계산 */
-    private final FavDirectorRepository favDirectorRepository;
+    /** 온보딩 선호 장르 Repository — onboard_complete 진행률 계산 */
+    private final FavGenreRepository favGenreRepository;
+
+    /** 온보딩 인생 영화 Repository — onboard_complete 진행률 계산 */
+    private final FavMovieRepository favMovieRepository;
 
     /** 조회 API의 소급 달성 처리를 별도 트랜잭션으로 분리하기 위한 트랜잭션 매니저 */
     private final PlatformTransactionManager transactionManager;
@@ -225,6 +229,47 @@ public class AchievementService {
             String code = normalizeAchievementCode(type.getAchievementCode());
             return code != null && code.startsWith("comment_count_");
         });
+    }
+
+    /**
+     * 온보딩 완료 업적을 확인한다.
+     *
+     * <p>{@code onboard_complete}는 별도 개별 업적 없이 월드컵 완료, 선호 장르 선택,
+     * 인생 영화 선택 3개 체크포인트가 모두 충족되었을 때 최초 1회 달성된다.</p>
+     */
+    @Transactional
+    public void checkOnboardComplete(String userId) {
+        int progress = computeOnboardCompleteProgress(userId, 3);
+        if (progress >= 3) {
+            checkAndGrant(userId, "onboard_complete", "default");
+        }
+    }
+
+    /**
+     * 온보딩 3개 체크포인트의 현재 진행 상태를 조회한다.
+     */
+    public OnboardCompleteProgress getOnboardCompleteProgress(String userId) {
+        boolean worldcupCompleted = worldcupResultRepository.countByUserId(userId) > 0;
+        boolean favoriteGenresCompleted = favGenreRepository.countByUserId(userId) > 0;
+        boolean favoriteMoviesCompleted = favMovieRepository.countByUserId(userId) > 0;
+        int progress = 0;
+        if (worldcupCompleted) {
+            progress++;
+        }
+        if (favoriteGenresCompleted) {
+            progress++;
+        }
+        if (favoriteMoviesCompleted) {
+            progress++;
+        }
+        return new OnboardCompleteProgress(
+                worldcupCompleted,
+                favoriteGenresCompleted,
+                favoriteMoviesCompleted,
+                progress,
+                3,
+                progress >= 3
+        );
     }
 
     /**
@@ -401,9 +446,7 @@ public class AchievementService {
     }
 
     private int computeOnboardCompleteProgress(String userId, int maxProgress) {
-        boolean hasActor = favActorRepository.countByUserId(userId) > 0;
-        boolean hasDirector = favDirectorRepository.countByUserId(userId) > 0;
-        return hasActor && hasDirector ? maxProgress : 0;
+        return Math.min(getOnboardCompleteProgress(userId).progress(), maxProgress);
     }
 
     private boolean isAllCategory(@Nullable String category) {
@@ -445,11 +488,15 @@ public class AchievementService {
     }
 
     private int resolveMaxProgress(AchievementType type) {
+        String code = normalizeAchievementCode(type.getAchievementCode());
+        if ("onboard_complete".equals(code)) {
+            return 3;
+        }
+
         if (type.getRequiredCount() != null && type.getRequiredCount() > 0) {
             return type.getRequiredCount();
         }
 
-        String code = normalizeAchievementCode(type.getAchievementCode());
         if (code == null) {
             return 1;
         }
@@ -489,6 +536,15 @@ public class AchievementService {
         }
         return true;
     }
+
+    public record OnboardCompleteProgress(
+            boolean worldcupCompleted,
+            boolean favoriteGenresCompleted,
+            boolean favoriteMoviesCompleted,
+            int progress,
+            int maxProgress,
+            boolean completed
+    ) {}
 
     /**
      * 소급 달성 처리 — 이미 조건을 충족했지만 아직 UserAchievement가 없는 경우 INSERT + 리워드 지급.

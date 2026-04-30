@@ -28,8 +28,12 @@ import java.util.List;
  * <ul>
  *   <li>{@code POST /api/v1/onboarding/directors} — 선호 감독 일괄 저장</li>
  *   <li>{@code POST /api/v1/onboarding/actors}    — 선호 배우 일괄 저장</li>
+ *   <li>{@code POST /api/v1/onboarding/genres}    — 선호 장르 일괄 저장</li>
+ *   <li>{@code POST /api/v1/onboarding/movies}    — 인생 영화 일괄 저장</li>
  *   <li>{@code GET  /api/v1/onboarding/directors} — 선호 감독 목록 조회</li>
  *   <li>{@code GET  /api/v1/onboarding/actors}    — 선호 배우 목록 조회</li>
+ *   <li>{@code GET  /api/v1/onboarding/genres}    — 선호 장르 목록 조회</li>
+ *   <li>{@code GET  /api/v1/onboarding/movies}    — 인생 영화 목록 조회</li>
  * </ul>
  *
  * <h3>인증</h3>
@@ -104,6 +108,58 @@ public class OnboardingController {
     }
 
     /**
+     * 선호 장르 일괄 저장 API.
+     *
+     * @param userId   JWT에서 추출한 사용자 ID
+     * @param genreIds 저장할 장르 ID 목록
+     * @return 200 OK
+     */
+    @Operation(
+            summary = "선호 장르 저장",
+            description = "온보딩에서 선택한 선호 장르 ID 목록을 일괄 저장합니다. 기존 데이터는 교체됩니다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "선호 장르 저장 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PostMapping("/genres")
+    public ResponseEntity<Void> saveGenres(
+            @AuthenticationPrincipal String userId,
+            @RequestBody List<Long> genreIds) {
+
+        log.info("선호 장르 저장 요청 - userId: {}, 건수: {}", userId, genreIds.size());
+        onboardingService.saveGenres(userId, genreIds);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * 인생 영화 일괄 저장 API.
+     *
+     * @param userId   JWT에서 추출한 사용자 ID
+     * @param movieIds 저장할 영화 ID 목록
+     * @return 200 OK
+     */
+    @Operation(
+            summary = "인생 영화 저장",
+            description = "온보딩에서 선택한 인생 영화 ID 목록을 일괄 저장합니다. 기존 데이터는 교체됩니다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "인생 영화 저장 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @PostMapping("/movies")
+    public ResponseEntity<Void> saveMovies(
+            @AuthenticationPrincipal String userId,
+            @RequestBody List<String> movieIds) {
+
+        log.info("인생 영화 저장 요청 - userId: {}, 건수: {}", userId, movieIds.size());
+        onboardingService.saveMovies(userId, movieIds);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
      * 선호 감독 목록 조회 API.
      *
      * <p>현재 로그인한 사용자가 등록한 선호 감독 이름 목록을 반환한다.</p>
@@ -151,5 +207,51 @@ public class OnboardingController {
 
         List<String> actors = onboardingService.getActors(userId);
         return ResponseEntity.ok(actors);
+    }
+
+    /**
+     * 선호 장르 목록 조회 API.
+     *
+     * @param userId JWT에서 추출한 사용자 ID
+     * @return 200 OK + 장르 ID 목록
+     */
+    @Operation(
+            summary = "선호 장르 목록 조회",
+            description = "현재 사용자의 선호 장르 ID 목록을 반환합니다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "선호 장르 조회 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @GetMapping("/genres")
+    public ResponseEntity<List<Long>> getGenres(
+            @AuthenticationPrincipal String userId) {
+
+        List<Long> genres = onboardingService.getGenres(userId);
+        return ResponseEntity.ok(genres);
+    }
+
+    /**
+     * 인생 영화 목록 조회 API.
+     *
+     * @param userId JWT에서 추출한 사용자 ID
+     * @return 200 OK + 영화 ID 목록
+     */
+    @Operation(
+            summary = "인생 영화 목록 조회",
+            description = "현재 사용자의 인생 영화 ID 목록을 반환합니다."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "인생 영화 조회 성공"),
+            @ApiResponse(responseCode = "401", description = "인증 필요")
+    })
+    @SecurityRequirement(name = "BearerAuth")
+    @GetMapping("/movies")
+    public ResponseEntity<List<String>> getMovies(
+            @AuthenticationPrincipal String userId) {
+
+        List<String> movies = onboardingService.getMovies(userId);
+        return ResponseEntity.ok(movies);
     }
 }

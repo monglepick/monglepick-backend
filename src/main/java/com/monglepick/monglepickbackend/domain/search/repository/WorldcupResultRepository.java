@@ -30,4 +30,12 @@ public interface WorldcupResultRepository extends JpaRepository<WorldcupResult, 
      * @return 해당 세션의 월드컵 결과 (없으면 empty)
      */
     Optional<WorldcupResult> findBySessionId(Long sessionId);
+
+    /**
+     * 특정 사용자의 완료된 월드컵 결과 수를 집계한다.
+     *
+     * @param userId 사용자 ID
+     * @return 해당 사용자의 월드컵 결과 수
+     */
+    long countByUserId(String userId);
 }
