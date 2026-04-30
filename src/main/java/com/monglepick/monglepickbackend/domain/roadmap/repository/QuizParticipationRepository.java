@@ -50,6 +50,13 @@ public interface QuizParticipationRepository extends JpaRepository<QuizParticipa
     /** 특정 퀴즈에 참여 기록이 하나라도 있는지 확인 — 삭제 전 FK 보호용. */
     boolean existsByQuiz_QuizId(Long quizId);
 
+    /** 특정 퀴즈의 참여 기록을 제출 시각 역순으로 페이징 조회 — 관리자 참여자 목록용. */
+    @Query(
+            value = "SELECT p FROM QuizParticipation p WHERE p.quiz.quizId = :quizId ORDER BY p.submittedAt DESC",
+            countQuery = "SELECT COUNT(p) FROM QuizParticipation p WHERE p.quiz.quizId = :quizId"
+    )
+    Page<QuizParticipation> findByQuizId(@Param("quizId") Long quizId, Pageable pageable);
+
     /**
      * 특정 사용자가 특정 퀴즈에서 정답을 맞춘 참여 기록이 있는지 확인한다.
      *
