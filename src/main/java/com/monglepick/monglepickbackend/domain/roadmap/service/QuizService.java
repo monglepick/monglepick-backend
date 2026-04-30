@@ -102,15 +102,24 @@ public class QuizService {
      * @param movieId 조회할 영화 ID (VARCHAR(50))
      * @return PUBLISHED 상태 퀴즈 DTO 목록 (없으면 빈 리스트)
      */
-    public List<QuizResponse> getMovieQuizzes(String movieId) {
-        log.debug("영화별 퀴즈 목록 조회: movieId={}", movieId);
+    public List<QuizResponse> getMovieQuizzes(String movieId, String userId) {
+        log.debug("영화별 퀴즈 목록 조회: movieId={}, userId={}", movieId, userId);
 
         List<Quiz> quizzes = quizRepository.findByMovieIdAndStatus(
                 movieId, Quiz.QuizStatus.PUBLISHED
         );
 
+        java.util.Set<Long> attempted = (userId != null)
+                ? participationRepository.findAttemptedQuizIdsByUserId(userId)
+                : java.util.Collections.emptySet();
+
         return quizzes.stream()
-                .map(quiz -> QuizResponse.from(quiz, parseOptions(quiz.getOptions())))
+                .map(quiz -> {
+                    List<String> opts = parseOptions(quiz.getOptions());
+                    return (userId != null)
+                            ? QuizResponse.from(quiz, opts, attempted.contains(quiz.getQuizId()))
+                            : QuizResponse.from(quiz, opts);
+                })
                 .toList();
     }
 
@@ -122,16 +131,25 @@ public class QuizService {
      *
      * @return 오늘 날짜의 PUBLISHED 퀴즈 DTO 목록 (없으면 빈 리스트)
      */
-    public List<QuizResponse> getTodayQuizzes() {
+    public List<QuizResponse> getTodayQuizzes(String userId) {
         LocalDate today = LocalDate.now();
-        log.debug("오늘의 퀴즈 조회: date={}", today);
+        log.debug("오늘의 퀴즈 조회: date={}, userId={}", today, userId);
 
         List<Quiz> quizzes = quizRepository.findByQuizDateAndStatus(
                 today, Quiz.QuizStatus.PUBLISHED
         );
 
+        java.util.Set<Long> attempted = (userId != null)
+                ? participationRepository.findAttemptedQuizIdsByUserId(userId)
+                : java.util.Collections.emptySet();
+
         return quizzes.stream()
-                .map(quiz -> QuizResponse.from(quiz, parseOptions(quiz.getOptions())))
+                .map(quiz -> {
+                    List<String> opts = parseOptions(quiz.getOptions());
+                    return (userId != null)
+                            ? QuizResponse.from(quiz, opts, attempted.contains(quiz.getQuizId()))
+                            : QuizResponse.from(quiz, opts);
+                })
                 .toList();
     }
 
@@ -192,9 +210,19 @@ public class QuizService {
         // ② 사용자 검증은 JWT 인증 단계에서 이미 처리됨 — users 테이블 쓰기 소유는 김민규(MyBatis),
         //    JPA에서 fetch 하지 않고 String userId만 보관 (설계서 §15.4)
 
-        // ③ 리워드 중복 지급 방지를 위한 사전 확인 — 이미 정답 기록이 있으면 리워드 지급 불가
-        boolean alreadyCorrect = participationRepository
-                .existsByQuiz_QuizIdAndUserIdAndIsCorrect(quizId, userId, true);
+        // ③ 재제출 차단 — 이미 제출 기록이 있으면 오답이어도 재제출 불가
+        boolean alreadyAttempted = participationRepository
+                .findByQuiz_QuizIdAndUserId(quizId, userId)
+                .isPresent();
+        if (alreadyAttempted) {
+            throw new BusinessException(
+                    ErrorCode.QUIZ_ALREADY_SUBMITTED,
+                    "이미 답변을 제출한 퀴즈입니다: quizId=" + quizId
+            );
+        }
+
+        // ④ 리워드 중복 지급 방지 (재제출 차단 이후라 항상 false지만 안전을 위해 유지)
+        boolean alreadyCorrect = false;
 
         // ④ 채점 — 대소문자 무시, 앞뒤 공백 제거 후 비교
         String userAnswer = request.answer() != null ? request.answer().trim() : "";
@@ -204,8 +232,14 @@ public class QuizService {
         log.info("퀴즈 채점: userId={}, quizId={}, isCorrect={}, alreadyCorrect={}",
                 userId, quizId, isCorrect, alreadyCorrect);
 
-        // ⑤ 참여 기록 저장/업데이트
-        saveOrUpdateParticipation(quiz, userId, quizId, userAnswer, isCorrect);
+        // ⑤ 참여 기록 저장 (재제출 차단으로 항상 신규 INSERT)
+        participationRepository.save(QuizParticipation.builder()
+                .quiz(quiz)
+                .userId(userId)
+                .selectedOption(userAnswer)
+                .isCorrect(isCorrect)
+                .submittedAt(LocalDateTime.now())
+                .build());
 
         // ⑥ 리워드 지급 — 정답이고 최초 정답인 경우에만 지급
         //    alreadyCorrect=true이면 이번 제출이 정답이라도 리워드를 건너뛴다
@@ -229,44 +263,6 @@ public class QuizService {
     // ────────────────────────────────────────────────────────────────
     // private 헬퍼 메서드
     // ────────────────────────────────────────────────────────────────
-
-    /**
-     * 퀴즈 참여 기록을 저장하거나 기존 기록을 업데이트한다.
-     *
-     * <p>동일 (quiz_id, user_id) 조합에 UNIQUE 제약이 있으므로,
-     * 기존 기록이 있으면 {@link QuizParticipation#submit(String, Boolean)} 도메인 메서드로 업데이트하고,
-     * 없으면 신규 INSERT한다.</p>
-     *
-     * @param quiz       참여한 퀴즈 엔티티
-     * @param userId     사용자 ID (String FK)
-     * @param quizId     퀴즈 ID (기존 기록 조회용)
-     * @param userAnswer 사용자가 제출한 답변
-     * @param isCorrect  채점 결과
-     */
-    private void saveOrUpdateParticipation(Quiz quiz, String userId, Long quizId,
-                                            String userAnswer, boolean isCorrect) {
-        participationRepository
-                .findByQuiz_QuizIdAndUserId(quizId, userId)
-                .ifPresentOrElse(
-                        // 기존 기록 있음 — 재제출: submit() 도메인 메서드로 업데이트
-                        existing -> {
-                            log.debug("퀴즈 재제출 — 기존 참여 기록 업데이트: userId={}, quizId={}", userId, quizId);
-                            existing.submit(userAnswer, isCorrect);
-                        },
-                        // 기존 기록 없음 — 신규 참여 INSERT
-                        () -> {
-                            log.debug("퀴즈 최초 참여 — 신규 기록 저장: userId={}, quizId={}", userId, quizId);
-                            QuizParticipation participation = QuizParticipation.builder()
-                                    .quiz(quiz)
-                                    .userId(userId)
-                                    .selectedOption(userAnswer)
-                                    .isCorrect(isCorrect)
-                                    .submittedAt(LocalDateTime.now())
-                                    .build();
-                            participationRepository.save(participation);
-                        }
-                );
-    }
 
     /**
      * QUIZ_CORRECT 리워드를 지급한다.

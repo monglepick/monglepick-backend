@@ -95,11 +95,12 @@ public class QuizController extends BaseController {
     @GetMapping("/movie/{movieId}")
     public ResponseEntity<List<QuizResponse>> getMovieQuizzes(
             @Parameter(description = "퀴즈를 조회할 영화 ID", required = true, example = "tt0816692")
-            @PathVariable String movieId
+            @PathVariable String movieId,
+            Principal principal
     ) {
         log.debug("영화별 퀴즈 목록 요청: movieId={}", movieId);
-
-        List<QuizResponse> responses = quizService.getMovieQuizzes(movieId);
+        String userId = (principal != null) ? resolveUserIdSilently(principal) : null;
+        List<QuizResponse> responses = quizService.getMovieQuizzes(movieId, userId);
         return ResponseEntity.ok(responses);
     }
 
@@ -121,10 +122,10 @@ public class QuizController extends BaseController {
             @ApiResponse(responseCode = "200", description = "오늘의 퀴즈 목록 조회 성공 (없으면 빈 배열)")
     })
     @GetMapping("/today")
-    public ResponseEntity<List<QuizResponse>> getTodayQuizzes() {
+    public ResponseEntity<List<QuizResponse>> getTodayQuizzes(Principal principal) {
         log.debug("오늘의 퀴즈 목록 요청");
-
-        List<QuizResponse> responses = quizService.getTodayQuizzes();
+        String userId = (principal != null) ? resolveUserIdSilently(principal) : null;
+        List<QuizResponse> responses = quizService.getTodayQuizzes(userId);
         return ResponseEntity.ok(responses);
     }
 

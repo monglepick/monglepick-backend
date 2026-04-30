@@ -50,6 +50,22 @@ public abstract class BaseController {
     }
 
     /**
+     * 공개 API에서 옵셔널 JWT 처리 — 인증이 없으면 null 반환 (예외 없음).
+     *
+     * <p>permitAll 엔드포인트가 로그인 사용자에게 추가 정보(solved 여부 등)를
+     * 내려줄 때 사용한다. 비로그인이면 null을 반환해 기능을 건너뛴다.</p>
+     *
+     * @param principal 인증된 사용자 정보 (비로그인이면 null)
+     * @return 사용자 ID, 또는 인증 정보가 없으면 null
+     */
+    protected String resolveUserIdSilently(Principal principal) {
+        if (principal == null || principal.getName() == null) {
+            return null;
+        }
+        return principal.getName();
+    }
+
+    /**
      * Principal에서 userId를 추출한다 (ServiceKey + JWT 혼합 인증).
      *
      * <p>ServiceKey 인증인 경우 다음 우선순위로 대상 사용자 ID 를 결정한다.</p>

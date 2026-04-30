@@ -53,25 +53,30 @@ public class QuizDto {
             String movieId,
             String question,
             List<String> options,
-            int rewardPoint
+            int rewardPoint,
+            Boolean solved
     ) {
-        /**
-         * Quiz 엔티티와 파싱된 선택지 목록으로 응답 DTO를 생성한다.
-         *
-         * <p>options는 서비스 레이어에서 JSON 파싱 후 전달받는다
-         * (엔티티 내 options 컬럼은 JSON 문자열이므로 직접 사용 불가).</p>
-         *
-         * @param quiz    Quiz 엔티티
-         * @param options 파싱된 선택지 목록
-         * @return 응답 DTO 인스턴스
-         */
+        /** 비로그인 상태용 — solved=null */
         public static QuizResponse from(Quiz quiz, List<String> options) {
             return new QuizResponse(
                     quiz.getQuizId(),
                     quiz.getMovieId(),
                     quiz.getQuestion(),
                     options,
-                    quiz.getRewardPoint()
+                    quiz.getRewardPoint(),
+                    null
+            );
+        }
+
+        /** 로그인 상태용 — solved=true/false */
+        public static QuizResponse from(Quiz quiz, List<String> options, boolean solved) {
+            return new QuizResponse(
+                    quiz.getQuizId(),
+                    quiz.getMovieId(),
+                    quiz.getQuestion(),
+                    options,
+                    quiz.getRewardPoint(),
+                    solved
             );
         }
     }

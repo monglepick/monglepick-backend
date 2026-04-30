@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 퀴즈 참여 리포지토리 — quiz_participations 테이블 접근.
@@ -41,6 +42,10 @@ public interface QuizParticipationRepository extends JpaRepository<QuizParticipa
      * @return 참여 기록 (없으면 빈 Optional)
      */
     Optional<QuizParticipation> findByQuiz_QuizIdAndUserId(Long quizId, String userId);
+
+    /** 특정 사용자가 이미 제출한 quizId 집합 (solved 배지 배치 조회용). */
+    @Query("SELECT p.quiz.quizId FROM QuizParticipation p WHERE p.userId = :userId")
+    Set<Long> findAttemptedQuizIdsByUserId(@Param("userId") String userId);
 
     /**
      * 특정 사용자가 특정 퀴즈에서 정답을 맞춘 참여 기록이 있는지 확인한다.

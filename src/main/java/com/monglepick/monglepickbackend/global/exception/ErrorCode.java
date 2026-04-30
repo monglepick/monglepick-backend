@@ -419,6 +419,9 @@ public enum ErrorCode {
     /** 관리자 — 허용되지 않은 퀴즈 상태 전이 시도. */
     INVALID_QUIZ_STATUS_TRANSITION(HttpStatus.BAD_REQUEST, "ROAD005", "허용되지 않은 퀴즈 상태 전이입니다"),
 
+    /** 퀴즈 — 이미 답변을 제출한 퀴즈에 재제출 시도. */
+    QUIZ_ALREADY_SUBMITTED(HttpStatus.CONFLICT, "ROAD008", "이미 답변을 제출한 퀴즈입니다. 퀴즈는 한 번만 풀 수 있습니다."),
+
     /** 도장깨기 — 이미 완료 처리한 영화를 중복 완료 시도. */
     ALREADY_VERIFIED_MOVIE(HttpStatus.CONFLICT, "ROAD006", "이미 완료 처리한 영화입니다"),
 
