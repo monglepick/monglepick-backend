@@ -105,6 +105,17 @@ public class AdminQuizDto {
     ) {}
 
     /**
+     * 퀴즈 참여 기록 단건 응답 DTO — 관리자 참여자 목록 조회용.
+     */
+    public record ParticipationResponse(
+            Long quizParticipationId,
+            String userId,
+            String selectedOption,
+            Boolean isCorrect,
+            java.time.LocalDateTime submittedAt
+    ) {}
+
+    /**
      * 오늘 퀴즈 강제 발행 응답 DTO — 2026-04-29 신규.
      *
      * <p>POST /api/v1/admin/quizzes/publish-now 응답.

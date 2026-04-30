@@ -1,10 +1,12 @@
 package com.monglepick.monglepickbackend.admin.service;
 
+import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.ParticipationResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.QuizDetailResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.UpdateQuizRequest;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.UpdateStatusRequest;
 import com.monglepick.monglepickbackend.admin.repository.AdminQuizRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.Quiz;
+import com.monglepick.monglepickbackend.domain.roadmap.entity.QuizParticipation;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.Quiz.QuizStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipationRepository;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
@@ -13,6 +15,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
 import java.util.EnumSet;
@@ -253,6 +258,19 @@ public class AdminQuizService {
         log.info("[관리자] 퀴즈 삭제 완료 — quizId={}", id);
     }
 
+    /**
+     * 특정 퀴즈의 참여자 목록 페이징 조회.
+     *
+     * @param id       퀴즈 ID
+     * @param pageable 페이지 정보
+     * @return 참여 기록 Page
+     */
+    public Page<ParticipationResponse> getParticipations(Long id, Pageable pageable) {
+        findQuizByIdOrThrow(id);
+        return participationRepository.findByQuizId(id, pageable)
+                .map(this::toParticipationResponse);
+    }
+
     // ─────────────────────────────────────────────
     // 헬퍼
     // ─────────────────────────────────────────────
@@ -263,6 +281,16 @@ public class AdminQuizService {
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.QUIZ_NOT_FOUND,
                         "퀴즈 ID " + id + "를 찾을 수 없습니다"));
+    }
+
+    private ParticipationResponse toParticipationResponse(QuizParticipation p) {
+        return new ParticipationResponse(
+                p.getQuizParticipationId(),
+                p.getUserId(),
+                p.getSelectedOption(),
+                p.getIsCorrect(),
+                p.getSubmittedAt()
+        );
     }
 
     /** 엔티티 → 응답 DTO */
