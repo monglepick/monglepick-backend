@@ -64,6 +64,18 @@ public class TossPaymentsClient {
     /** Toss Payments REST API 호출용 HTTP 클라이언트 (Basic 인증 헤더 포함) */
     private final RestClient restClient;
 
+    /**
+     * Mock 모드 여부 — 가상 사용자 시뮬레이션 등 평가/데모 시 Toss API 호출을 우회한다.
+     *
+     * <p>활성화 시 (TOSS_MOCK_MODE=true) {@link #confirmPayment}, {@link #cancelPayment},
+     * {@link #getPayment} 가 실제 HTTP 호출 없이 SUCCESS 응답을 모방하여 반환한다.
+     * 이를 통해 시뮬 시 가짜 카드 정보로 인한 통계 오염 / Toss 어드민 로그 오염 / rate limit 을 방지.</p>
+     *
+     * <p><b>운영 트래픽에는 절대 활성화 금지.</b> application.yml 의 {@code toss.payments.mock-mode}
+     * 가 환경변수 {@code TOSS_MOCK_MODE} 로 결정되며 기본값은 false.</p>
+     */
+    private final boolean mockMode;
+
     /** Toss 에러 응답 파싱용 Jackson ObjectMapper (싱글턴) */
     private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
 
@@ -75,10 +87,17 @@ public class TossPaymentsClient {
      *
      * @param secretKey Toss Payments 시크릿 키 (application.yml의 toss.payments.secret-key)
      * @param baseUrl   Toss Payments API 베이스 URL (application.yml의 toss.payments.base-url)
+     * @param mockMode  Mock 모드 활성화 여부 (application.yml의 toss.payments.mock-mode, 기본 false)
      */
     public TossPaymentsClient(
             @Value("${toss.payments.secret-key}") String secretKey,
-            @Value("${toss.payments.base-url:https://api.tosspayments.com/v1}") String baseUrl) {
+            @Value("${toss.payments.base-url:https://api.tosspayments.com/v1}") String baseUrl,
+            @Value("${toss.payments.mock-mode:false}") boolean mockMode) {
+        this.mockMode = mockMode;
+        if (mockMode) {
+            log.warn("[Toss Mock] TossPaymentsClient 가 MOCK 모드로 시작 — 모든 Toss API 호출 우회됨. "
+                    + "운영 트래픽에는 절대 사용 금지.");
+        }
         // Toss Payments Basic 인증: secretKey + ":" 를 Base64 인코딩
         String encodedKey = Base64.getEncoder().encodeToString((secretKey + ":").getBytes(StandardCharsets.UTF_8));
 
@@ -143,6 +162,13 @@ public class TossPaymentsClient {
      * @throws BusinessException 결제 승인 실패 시 (ErrorCode.PAYMENT_FAILED)
      */
     public TossConfirmResponse confirmPayment(String paymentKey, String orderId, int amount) {
+        // Mock 모드 분기 — 시뮬 시 Toss API 호출 우회. SUCCESS 응답 모방.
+        if (mockMode) {
+            log.info("[Toss Mock] confirmPayment 우회 — orderId={}, paymentKey={}, amount={}",
+                    orderId, paymentKey, amount);
+            return new TossConfirmResponse(paymentKey, orderId, "DONE", amount, "카드");
+        }
+
         // Toss Payments 승인 요청 Body 구성
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("paymentKey", paymentKey);
@@ -232,6 +258,13 @@ public class TossPaymentsClient {
      * @throws BusinessException 취소 실패 시 (ErrorCode.PAYMENT_FAILED)
      */
     public void cancelPayment(String paymentKey, String reason, Integer cancelAmount) {
+        // Mock 모드 분기 — 시뮬 시 Toss 취소 호출 우회
+        if (mockMode) {
+            log.info("[Toss Mock] cancelPayment 우회 — paymentKey={}, reason={}, cancelAmount={}",
+                    paymentKey, reason, cancelAmount);
+            return;
+        }
+
         // 요청 Body 구성 — cancelAmount 가 있으면 부분 환불
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("cancelReason", reason != null ? reason : "환불 요청");
@@ -288,6 +321,12 @@ public class TossPaymentsClient {
      * @throws BusinessException 조회 실패 시 (ErrorCode.PAYMENT_FAILED)
      */
     public TossConfirmResponse getPayment(String paymentKey) {
+        // Mock 모드 분기 — 시뮬 시 Toss 조회 호출 우회. DONE 상태 모방.
+        if (mockMode) {
+            log.debug("[Toss Mock] getPayment 우회 — paymentKey={}", paymentKey);
+            return new TossConfirmResponse(paymentKey, "mock-order-" + paymentKey, "DONE", 0, "카드");
+        }
+
         log.debug("Toss 결제 조회 요청: paymentKey={}", paymentKey);
 
         try {
