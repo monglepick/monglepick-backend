@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.monglepick.monglepickbackend.domain.user.mapper.WithdrawnUserIdentityMapper">
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="withdrawnId">
+        INSERT INTO withdrawn_user_identity (
+            identity_type,
+            identity_hash,
+            withdrawn_user_id,
+            withdrawn_at,
+            blocked_until,
+            created_at
+        ) VALUES (
+            #{identityType},
+            #{identityHash},
+            #{withdrawnUserId},
+            #{withdrawnAt},
+            #{blockedUntil},
+            #{createdAt}
+        )
+    </insert>
+
+    <select id="existsActiveBlock" resultType="boolean">
+        SELECT COUNT(*) > 0
+        FROM withdrawn_user_identity
+        WHERE identity_type = #{identityType}
+          AND identity_hash = #{identityHash}
+          AND blocked_until > #{now}
+    </select>
+
+    <delete id="deleteByWithdrawnUserId">
+        DELETE FROM withdrawn_user_identity
+        WHERE withdrawn_user_id = #{withdrawnUserId}
+    </delete>
+
+</mapper>

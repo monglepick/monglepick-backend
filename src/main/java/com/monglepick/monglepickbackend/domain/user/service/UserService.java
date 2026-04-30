@@ -1,6 +1,7 @@
 package com.monglepick.monglepickbackend.domain.user.service;
 
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
 import com.monglepick.monglepickbackend.domain.user.dto.UpdateProfileRequest;
 import com.monglepick.monglepickbackend.domain.user.dto.UserResponse;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
@@ -22,6 +23,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
@@ -55,6 +57,10 @@ public class UserService {
     /** 시청 이력 — 윤형주 도메인 JpaRepository 유지 (Kaggle 시드와 분리된 user_watch_history 테이블) */
     private final UserWatchHistoryRepository userWatchHistoryRepository;
     private final PasswordEncoder passwordEncoder;
+    /** JWT Refresh Token 무효화 서비스 */
+    private final JwtService jwtService;
+    /** 탈퇴 식별자 HMAC 이력 서비스 */
+    private final WithdrawnUserIdentityService withdrawnUserIdentityService;
 
     /** 활동 리워드 서비스 — 위시리스트 추가(WISHLIST_ADD) 리워드 지급 위임 */
     private final RewardService rewardService;
@@ -68,7 +74,7 @@ public class UserService {
      */
     public UserResponse getProfile(String userId) {
         User user = userMapper.findById(userId);
-        if (user == null) {
+        if (user == null || user.isDeleted()) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         return UserResponse.from(user);
@@ -92,7 +98,7 @@ public class UserService {
          * 도메인 메서드로 in-memory 변경한 뒤 반드시 userMapper.update(user)를 명시 호출해야 한다.
          */
         User user = userMapper.findById(userId);
-        if (user == null) {
+        if (user == null || user.isDeleted()) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
 
@@ -122,6 +128,34 @@ public class UserService {
         userMapper.update(user);
 
         return UserResponse.from(user);
+    }
+
+    /**
+     * 회원 탈퇴를 soft delete로 처리한다.
+     *
+     * <p>users row와 user_id는 유지하고 is_deleted/deleted_at만 갱신한다.
+     * 탈퇴 직전 이메일/providerId는 원문 저장 없이 HMAC 해시로만 기록하여
+     * 30일 재가입 제한에 사용한다.</p>
+     *
+     * @param userId 탈퇴할 사용자 ID
+     */
+    @Transactional
+    public void withdraw(String userId) {
+        User user = userMapper.findById(userId);
+        if (user == null || user.isDeleted()) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
+
+        LocalDateTime withdrawnAt = LocalDateTime.now();
+        withdrawnUserIdentityService.recordWithdrawal(user, withdrawnAt);
+
+        int affected = userMapper.softDeleteUser(userId, withdrawnAt);
+        if (affected == 0) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
+
+        jwtService.removeAllRefreshByUser(userId);
+        log.info("회원 탈퇴 soft delete 완료 - userId: {}", userId);
     }
 
     /**

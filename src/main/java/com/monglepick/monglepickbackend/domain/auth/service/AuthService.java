@@ -11,6 +11,7 @@ import com.monglepick.monglepickbackend.domain.reward.service.PointService;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.domain.user.service.WithdrawnUserIdentityService;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
@@ -62,6 +63,8 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
 
     /** C-2: Refresh Token DB 저장을 위한 JwtService 의존성 추가 */
     private final JwtService jwtService;
+    /** 탈퇴 후 30일 재가입 제한 확인 서비스 */
+    private final WithdrawnUserIdentityService withdrawnUserIdentityService;
 
     /**
      * R-1: 회원가입 보너스 지급을 위한 RewardService 주입.
@@ -93,6 +96,8 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     @Transactional
     public AuthResponse signup(SignupRequest request) {
         log.info("로컬 회원가입 요청 — email: {}", request.email());
+
+        withdrawnUserIdentityService.assertEmailNotBlocked(request.email());
 
         if (userMapper.existsByEmail(request.email())) {
             throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS);
@@ -150,7 +155,7 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
      */
     public void checkEmailExists(PasswordCheckRequest request) {
         User user = userMapper.findByEmail(request.email());
-        if (user == null || user.getProvider() != User.Provider.LOCAL) {
+        if (user == null || user.isDeleted() || user.getProvider() != User.Provider.LOCAL) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
     }
@@ -164,7 +169,7 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
     @Transactional
     public void resetPassword(PasswordResetRequest request) {
         User user = userMapper.findByEmail(request.email());
-        if (user == null || user.getProvider() != User.Provider.LOCAL) {
+        if (user == null || user.isDeleted() || user.getProvider() != User.Provider.LOCAL) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         String newHash = passwordEncoder.encode(request.newPassword());
@@ -188,6 +193,11 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         User user = userMapper.findByEmail(email);
         if (user == null) {
             throw new UsernameNotFoundException("사용자를 찾을 수 없습니다: " + email);
+        }
+
+        if (user.isDeleted()) {
+            log.warn("[AuthService] 탈퇴 계정 로그인 차단 — email={}", email);
+            throw new UsernameNotFoundException("탈퇴한 계정입니다.");
         }
 
         /* 소셜 로그인 사용자는 로컬 로그인 불가 */
@@ -319,9 +329,23 @@ public class AuthService extends DefaultOAuth2UserService implements UserDetails
         /* provider+providerId로 기존 사용자 조회 (MyBatis — Provider enum을 String으로 전달) */
         User existingUser = userMapper.findByProviderAndProviderId(provider.name(), providerId);
 
+        if (existingUser != null && existingUser.isDeleted()) {
+            log.warn("소셜 로그인 — 탈퇴 계정 차단: userId={}, provider={}",
+                    existingUser.getUserId(), provider);
+            throw new OAuth2AuthenticationException("탈퇴한 계정입니다.");
+        }
+
         /* 이메일 중복 확인 (다른 제공자로 가입된 이메일인지) */
         if (existingUser == null && email != null && userMapper.existsByEmail(email)) {
             throw new OAuth2AuthenticationException("이미 해당 이메일로 가입된 계정이 있습니다.");
+        }
+
+        if (existingUser == null) {
+            try {
+                withdrawnUserIdentityService.assertProviderNotBlocked(provider.name(), providerId);
+            } catch (BusinessException e) {
+                throw new OAuth2AuthenticationException(e.getMessage());
+            }
         }
 
         User user;

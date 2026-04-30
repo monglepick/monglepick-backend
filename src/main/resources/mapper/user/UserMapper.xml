@@ -218,6 +218,30 @@
         WHERE user_id = #{userId}
     </update>
 
+    <!-- 회원 탈퇴 soft delete 처리 -->
+    <update id="softDeleteUser">
+        UPDATE users
+        SET is_deleted = true,
+            deleted_at = #{deletedAt},
+            updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND is_deleted = false
+    </update>
+
+    <!-- 탈퇴 계정 관리자 복구 처리 -->
+    <update id="restoreWithdrawnUser">
+        UPDATE users
+        SET is_deleted = false,
+            deleted_at = NULL,
+            status = 'ACTIVE',
+            suspended_at = NULL,
+            suspended_until = NULL,
+            suspend_reason = NULL,
+            updated_at = NOW()
+        WHERE user_id = #{userId}
+          AND is_deleted = true
+    </update>
+
     <!-- 이메일 기준 비밀번호 변경 (LOCAL 계정 전용) -->
     <update id="updatePasswordByEmail">
         UPDATE users

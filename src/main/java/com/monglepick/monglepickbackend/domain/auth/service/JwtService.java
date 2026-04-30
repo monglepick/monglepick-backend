@@ -94,6 +94,14 @@ public class JwtService {
         if (user == null) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
+        if (user.isDeleted()) {
+            removeAllRefreshByUser(userId);
+            throw new BusinessException(ErrorCode.ACCOUNT_WITHDRAWN);
+        }
+        if (user.getStatus() == User.UserStatus.SUSPENDED) {
+            removeAllRefreshByUser(userId);
+            throw new BusinessException(ErrorCode.ACCOUNT_SUSPENDED);
+        }
 
         /* 4. 새 토큰 쌍 생성 */
         String newAccessToken = jwtTokenProvider.generateAccessToken(userId, user.getUserRole().name());

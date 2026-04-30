@@ -28,6 +28,7 @@ import com.monglepick.monglepickbackend.domain.reward.repository.UserPointReposi
 import com.monglepick.monglepickbackend.domain.review.mapper.ReviewMapper;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.domain.user.service.WithdrawnUserIdentityService;
 import com.monglepick.monglepickbackend.global.constants.UserRole;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
@@ -66,6 +67,12 @@ import java.util.List;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AdminUserService {
+
+    public enum DeletedFilter {
+        NOT_DELETED,
+        DELETED,
+        ALL
+    }
 
     // ── 의존성 주입 ──
     /** 사용자 CRUD — MyBatis Mapper (JpaRepository 폐기, 설계서 §15) */
@@ -106,6 +113,9 @@ public class AdminUserService {
      */
     private final JwtService jwtService;
 
+    /** 탈퇴 식별자 HMAC 이력 관리 — 탈퇴 계정 복구 시 재가입 제한 이력 정리 */
+    private final WithdrawnUserIdentityService withdrawnUserIdentityService;
+
     /**
      * 관리자 감사 로그 서비스 — 역할 변경/정지/복구/수동 포인트/이용권 발급 5개
      * 쓰기 액션의 성공 시점에 호출하여 admin_audit_logs 에 흔적을 남긴다.
@@ -139,10 +149,12 @@ public class AdminUserService {
      * @param keyword  닉네임/이메일 검색 키워드 (null 또는 빈 문자열이면 미적용)
      * @param status   계정 상태 필터 (null이면 미적용, "ACTIVE"/"SUSPENDED"/"LOCKED")
      * @param role     역할 필터 (null이면 미적용, "USER"/"ADMIN")
+     * @param deletedFilter 삭제 필터 (NOT_DELETED/DELETED/ALL, null이면 NOT_DELETED)
      * @param pageable 페이징 정보
      * @return 필터 조건에 맞는 사용자 목록 페이지
      */
-    public Page<UserListResponse> getUsers(String keyword, String status, String role, Pageable pageable) {
+    public Page<UserListResponse> getUsers(String keyword, String status, String role,
+                                           String deletedFilter, Pageable pageable) {
         // 필터 파싱 — null 또는 빈 문자열이면 해당 필터 미적용
         boolean hasKeyword = StringUtils.hasText(keyword);
         boolean hasStatus  = StringUtils.hasText(status);
@@ -170,6 +182,8 @@ public class AdminUserService {
             }
         }
 
+        DeletedFilter parsedDeletedFilter = parseDeletedFilter(deletedFilter);
+
         /*
          * AdminUserMapper로 통합 동적 SQL 호출 (JPA/MyBatis 하이브리드 §15).
          *  - 기존 8개 분기(case 1~8)는 XML의 <if> 조건 조합으로 한 번에 처리된다.
@@ -179,8 +193,10 @@ public class AdminUserService {
         int offset = (int) pageable.getOffset();
         int size   = pageable.getPageSize();
 
-        List<User> users = adminUserMapper.searchUsers(normalizedKeyword, statusEnum, roleEnum, offset, size);
-        long total = adminUserMapper.countSearchUsers(normalizedKeyword, statusEnum, roleEnum);
+        List<User> users = adminUserMapper.searchUsers(
+                normalizedKeyword, statusEnum, roleEnum, parsedDeletedFilter.name(), offset, size);
+        long total = adminUserMapper.countSearchUsers(
+                normalizedKeyword, statusEnum, roleEnum, parsedDeletedFilter.name());
 
         List<UserListResponse> content = users.stream()
                 .map(this::toUserListResponse)
@@ -197,19 +213,14 @@ public class AdminUserService {
      *
      * @param userId 조회할 사용자 ID
      * @return 사용자 상세 응답 DTO
-     * @throws BusinessException USER_NOT_FOUND — 해당 userId의 사용자가 없거나 탈퇴한 경우
+     * @throws BusinessException USER_NOT_FOUND — 해당 userId의 사용자가 없는 경우
      */
     public UserDetailResponse getUserDetail(String userId) {
-        // 사용자 조회 — 탈퇴 회원 포함 조회 후 isDeleted 체크 (MyBatis, null 반환 시 예외)
+        // 사용자 조회 — 탈퇴 회원 포함 조회 (MyBatis, null 반환 시 예외)
         User user = userMapper.findById(userId);
         if (user == null) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND,
                     "사용자를 찾을 수 없습니다: " + userId);
-        }
-
-        if (user.isDeleted()) {
-            throw new BusinessException(ErrorCode.USER_NOT_FOUND,
-                    "이미 탈퇴한 사용자입니다: " + userId);
         }
 
         // 포인트 + 등급 정보 조회 — JOIN FETCH로 grade를 즉시 로딩하여 LazyInitializationException 방지
@@ -236,12 +247,14 @@ public class AdminUserService {
 
         return new UserDetailResponse(
                 user.getUserId(),
-                user.getEmail(),
+                displayEmail(user),
                 user.getNickname(),
                 user.getUserRole() != null ? user.getUserRole().name() : null,
                 user.getStatus() != null ? user.getStatus().name() : null,
                 user.getProvider() != null ? user.getProvider().name() : null,
                 user.getProfileImage(),
+                user.isDeleted(),
+                user.getDeletedAt(),
                 balance,
                 totalEarned,
                 gradeCode,
@@ -473,6 +486,46 @@ public class AdminUserService {
                 "{\"status\":\"SUSPENDED\"}",
                 "{\"status\":\"ACTIVE\"}"
         );
+    }
+
+    /**
+     * 탈퇴 처리된 사용자 계정을 관리자 권한으로 복구한다.
+     *
+     * <p>정지 복구와 별개로 is_deleted/deleted_at을 되돌리는 복구이다.
+     * 30일 재가입 제한용 HMAC 이력도 함께 삭제한다.</p>
+     *
+     * @param userId 복구할 탈퇴 사용자 ID
+     */
+    @Transactional
+    public void restoreWithdrawnUser(String userId) {
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND,
+                    "사용자를 찾을 수 없습니다: " + userId);
+        }
+        if (!user.isDeleted()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "탈퇴한 사용자가 아닙니다: " + userId);
+        }
+
+        int restored = userMapper.restoreWithdrawnUser(userId);
+        if (restored == 0) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR,
+                    "탈퇴 계정 복구 처리 중 DB 갱신에 실패했습니다: " + userId);
+        }
+
+        withdrawnUserIdentityService.clearWithdrawalBlocks(userId);
+
+        adminAuditService.log(
+                AdminAuditService.ACTION_USER_UNSUSPEND,
+                AdminAuditService.TARGET_USER,
+                userId,
+                String.format("탈퇴 사용자 %s 계정 복구", userId),
+                "{\"isDeleted\":true}",
+                "{\"isDeleted\":false,\"status\":\"ACTIVE\"}"
+        );
+
+        log.info("[AdminUserService] 탈퇴 계정 복구 — userId={}", userId);
     }
 
     /**
@@ -871,14 +924,42 @@ public class AdminUserService {
     private UserListResponse toUserListResponse(User user) {
         return new UserListResponse(
                 user.getUserId(),
-                user.getEmail(),
+                displayEmail(user),
                 user.getNickname(),
                 user.getUserRole() != null ? user.getUserRole().name() : null,
                 user.getStatus() != null ? user.getStatus().name() : null,
                 user.getProvider() != null ? user.getProvider().name() : null,
+                user.isDeleted(),
+                user.getDeletedAt(),
                 user.getCreatedAt(),
                 user.getLastLoginAt()
         );
+    }
+
+    private DeletedFilter parseDeletedFilter(String deletedFilter) {
+        if (!StringUtils.hasText(deletedFilter)) {
+            return DeletedFilter.NOT_DELETED;
+        }
+        try {
+            return DeletedFilter.valueOf(deletedFilter.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "유효하지 않은 deletedFilter 값입니다: " + deletedFilter
+                            + " (허용값: NOT_DELETED, DELETED, ALL)");
+        }
+    }
+
+    /**
+     * 관리자 화면용 이메일 표시값.
+     *
+     * <p>현재 목록 쿼리는 탈퇴 회원을 기본 제외하지만, 향후 탈퇴 회원 복구 화면에서
+     * 같은 DTO를 재사용해도 원문 이메일이 노출되지 않도록 방어한다.</p>
+     */
+    private String displayEmail(User user) {
+        if (user != null && user.isDeleted()) {
+            return "탈퇴한 계정";
+        }
+        return user != null ? user.getEmail() : null;
     }
 
     /**

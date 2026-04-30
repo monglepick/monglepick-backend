@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.global.security;
 
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -109,13 +110,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 관리자가 계정을 정지하면 DB status=SUSPENDED로 변경되며, Access Token이 아직
         // 만료되지 않았더라도 이 단계에서 차단하여 즉각적인 로그아웃 효과를 낸다.
         User user = userMapper.findById(userId);
-        if (user == null || user.getStatus() == User.UserStatus.SUSPENDED) {
+        if (user == null) {
+            log.warn("존재하지 않는 계정의 API 접근 차단 — userId: {}", userId);
+            writeForbidden(response, ErrorCode.USER_NOT_FOUND);
+            return;
+        }
+
+        if (user.isDeleted()) {
+            log.warn("탈퇴 계정의 API 접근 차단 — userId: {}", userId);
+            writeForbidden(response, ErrorCode.ACCOUNT_WITHDRAWN);
+            return;
+        }
+
+        if (user.getStatus() == User.UserStatus.SUSPENDED) {
             log.warn("정지된 계정의 API 접근 차단 — userId: {}", userId);
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write(
-                    "{\"code\":\"A011\",\"message\":\"정지된 계정입니다. 관리자에게 문의하세요.\"}"
-            );
+            writeForbidden(response, ErrorCode.ACCOUNT_SUSPENDED);
             return;
         }
 
@@ -186,5 +195,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return token;
         }
         return null;
+    }
+
+    private void writeForbidden(HttpServletResponse response, ErrorCode errorCode) throws IOException {
+        response.setStatus(errorCode.getHttpStatus().value());
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(
+                "{\"code\":\"" + errorCode.getCode() + "\",\"message\":\"" + errorCode.getMessage() + "\"}"
+        );
     }
 }

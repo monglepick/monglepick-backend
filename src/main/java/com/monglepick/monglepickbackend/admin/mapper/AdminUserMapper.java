@@ -14,7 +14,8 @@ import java.util.List;
  * 담당하지 않는 관리자 전용 동적 검색/필터 쿼리를 제공한다.
  * 닉네임·이메일 키워드 검색, 상태 필터, 역할 필터, 복합 필터를 지원한다.</p>
  *
- * <p>소프트 삭제({@code is_deleted=true})된 탈퇴 회원은 모든 조회에서 기본적으로 제외한다.</p>
+ * <p>소프트 삭제({@code is_deleted=true})된 탈퇴 회원은 삭제 필터 값에 따라 조회한다.
+ * 기본 정책은 탈퇴 회원 제외이다.</p>
  *
  * <h3>JPA/MyBatis 하이브리드 (§15.5)</h3>
  * <p>기존 {@code admin/repository/AdminUserRepository.java} (JpaRepository)를 대체한다.
@@ -29,8 +30,8 @@ import java.util.List;
  * <p>기존 Repository의 8개 메서드(searchUsers/searchUsersByStatus/… /findAllByIsDeletedFalse)는
  * 모두 같은 형태의 WHERE 절 조합이었으므로 단일 메서드로 통합했다:</p>
  * <ul>
- *   <li>{@link #searchUsers(String, User.UserStatus, UserRole, int, int)} — 목록 조회 (동적 WHERE)</li>
- *   <li>{@link #countSearchUsers(String, User.UserStatus, UserRole)} — 동일 조건 총 개수</li>
+ *   <li>{@link #searchUsers(String, User.UserStatus, UserRole, String, int, int)} — 목록 조회 (동적 WHERE)</li>
+ *   <li>{@link #countSearchUsers(String, User.UserStatus, UserRole, String)} — 동일 조건 총 개수</li>
  * </ul>
  *
  * <p>SQL 정의: {@code resources/mapper/admin/AdminUserMapper.xml}</p>
@@ -39,7 +40,7 @@ import java.util.List;
 public interface AdminUserMapper {
 
     /**
-     * 관리자 사용자 목록 검색 (탈퇴 제외, 동적 필터).
+     * 관리자 사용자 목록 검색 (동적 필터).
      *
      * <p>키워드(닉네임·이메일 부분 일치, 대소문자 무시), 계정 상태, 역할 필터를 선택적으로 적용한다.
      * 각 파라미터가 null 또는 빈 문자열이면 해당 필터를 건너뛴다.</p>
@@ -47,6 +48,7 @@ public interface AdminUserMapper {
      * @param keyword  검색 키워드 (닉네임 또는 이메일 부분 일치, null/빈값이면 미적용)
      * @param status   계정 상태 필터 (ACTIVE/SUSPENDED/LOCKED, null이면 미적용)
      * @param userRole 역할 필터 (USER/ADMIN, null이면 미적용)
+     * @param deletedFilter 삭제 필터 (NOT_DELETED/DELETED/ALL)
      * @param offset   건너뛸 레코드 수 (0부터 시작)
      * @param size     가져올 최대 레코드 수
      * @return 조건에 매칭되는 사용자 목록 (created_at DESC 정렬)
@@ -55,6 +57,7 @@ public interface AdminUserMapper {
             @Param("keyword") String keyword,
             @Param("status") User.UserStatus status,
             @Param("userRole") UserRole userRole,
+            @Param("deletedFilter") String deletedFilter,
             @Param("offset") int offset,
             @Param("size") int size
     );
@@ -68,11 +71,13 @@ public interface AdminUserMapper {
      * @param keyword  검색 키워드 (null/빈값이면 미적용)
      * @param status   계정 상태 필터 (null이면 미적용)
      * @param userRole 역할 필터 (null이면 미적용)
+     * @param deletedFilter 삭제 필터 (NOT_DELETED/DELETED/ALL)
      * @return 조건에 매칭되는 전체 사용자 수
      */
     long countSearchUsers(
             @Param("keyword") String keyword,
             @Param("status") User.UserStatus status,
-            @Param("userRole") UserRole userRole
+            @Param("userRole") UserRole userRole,
+            @Param("deletedFilter") String deletedFilter
     );
 }

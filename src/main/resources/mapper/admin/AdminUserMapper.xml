@@ -13,7 +13,7 @@
         단일 searchUsers + countSearchUsers 로 통합.
       - MyBatis <if> 동적 SQL로 WHERE 절을 조건부로 조합.
       - 키워드는 nickname OR email 부분 일치 (LOWER로 대소문자 무시).
-      - 탈퇴 회원(is_deleted=true)은 무조건 제외.
+      - 탈퇴 회원(is_deleted=true)은 deletedFilter 값에 따라 포함한다.
 -->
 <mapper namespace="com.monglepick.monglepickbackend.admin.mapper.AdminUserMapper">
 
@@ -60,9 +60,22 @@
 
     <!-- ═══ 공통 WHERE 절 (동적) ═══
          keyword, status, userRole이 각각 null/빈값이 아닌 경우에만 조건 추가.
-         탈퇴 회원(is_deleted=true)은 항상 제외. -->
+         deletedFilter:
+           NOT_DELETED/null = 탈퇴 회원 제외
+           DELETED          = 탈퇴 회원만
+           ALL              = 전체 -->
     <sql id="searchWhereClause">
-        WHERE is_deleted = false
+        WHERE 1 = 1
+        <choose>
+            <when test="deletedFilter == 'DELETED'">
+                AND is_deleted = true
+            </when>
+            <when test="deletedFilter == 'ALL'">
+            </when>
+            <otherwise>
+                AND is_deleted = false
+            </otherwise>
+        </choose>
         <if test="keyword != null and keyword != ''">
             AND (LOWER(nickname) LIKE LOWER(CONCAT('%', #{keyword}, '%'))
                  OR LOWER(email) LIKE LOWER(CONCAT('%', #{keyword}, '%')))
