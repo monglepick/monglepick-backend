@@ -90,7 +90,11 @@ public class GlobalExceptionHandler {
         log.warn("비즈니스 예외 발생: code={}, message={}", ex.getErrorCode().getCode(), ex.getMessage());
 
         ErrorCode errorCode = ex.getErrorCode();
-        ErrorResponse response = ErrorResponse.of(errorCode);
+        ErrorResponse response = new ErrorResponse(
+                errorCode.getCode(),
+                ex.getMessage(),
+                java.util.Collections.emptyMap()
+        );
 
         return ResponseEntity
                 .status(errorCode.getHttpStatus())
