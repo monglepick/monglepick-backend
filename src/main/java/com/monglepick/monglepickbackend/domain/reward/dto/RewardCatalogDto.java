@@ -159,12 +159,21 @@ public final class RewardCatalogDto {
                                                   UserActivityProgress progress,
                                                   String actionType) {
             /* 정책이 있으면 정책 필드를, 없으면 actionType 만 채운다 */
+            /*
+             * 주의: 삼항식 `policy != null ? policy.getX() : 0` 형태로 쓰면
+             * 한쪽이 int 리터럴(0), 다른 쪽이 Integer 라서 JLS 가 결과 타입을 int 로 통일하면서
+             * 좌측 Integer 를 자동 언박싱한다. DB 에 daily_limit / max_count 가 NULL 인 행이 있으면
+             * Integer.intValue() 시점에 NPE 가 터져 GET /api/v1/point/progress 가 500 으로 회귀했다
+             * (운영 2026-04-30 회귀, RewardPolicy.dailyLimit/maxCount 는 nullable 컬럼).
+             * 우측을 Integer.valueOf(0) 로 박싱해 양쪽 타입을 Integer 로 맞춰 언박싱을 차단한다.
+             */
             String name = policy != null ? policy.getActivityName() : actionType;
             String category = policy != null ? policy.getActionCategory() : null;
             Integer amount = policy != null ? policy.getPointsAmount() : null;
-            Integer dailyLimit = policy != null ? policy.getDailyLimit() : 0;
-            Integer maxCount = policy != null ? policy.getMaxCount() : 0;
-            Integer cooldown = policy != null ? policy.getCooldownSeconds() : 0;
+            /* nullSafeZero 로 한 번 더 감싸 null 컬럼 → 0 으로 일관되게 노출한다 */
+            Integer dailyLimit = nullSafeZero(policy != null ? policy.getDailyLimit() : null);
+            Integer maxCount = nullSafeZero(policy != null ? policy.getMaxCount() : null);
+            Integer cooldown = nullSafeZero(policy != null ? policy.getCooldownSeconds() : null);
 
             if (progress == null) {
                 /* 활동 이력 없음 — 카운터 전부 0 */
@@ -192,6 +201,16 @@ public final class RewardCatalogDto {
                     progress.getLastStreakDate(),
                     progress.getLastActionAt()
             );
+        }
+
+        /**
+         * Integer null → 0 으로 치환하는 헬퍼.
+         *
+         * <p>RewardPolicy.dailyLimit / maxCount 컬럼은 nullable 이므로 DB 에 NULL 행이 있을 수 있다.
+         * 응답 DTO 의 해당 필드는 "0=무제한" 의미로 사용되므로 NULL 을 0 으로 통일해 일관된 뷰를 제공한다.</p>
+         */
+        private static Integer nullSafeZero(Integer value) {
+            return value != null ? value : 0;
         }
     }
 
