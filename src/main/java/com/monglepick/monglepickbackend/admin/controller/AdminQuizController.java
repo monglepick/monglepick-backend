@@ -1,5 +1,6 @@
 package com.monglepick.monglepickbackend.admin.controller;
 
+import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.ParticipationResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.PublishNowResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.QuizDetailResponse;
 import com.monglepick.monglepickbackend.admin.dto.AdminQuizDto.UpdateQuizRequest;
@@ -12,6 +13,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -160,6 +165,25 @@ public class AdminQuizController {
      *
      * @return 200 OK + {@link PublishNowResponse} (published 0 또는 1)
      */
+    /**
+     * 퀴즈 참여자 목록 조회 (페이징).
+     *
+     * @param id   퀴즈 ID
+     * @param page 페이지 번호 (0-based, 기본값 0)
+     * @param size 페이지 크기 (기본값 20)
+     * @return 참여 기록 Page
+     */
+    @Operation(summary = "퀴즈 참여자 목록 조회", description = "특정 퀴즈의 참여 기록을 제출 시각 역순으로 페이징 조회")
+    @GetMapping("/{id}/participations")
+    public ResponseEntity<ApiResponse<Page<ParticipationResponse>>> getParticipations(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        Pageable pageable = PageRequest.of(page, size);
+        return ResponseEntity.ok(ApiResponse.ok(adminQuizService.getParticipations(id, pageable)));
+    }
+
     @Operation(
             summary = "오늘 퀴즈 강제 발행",
             description = "QuizPublishScheduler.manualPublish() 를 호출하여 APPROVED 1건을 즉시 발행한다. " +
