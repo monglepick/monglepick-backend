@@ -78,6 +78,14 @@ public class Post extends BaseAuditEntity {
     @Setter
     private String nickname;
 
+    /**
+     * 작성자 프로필 이미지 URL (DB 비영속, JOIN 결과 캐리어).
+     * MyBatis JOIN 쿼리에서 users.profile_image 를 매핑해 채운다.
+     */
+    @Transient
+    @Setter
+    private String profileImage;
+
     /** 게시글 제목 (최대 200자) */
     @Column(nullable = false, length = 200)
     private String title;

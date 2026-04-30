@@ -42,10 +42,11 @@
         <result property="adminEditReason" column="admin_edit_reason"/>
     </resultMap>
 
-    <!-- 게시글 + JOIN users.nickname 매핑 (상세/목록용) -->
+    <!-- 게시글 + JOIN users.nickname + profile_image 매핑 (상세/목록용) -->
     <resultMap id="postWithNicknameResultMap" type="com.monglepick.monglepickbackend.domain.community.entity.Post"
                extends="postResultMap">
         <result property="nickname" column="nickname"/>
+        <result property="profileImage" column="author_profile_image"/>
     </resultMap>
 
     <!-- 게시글 + nickname + playlist JOIN 매핑 (PLAYLIST_SHARE 피드 전용) -->
@@ -123,7 +124,8 @@
 
     <select id="findByIdWithNickname" resultMap="postWithNicknameResultMap">
         SELECT <include refid="postColumns"/>,
-               u.nickname AS nickname
+               u.nickname AS nickname,
+               u.profile_image AS author_profile_image
         FROM posts p
         LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.post_id = #{postId}
@@ -133,7 +135,8 @@
 
     <select id="findByStatusWithNickname" resultMap="postWithNicknameResultMap">
         SELECT <include refid="postColumns"/>,
-        u.nickname AS nickname
+        u.nickname AS nickname,
+        u.profile_image AS author_profile_image
         FROM posts p
         LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.status = #{status}
@@ -153,7 +156,8 @@
 
     <select id="findByCategoryAndStatusWithNickname" resultMap="postWithNicknameResultMap">
         SELECT <include refid="postColumns"/>,
-        u.nickname AS nickname
+        u.nickname AS nickname,
+        u.profile_image AS author_profile_image
         FROM posts p
         LEFT JOIN users u ON p.user_id = u.user_id
         WHERE p.category = #{category}
@@ -354,7 +358,8 @@
 
     <select id="searchAdminPosts" resultMap="postWithNicknameResultMap">
         SELECT <include refid="postColumns"/>,
-               u.nickname AS nickname
+               u.nickname AS nickname,
+               u.profile_image AS author_profile_image
         FROM posts p
         LEFT JOIN users u ON p.user_id = u.user_id
         <include refid="adminPostWhere"/>
@@ -389,6 +394,7 @@
                p.is_deleted, p.deleted_at, p.is_blinded, p.playlist_id,
                p.created_at, p.updated_at, p.created_by, p.updated_by,
                u.nickname AS nickname,
+               u.profile_image AS author_profile_image,
                COALESCE(p.pl_snapshot_name,      pl.playlist_name)   AS pl_playlist_name,
                COALESCE(p.pl_snapshot_desc,      pl.description)      AS pl_description,
                COALESCE(p.pl_snapshot_cover_url, pl.cover_image_url)  AS pl_cover_image_url,

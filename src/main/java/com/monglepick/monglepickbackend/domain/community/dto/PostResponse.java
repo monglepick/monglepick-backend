@@ -30,6 +30,7 @@ import java.util.List;
  * @param authorEquippedAvatarUrl  작성자가 장착 중인 아바타 이미지 URL (없으면 null) — 2026-04-27 신설
  * @param authorEquippedBadgeUrl   작성자가 장착 중인 배지 이미지 URL (없으면 null)  — 2026-04-27 신설
  * @param authorEquippedBadgeName  작성자가 장착 중인 배지 이름 (tooltip 용, 없으면 null) — 2026-04-27 신설
+ * @param authorProfileImageUrl    작성자가 설정한 프로필 이미지 URL (없으면 null) — 2026-04-30 신설
  */
 public record PostResponse(
         Long id,
@@ -49,7 +50,8 @@ public record PostResponse(
         List<String> imageUrls,
         String authorEquippedAvatarUrl,
         String authorEquippedBadgeUrl,
-        String authorEquippedBadgeName
+        String authorEquippedBadgeName,
+        String authorProfileImageUrl
 ) {
 
     /**
@@ -70,6 +72,8 @@ public record PostResponse(
     public static PostResponse from(Post post, Integer rewardPoints) {
         return from(post, rewardPoints, AuthorEquipment.EMPTY);
     }
+
+
 
     /**
      * 게시글 + 리워드 + 작성자 장착 정보 통합 매핑.
@@ -121,7 +125,8 @@ public record PostResponse(
                 imageUrlList,
                 safeEquip.avatarUrl(),
                 safeEquip.badgeUrl(),
-                safeEquip.badgeName()
+                safeEquip.badgeName(),
+                post.getProfileImage()
         );
     }
 }
