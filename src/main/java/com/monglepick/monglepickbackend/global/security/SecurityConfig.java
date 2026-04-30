@@ -339,6 +339,12 @@ public class SecurityConfig {
                  */
                 .requestMatchers(HttpMethod.POST, "/api/v1/guest/quota/**").hasRole("SERVICE")
 
+                /*
+                 * 온보딩 업적 동기화 — Recommend/FastAPI 등 내부 서비스가 /api/v2 선호 저장
+                 * 성공 후 Spring Boot 업적 도메인에 onboard_complete 재계산을 요청한다.
+                 */
+                .requestMatchers(HttpMethod.POST, "/api/v1/onboarding/internal/**").hasRole("SERVICE")
+
                 /* 관리자 전용 로그인 — AdminLoginFilter가 처리, permitAll 필요 */
                 .requestMatchers("/api/v1/admin/auth/login").permitAll()
 

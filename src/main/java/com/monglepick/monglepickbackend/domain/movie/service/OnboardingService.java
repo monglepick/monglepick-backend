@@ -2,13 +2,19 @@ package com.monglepick.monglepickbackend.domain.movie.service;
 
 import com.monglepick.monglepickbackend.domain.movie.entity.FavActor;
 import com.monglepick.monglepickbackend.domain.movie.entity.FavDirector;
+import com.monglepick.monglepickbackend.domain.movie.entity.FavGenre;
+import com.monglepick.monglepickbackend.domain.movie.entity.FavMovie;
 import com.monglepick.monglepickbackend.domain.movie.repository.FavActorRepository;
 import com.monglepick.monglepickbackend.domain.movie.repository.FavDirectorRepository;
+import com.monglepick.monglepickbackend.domain.movie.repository.FavGenreRepository;
+import com.monglepick.monglepickbackend.domain.movie.repository.FavMovieRepository;
+import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -39,6 +45,9 @@ public class OnboardingService {
 
     private final FavDirectorRepository favDirectorRepository;
     private final FavActorRepository favActorRepository;
+    private final FavGenreRepository favGenreRepository;
+    private final FavMovieRepository favMovieRepository;
+    private final AchievementService achievementService;
 
     /**
      * 사용자의 선호 감독 목록을 일괄 저장한다 (Replace All).
@@ -99,6 +108,75 @@ public class OnboardingService {
     }
 
     /**
+     * 사용자의 선호 장르 목록을 일괄 저장한다 (Replace All).
+     *
+     * @param userId   사용자 ID
+     * @param genreIds 저장할 장르 ID 목록
+     */
+    @Transactional
+    public void saveGenres(String userId, List<Long> genreIds) {
+        favGenreRepository.deleteByUserId(userId);
+        log.debug("선호 장르 기존 데이터 삭제 완료 - userId: {}", userId);
+
+        List<FavGenre> entities = new java.util.ArrayList<>();
+        List<Long> normalizedGenreIds = genreIds == null
+                ? List.of()
+                : genreIds.stream()
+                .filter(genreId -> genreId != null)
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                        java.util.ArrayList::new
+                ));
+        for (int i = 0; i < normalizedGenreIds.size(); i++) {
+            Long genreId = normalizedGenreIds.get(i);
+            entities.add(FavGenre.builder()
+                    .userId(userId)
+                    .genreId(genreId)
+                    .priority(i)
+                    .build());
+        }
+
+        favGenreRepository.saveAll(entities);
+        log.info("선호 장르 저장 완료 - userId: {}, 저장 건수: {}", userId, entities.size());
+        checkOnboardCompleteSafely(userId, "선호 장르");
+    }
+
+    /**
+     * 사용자의 인생 영화 목록을 일괄 저장한다 (Replace All).
+     *
+     * @param userId   사용자 ID
+     * @param movieIds 저장할 영화 ID 목록
+     */
+    @Transactional
+    public void saveMovies(String userId, List<String> movieIds) {
+        favMovieRepository.deleteByUserId(userId);
+        log.debug("인생 영화 기존 데이터 삭제 완료 - userId: {}", userId);
+
+        List<FavMovie> entities = new java.util.ArrayList<>();
+        List<String> normalizedMovieIds = movieIds == null
+                ? List.of()
+                : movieIds.stream()
+                .filter(movieId -> movieId != null && !movieId.isBlank())
+                .map(String::trim)
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                        java.util.ArrayList::new
+                ));
+        for (int i = 0; i < normalizedMovieIds.size(); i++) {
+            String movieId = normalizedMovieIds.get(i);
+            entities.add(FavMovie.builder()
+                    .userId(userId)
+                    .movieId(movieId)
+                    .priority(i)
+                    .build());
+        }
+
+        favMovieRepository.saveAll(entities);
+        log.info("인생 영화 저장 완료 - userId: {}, 저장 건수: {}", userId, entities.size());
+        checkOnboardCompleteSafely(userId, "인생 영화");
+    }
+
+    /**
      * 사용자의 선호 감독 이름 목록을 조회한다.
      *
      * @param userId 사용자 ID
@@ -121,4 +199,62 @@ public class OnboardingService {
                 .map(FavActor::getActorName)
                 .toList();
     }
+
+    /**
+     * 사용자의 선호 장르 ID 목록을 조회한다.
+     *
+     * @param userId 사용자 ID
+     * @return 선호 장르 ID 목록
+     */
+    public List<Long> getGenres(String userId) {
+        return favGenreRepository.findByUserIdOrderByPriorityAscFavGenreIdAsc(userId).stream()
+                .map(FavGenre::getGenreId)
+                .toList();
+    }
+
+    /**
+     * 사용자의 인생 영화 ID 목록을 조회한다.
+     *
+     * @param userId 사용자 ID
+     * @return 인생 영화 ID 목록
+     */
+    public List<String> getMovies(String userId) {
+        return favMovieRepository.findByUserIdOrderByPriorityAscFavMovieIdAsc(userId).stream()
+                .map(FavMovie::getMovieId)
+                .toList();
+    }
+
+    /**
+     * 현재 온보딩 완료 업적 기준 상태를 조회한다.
+     */
+    public OnboardingStatus getStatus(String userId) {
+        AchievementService.OnboardCompleteProgress progress =
+                achievementService.getOnboardCompleteProgress(userId);
+        return new OnboardingStatus(
+                progress.worldcupCompleted(),
+                progress.favoriteGenresCompleted(),
+                progress.favoriteMoviesCompleted(),
+                progress.progress(),
+                progress.maxProgress(),
+                progress.completed()
+        );
+    }
+
+    private void checkOnboardCompleteSafely(String userId, String source) {
+        try {
+            achievementService.checkOnboardComplete(userId);
+        } catch (Exception e) {
+            log.warn("{} 저장 후 온보딩 업적 체크 실패 (저장은 정상 처리): userId={}, error={}",
+                    source, userId, e.getMessage());
+        }
+    }
+
+    public record OnboardingStatus(
+            boolean worldcupCompleted,
+            boolean favoriteGenresCompleted,
+            boolean favoriteMoviesCompleted,
+            int progress,
+            int maxProgress,
+            boolean completed
+    ) {}
 }

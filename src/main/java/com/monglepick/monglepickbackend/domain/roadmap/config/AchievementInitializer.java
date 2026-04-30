@@ -24,12 +24,13 @@ import java.util.List;
  *   <li>신규 코드만 INSERT하므로 운영 중 재시작해도 기존 데이터에 영향이 없다.</li>
  * </ul>
  *
- * <h3>기본 업적 유형 4종</h3>
+ * <h3>기본 업적 유형 5종</h3>
  * <ul>
  *   <li>{@code course_complete}  — 도장깨기 코스 완주 (1회, 100P)</li>
  *   <li>{@code quiz_perfect}     — 퀴즈 만점 달성 (1회, 50P)</li>
  *   <li>{@code review_count_10}  — 리뷰 10개 달성 (10회, 200P)</li>
  *   <li>{@code genre_explorer}   — 5개 장르 탐험 (5회, 150P)</li>
+ *   <li>{@code onboard_complete} — 온보딩 완료 (월드컵/장르/인생영화, 100P)</li>
  * </ul>
  */
 @Slf4j
@@ -102,6 +103,17 @@ public class AchievementInitializer implements ApplicationRunner {
                         .requiredCount(5)
                         .rewardPoints(150)
                         .category("VIEWING")
+                        .isActive(true)
+                        .build(),
+
+                /* 온보딩 완료 — 월드컵 완료, 선호 장르 선택, 인생 영화 선택 3개가 모두 끝났을 때 달성 */
+                AchievementType.builder()
+                        .achievementCode("onboard_complete")
+                        .achievementName("온보딩 완료")
+                        .description("월드컵 완료, 선호 장르 선택, 인생 영화 선택을 모두 완료하면 획득할 수 있습니다.")
+                        .requiredCount(3)
+                        .rewardPoints(100)
+                        .category("COLLECTION")
                         .isActive(true)
                         .build()
         );
