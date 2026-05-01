@@ -4,6 +4,7 @@ package com.monglepick.monglepickbackend.global.security;
 import tools.jackson.databind.ObjectMapper;
 import com.monglepick.monglepickbackend.domain.auth.filter.AdminLoginFilter;
 import com.monglepick.monglepickbackend.domain.auth.filter.LoginFilter;
+import com.monglepick.monglepickbackend.domain.auth.handler.AdminLoginSuccessHandler;
 import com.monglepick.monglepickbackend.domain.auth.handler.LoginSuccessHandler;
 import com.monglepick.monglepickbackend.domain.auth.handler.RefreshTokenLogoutHandler;
 import com.monglepick.monglepickbackend.domain.auth.handler.SocialFailureHandler;
@@ -94,6 +95,7 @@ public class SecurityConfig {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final LoginSuccessHandler loginSuccessHandler;
+    private final AdminLoginSuccessHandler adminLoginSuccessHandler;
     private final SocialSuccessHandler socialSuccessHandler;
     private final SocialFailureHandler socialFailureHandler;
     private final JwtService jwtService;
@@ -347,6 +349,8 @@ public class SecurityConfig {
 
                 /* 관리자 전용 로그인 — AdminLoginFilter가 처리, permitAll 필요 */
                 .requestMatchers("/api/v1/admin/auth/login").permitAll()
+                /* 관리자 전용 refresh/logout — adminRefreshToken 쿠키 기반이므로 access token 없이 허용 */
+                .requestMatchers("/api/v1/admin/auth/refresh", "/api/v1/admin/auth/logout").permitAll()
 
                 /* JWT 토큰 교환/갱신 (KMG 패턴: OAuth2 성공 후 /jwt/exchange 호출) */
                 .requestMatchers("/jwt/exchange", "/jwt/refresh").permitAll()
@@ -468,7 +472,7 @@ public class SecurityConfig {
              * 일반 사용자(ROLE_USER)에게는 403을 반환하고 관리자 JWT 발급을 차단한다.
              */
             .addFilterBefore(
-                new AdminLoginFilter(authenticationManager, loginSuccessHandler),
+                new AdminLoginFilter(authenticationManager, adminLoginSuccessHandler),
                 UsernamePasswordAuthenticationFilter.class
             )
 

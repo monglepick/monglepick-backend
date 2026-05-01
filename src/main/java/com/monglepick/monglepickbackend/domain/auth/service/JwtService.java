@@ -4,6 +4,7 @@ import com.monglepick.monglepickbackend.domain.auth.entity.RefreshEntity;
 import com.monglepick.monglepickbackend.domain.auth.mapper.RefreshMapper;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.global.constants.UserRole;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
@@ -77,6 +78,26 @@ public class JwtService {
      */
     @Transactional
     public JwtRefreshResult refreshRotate(String refreshToken) {
+        return refreshRotate(refreshToken, UserRole.USER);
+    }
+
+    /**
+     * 특정 역할 전용 Refresh Token 로테이션.
+     *
+     * <p>관리자 refresh API처럼 토큰 주체의 역할을 확인한 뒤에만 기존 토큰을
+     * 무효화하고 새 토큰을 발급해야 하는 흐름에서 사용한다. 역할이 맞지 않으면
+     * 토큰 회전을 수행하지 않고 즉시 차단한다.</p>
+     *
+     * @param refreshToken 기존 Refresh Token
+     * @param requiredRole 요구 역할
+     * @return 새로운 토큰 쌍
+     */
+    @Transactional
+    public JwtRefreshResult refreshRotateForRole(String refreshToken, UserRole requiredRole) {
+        return refreshRotate(refreshToken, requiredRole);
+    }
+
+    private JwtRefreshResult refreshRotate(String refreshToken, UserRole requiredRole) {
         /* 1. 토큰 서명 및 만료 검증 */
         JwtTokenProvider.ParsedToken parsed = jwtTokenProvider.parse(refreshToken);
         if (parsed == null || !parsed.isRefresh()) {
@@ -101,6 +122,12 @@ public class JwtService {
         if (user.getStatus() == User.UserStatus.SUSPENDED) {
             removeAllRefreshByUser(userId);
             throw new BusinessException(ErrorCode.ACCOUNT_SUSPENDED);
+        }
+        if (requiredRole != null && user.getUserRole() != requiredRole) {
+            if (requiredRole == UserRole.USER && user.getUserRole() == UserRole.ADMIN) {
+                throw new BusinessException(ErrorCode.ADMIN_LOGIN_REQUIRED);
+            }
+            throw new BusinessException(ErrorCode.ADMIN_ONLY);
         }
 
         /* 4. 새 토큰 쌍 생성 */

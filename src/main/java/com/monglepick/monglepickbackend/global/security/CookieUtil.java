@@ -41,6 +41,8 @@ public class CookieUtil {
 
     /** Refresh Token을 담는 쿠키 이름 — 모든 인증 흐름에서 이 이름을 사용 */
     private static final String REFRESH_TOKEN_COOKIE_NAME = "refreshToken";
+    /** 관리자 Refresh Token을 담는 쿠키 이름 — 일반 사용자 세션과 분리 */
+    private static final String ADMIN_REFRESH_TOKEN_COOKIE_NAME = "adminRefreshToken";
 
     /**
      * Secure 속성 제어 플래그.
@@ -69,10 +71,27 @@ public class CookieUtil {
      * @param refreshToken 저장할 Refresh Token 문자열
      */
     public void addRefreshTokenCookie(HttpServletResponse response, String refreshToken) {
+        addRefreshTokenCookie(response, REFRESH_TOKEN_COOKIE_NAME, refreshToken);
+    }
+
+    /**
+     * 응답에 관리자 Refresh Token HttpOnly 쿠키를 추가한다.
+     *
+     * <p>일반 사용자용 {@code refreshToken} 쿠키와 분리된 {@code adminRefreshToken}
+     * 쿠키를 사용하여 관리자 로그인 상태가 사용자 로그인 상태를 덮어쓰지 않게 한다.</p>
+     *
+     * @param response     HTTP 응답 객체
+     * @param refreshToken 저장할 관리자 Refresh Token 문자열
+     */
+    public void addAdminRefreshTokenCookie(HttpServletResponse response, String refreshToken) {
+        addRefreshTokenCookie(response, ADMIN_REFRESH_TOKEN_COOKIE_NAME, refreshToken);
+    }
+
+    private void addRefreshTokenCookie(HttpServletResponse response, String cookieName, String refreshToken) {
         /* ms → s 변환: 쿠키 MaxAge는 초 단위 */
         long maxAgeSeconds = jwtTokenProvider.getRefreshTokenExpiry() / 1000;
 
-        ResponseCookie cookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, refreshToken)
+        ResponseCookie cookie = ResponseCookie.from(cookieName, refreshToken)
                 .httpOnly(true)           // JavaScript에서 document.cookie로 접근 불가 (XSS 방어)
                 .secure(secure)           // HTTPS 전용 여부 (운영: true, 개발: false)
                 .sameSite("Lax")          // CSRF 방어 + OAuth2 리다이렉트 허용
@@ -83,7 +102,8 @@ public class CookieUtil {
         /* ResponseCookie.toString()은 "name=value; attributes" 형식의 Set-Cookie 헤더 값을 반환 */
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
-        log.debug("Refresh Token 쿠키 설정 완료 — maxAge: {}초, secure: {}", maxAgeSeconds, secure);
+        log.debug("Refresh Token 쿠키 설정 완료 — name: {}, maxAge: {}초, secure: {}",
+                cookieName, maxAgeSeconds, secure);
     }
 
     /**
@@ -95,7 +115,20 @@ public class CookieUtil {
      * @param response HTTP 응답 객체
      */
     public void deleteRefreshTokenCookie(HttpServletResponse response) {
-        ResponseCookie cookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, "")
+        deleteRefreshTokenCookie(response, REFRESH_TOKEN_COOKIE_NAME);
+    }
+
+    /**
+     * 응답에 관리자 Refresh Token 쿠키 삭제용 빈 쿠키를 추가한다.
+     *
+     * @param response HTTP 응답 객체
+     */
+    public void deleteAdminRefreshTokenCookie(HttpServletResponse response) {
+        deleteRefreshTokenCookie(response, ADMIN_REFRESH_TOKEN_COOKIE_NAME);
+    }
+
+    private void deleteRefreshTokenCookie(HttpServletResponse response, String cookieName) {
+        ResponseCookie cookie = ResponseCookie.from(cookieName, "")
                 .httpOnly(true)
                 .secure(secure)
                 .sameSite("Lax")
@@ -105,7 +138,7 @@ public class CookieUtil {
 
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 
-        log.debug("Refresh Token 쿠키 삭제 — Set-Cookie MaxAge=0 전송");
+        log.debug("Refresh Token 쿠키 삭제 — name: {}, Set-Cookie MaxAge=0 전송", cookieName);
     }
 
     /**
@@ -118,6 +151,20 @@ public class CookieUtil {
      * @return Refresh Token 문자열, 없으면 null
      */
     public String extractRefreshToken(HttpServletRequest request) {
+        return extractRefreshToken(request, REFRESH_TOKEN_COOKIE_NAME);
+    }
+
+    /**
+     * 요청에서 관리자 Refresh Token 쿠키 값을 추출한다.
+     *
+     * @param request HTTP 요청 객체
+     * @return 관리자 Refresh Token 문자열, 없으면 null
+     */
+    public String extractAdminRefreshToken(HttpServletRequest request) {
+        return extractRefreshToken(request, ADMIN_REFRESH_TOKEN_COOKIE_NAME);
+    }
+
+    private String extractRefreshToken(HttpServletRequest request, String cookieName) {
         Cookie[] cookies = request.getCookies();
 
         /* 쿠키가 아예 없는 경우 — null 반환 */
@@ -127,7 +174,7 @@ public class CookieUtil {
 
         /* 스트림으로 "refreshToken" 이름의 쿠키 검색 */
         return Arrays.stream(cookies)
-                .filter(c -> REFRESH_TOKEN_COOKIE_NAME.equals(c.getName()))
+                .filter(c -> cookieName.equals(c.getName()))
                 .map(Cookie::getValue)
                 .findFirst()
                 .orElse(null);

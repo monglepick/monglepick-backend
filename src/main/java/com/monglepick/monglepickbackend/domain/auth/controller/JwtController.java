@@ -25,7 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
  * JWT 토큰 관리 컨트롤러.
  *
  * <p>KMG 프로젝트의 JwtController 패턴을 적용.
- * OAuth2 쿠키→헤더 교환과 Refresh Token 갱신을 처리한다.</p>
+ * 사용자 OAuth2 쿠키→헤더 교환과 사용자 Refresh Token 갱신을 처리한다.
+ * 관리자 Refresh Token 갱신은 {@code /api/v1/admin/auth/refresh}를 사용한다.</p>
  *
  * <h3>쿠키 보안 정책</h3>
  * <p>모든 엔드포인트에서 Refresh Token은 HttpOnly 쿠키로만 읽고/설정하며,
@@ -34,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <h3>엔드포인트</h3>
  * <ul>
  *   <li>POST /jwt/exchange — OAuth2 쿠키 Refresh Token → 새 토큰 쌍 (쿠키+body)</li>
- *   <li>POST /jwt/refresh — 쿠키 Refresh Token → 새 토큰 쌍 (쿠키+body)</li>
+ *   <li>POST /jwt/refresh — 사용자 쿠키 Refresh Token → 새 토큰 쌍 (쿠키+body)</li>
  * </ul>
  */
 @Tag(name = "JWT 토큰", description = "쿠키 기반 Refresh Token 교환 및 갱신")
@@ -145,12 +146,13 @@ public class JwtController {
     }
 
     /**
-     * Refresh Token 갱신 (토큰 로테이션).
+     * 사용자 Refresh Token 갱신 (토큰 로테이션).
      *
-     * <p>HttpOnly 쿠키에서 기존 Refresh Token을 읽어 새 토큰 쌍으로 교환한다.
+     * <p>HttpOnly 쿠키에서 기존 사용자 Refresh Token을 읽어 새 토큰 쌍으로 교환한다.
      * 기존 토큰은 DB 화이트리스트에서 삭제되어 재사용 불가능하다.
      * 새 Refresh Token은 HttpOnly 쿠키로 갱신하고,
-     * Access Token만 JSON body로 반환한다.</p>
+     * Access Token만 JSON body로 반환한다. 관리자 계정은 이 엔드포인트를 사용할 수 없고
+     * {@code /api/v1/admin/auth/refresh}를 사용해야 한다.</p>
      *
      * @param request  HTTP 요청 (refreshToken 쿠키 포함)
      * @param response HTTP 응답 (새 refreshToken 쿠키 설정)

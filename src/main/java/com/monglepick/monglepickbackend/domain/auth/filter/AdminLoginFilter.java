@@ -47,7 +47,7 @@ public class AdminLoginFilter extends AbstractAuthenticationProcessingFilter {
      * AdminLoginFilter 생성자.
      *
      * @param authenticationManager Spring Security 인증 매니저
-     * @param successHandler        인증 성공 핸들러 (JWT 발급) — LoginSuccessHandler 공유
+     * @param successHandler        관리자 인증 성공 핸들러 (관리자 JWT + adminRefreshToken 발급)
      */
     public AdminLoginFilter(AuthenticationManager authenticationManager,
                              AuthenticationSuccessHandler successHandler) {
@@ -96,7 +96,7 @@ public class AdminLoginFilter extends AbstractAuthenticationProcessingFilter {
      * 인증 성공 후 ROLE_ADMIN 여부를 검증한다.
      *
      * <p>일반 사용자(ROLE_USER)인 경우 403 Forbidden(A010)을 반환하고 종료한다.
-     * ROLE_ADMIN이면 LoginSuccessHandler를 호출하여 JWT를 발급한다.</p>
+     * ROLE_ADMIN이면 관리자 성공 핸들러를 호출하여 JWT를 발급한다.</p>
      */
     @Override
     protected void successfulAuthentication(HttpServletRequest request, HttpServletResponse response,

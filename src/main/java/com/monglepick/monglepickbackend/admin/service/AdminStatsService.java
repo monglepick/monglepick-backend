@@ -23,6 +23,7 @@ import com.monglepick.monglepickbackend.domain.reward.repository.UserAiQuotaRepo
 import com.monglepick.monglepickbackend.domain.reward.repository.UserAttendanceRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserActivityProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserPointRepository;
+import com.monglepick.monglepickbackend.domain.reward.repository.RewardPolicyRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.CourseProgressStatus;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserAchievementRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
@@ -145,6 +146,8 @@ public class AdminStatsService {
     private final UserAttendanceRepository userAttendanceRepository;
     /* 활동 진행 — user_activity_progress 테이블 집계 */
     private final UserActivityProgressRepository userActivityProgressRepository;
+    /* 리워드 정책 — 활동 코드의 한국어 표시명 조회 */
+    private final RewardPolicyRepository rewardPolicyRepository;
     /* 위시리스트 — user_wishlists 테이블 집계 */
     private final UserWishlistRepository userWishlistRepository;
 
@@ -2339,34 +2342,48 @@ public class AdminStatsService {
         /* actionType별 [actionType, userCount, totalActions] 집계 */
         List<Object[]> rows = userActivityProgressRepository.countGroupByActionType();
 
-        /* actionType → 한국어 라벨 매핑 (주요 55개 정책 코드 기반) */
-        Map<String, String> actionLabels = new HashMap<>();
-        actionLabels.put("review_write",       "리뷰 작성");
-        actionLabels.put("attendance",          "출석 체크");
-        actionLabels.put("movie_like",          "영화 좋아요");
-        actionLabels.put("wishlist_add",        "위시리스트 추가");
-        actionLabels.put("post_write",          "게시글 작성");
-        actionLabels.put("comment_write",       "댓글 작성");
-        actionLabels.put("worldcup_play",       "이상형 월드컵");
-        actionLabels.put("roadmap_complete",    "도장깨기 완주");
-        actionLabels.put("quiz_correct",        "퀴즈 정답");
-        actionLabels.put("playlist_create",     "플레이리스트 생성");
-        actionLabels.put("profile_complete",    "프로필 완성");
-        actionLabels.put("first_review",        "첫 리뷰");
-        actionLabels.put("first_login",         "첫 로그인");
+        /* actionType → 한국어 라벨 매핑. reward_policy.activity_name을 단일 표시명 원본으로 사용한다. */
+        Map<String, String> actionLabels = rewardPolicyRepository.findAll().stream()
+                .collect(Collectors.toMap(
+                        policy -> policy.getActionType(),
+                        policy -> policy.getActivityName(),
+                        (existing, replacement) -> existing
+                ));
 
         List<ActivityItem> activities = rows.stream()
                 .map(row -> {
                     String actionType  = (String) row[0];
                     long userCount     = ((Number) row[1]).longValue();
                     long totalActions  = ((Number) row[2]).longValue();
-                    String label = actionLabels.getOrDefault(actionType, actionType);
+                    String label = actionLabels.getOrDefault(actionType, toKoreanActivityFallback(actionType));
                     return new ActivityItem(actionType, label, userCount, totalActions);
                 })
                 .toList();
 
         log.debug("[admin-stats] 활동 분포 — {} 유형", activities.size());
         return new ActivityDistributionResponse(activities);
+    }
+
+    private String toKoreanActivityFallback(String actionType) {
+        if (actionType == null || actionType.isBlank()) {
+            return "기타 활동";
+        }
+        return switch (actionType) {
+            case "review_write", "REVIEW_WRITE", "REVIEW_CREATE" -> "리뷰 작성";
+            case "attendance", "ATTENDANCE", "ATTENDANCE_BASE" -> "출석 체크";
+            case "movie_like", "MOVIE_LIKE" -> "영화 좋아요";
+            case "wishlist_add", "WISHLIST_ADD" -> "위시리스트 추가";
+            case "post_write", "POST_WRITE", "POST_REWARD" -> "게시글 작성";
+            case "comment_write", "COMMENT_WRITE", "COMMENT_CREATE" -> "댓글 작성";
+            case "worldcup_play", "WORLDCUP_PLAY", "WORLDCUP_COMPLETE" -> "월드컵 완주";
+            case "roadmap_complete", "ROADMAP_COMPLETE", "COURSE_COMPLETE" -> "도장깨기 완주";
+            case "quiz_correct", "QUIZ_CORRECT" -> "퀴즈 정답";
+            case "playlist_create", "PLAYLIST_CREATE", "PLAYLIST_SHARE" -> "플레이리스트 공유";
+            case "profile_complete", "PROFILE_COMPLETE" -> "프로필 완성";
+            case "first_review", "FIRST_REVIEW" -> "첫 리뷰 작성";
+            case "first_login", "FIRST_LOGIN" -> "첫 로그인";
+            default -> "기타 활동";
+        };
     }
 
     /**

@@ -6,6 +6,9 @@ import com.monglepick.monglepickbackend.domain.auth.service.JwtService;
 import com.monglepick.monglepickbackend.domain.auth.service.LoginPostProcessor;
 import com.monglepick.monglepickbackend.domain.user.entity.User;
 import com.monglepick.monglepickbackend.domain.user.mapper.UserMapper;
+import com.monglepick.monglepickbackend.global.constants.UserRole;
+import com.monglepick.monglepickbackend.global.exception.BusinessException;
+import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.global.security.CookieUtil;
 import com.monglepick.monglepickbackend.global.security.JwtTokenProvider;
 import jakarta.servlet.http.HttpServletRequest;
@@ -95,6 +98,9 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
         User user = userMapper.findByEmail(email);
         if (user == null) {
             throw new RuntimeException("로그인 성공 후 사용자 조회 실패: " + email);
+        }
+        if (user.getUserRole() == UserRole.ADMIN) {
+            throw new BusinessException(ErrorCode.ADMIN_LOGIN_REQUIRED);
         }
 
         /* Access Token + Refresh Token 생성 */
