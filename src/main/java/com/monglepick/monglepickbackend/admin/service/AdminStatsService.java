@@ -572,6 +572,7 @@ public class AdminStatsService {
                     return new SearchHistoryKeywordItem(
                             keyword,
                             searchCount,
+                            sessionCount,
                             resultCount,
                             conversionRate
                     );

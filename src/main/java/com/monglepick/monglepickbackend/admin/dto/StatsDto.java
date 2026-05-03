@@ -229,12 +229,14 @@ public class StatsDto {
      *
      * @param keyword        검색어
      * @param searchCount    검색 횟수 (clicked_movie_id IS NULL 기준)
+     * @param sessionCount   검색 세션 수 (동일 user_id + keyword, 30분 inactivity 기준)
      * @param resultCount    기간 내 누적 검색 결과 수
      * @param conversionRate 검색 세션 대비 클릭 발생 세션 비율 (0.0~1.0)
      */
     public record SearchHistoryKeywordItem(
             String keyword,
             long searchCount,
+            long sessionCount,
             long resultCount,
             double conversionRate
     ) {}
