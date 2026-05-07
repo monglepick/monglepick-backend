@@ -2,6 +2,7 @@ package com.monglepick.monglepickbackend.domain.recommendation.repository;
 
 import com.monglepick.monglepickbackend.domain.recommendation.entity.RecommendationImpact;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -51,6 +52,21 @@ public interface RecommendationImpactRepository extends JpaRepository<Recommenda
      * @return 해당 사용자·영화 조합의 임팩트 목록 (없으면 빈 리스트)
      */
     List<RecommendationImpact> findByUserIdAndMovieId(String userId, String movieId);
+
+    /**
+     * 특정 추천 로그에 매달린 임팩트 레코드를 일괄 삭제한다.
+     *
+     * <p>추천 이력 hard-delete 전에 호출하여 recommendation_log FK 참조를 먼저 정리한다.</p>
+     *
+     * @param recommendationLogId 삭제 대상 추천 로그 ID
+     * @return 삭제된 임팩트 행 수
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            DELETE FROM RecommendationImpact ri
+            WHERE ri.recommendationLog.recommendationLogId = :recommendationLogId
+            """)
+    int deleteByRecommendationLogId(@Param("recommendationLogId") Long recommendationLogId);
 
     /**
      * 행동 프로필 배치용 — 유저의 추천 수용률 집계.
