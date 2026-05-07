@@ -15,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,13 +28,14 @@ import java.security.Principal;
 /**
  * 추천 이력 REST API 컨트롤러.
  *
- * <p>클라이언트 추천 이력 탭에서 호출하는 4개 엔드포인트를 제공한다.
+ * <p>클라이언트 추천 이력 탭에서 호출하는 5개 엔드포인트를 제공한다.
  * {@code /api/v1/recommendations} 베이스 경로를 추천 도메인 다른 컨트롤러
  * ({@link RecommendationReviewController}, {@link RecommendationInternalController}) 와 공유한다.</p>
  *
  * <h3>엔드포인트 목록</h3>
  * <ul>
  *   <li>GET  /api/v1/recommendations              — 추천 이력 목록 조회 (페이징)</li>
+ *   <li>DELETE /api/v1/recommendations/{id}       — 추천 이력 삭제</li>
  *   <li>POST /api/v1/recommendations/{id}/wishlist — 찜 토글</li>
  *   <li>POST /api/v1/recommendations/{id}/watched  — 봤어요 토글</li>
  *   <li>POST /api/v1/recommendations/{id}/dismiss  — 관심없음 토글 (P2)</li>
@@ -47,7 +49,7 @@ import java.security.Principal;
  * <h3>인증</h3>
  * <p>모든 엔드포인트는 JWT Bearer 토큰 인증 필수.</p>
  */
-@Tag(name = "추천 이력", description = "사용자 AI 추천 이력 조회 및 찜/봤어요 토글 API")
+@Tag(name = "추천 이력", description = "사용자 AI 추천 이력 조회/삭제 및 액션 토글 API")
 @RestController
 @RequestMapping("/api/v1/recommendations")
 @RequiredArgsConstructor
@@ -121,6 +123,41 @@ public class RecommendationHistoryController extends BaseController {
                 recommendationHistoryService.getRecommendationHistory(userId, status, pageable);
 
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * 추천 이력 항목을 삭제한다.
+     *
+     * <p>UI 버튼명은 "관심 없음"이지만, 사용자 요구사항에 따라 실제 동작은
+     * recommendation_log 레코드 삭제다. 연관된 recommendation_impact 레코드는 먼저 정리하여
+     * FK 제약 또는 고아 데이터가 남지 않게 한다.</p>
+     *
+     * @param recommendationLogId 삭제 대상 추천 로그 ID
+     * @param principal           JWT 인증 정보
+     * @return 204 No Content
+     */
+    @Operation(
+            summary = "추천 이력 삭제",
+            description = "추천 이력 항목을 삭제합니다. 연관 recommendation_impact 도 함께 정리됩니다.",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "204", description = "삭제 성공"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증 필요"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "추천 이력 없음 또는 본인 이력 아님")
+    })
+    @DeleteMapping("/{recommendationLogId}")
+    public ResponseEntity<Void> deleteRecommendationHistory(
+            @Parameter(description = "삭제 대상 추천 로그 ID", required = true, example = "42")
+            @PathVariable Long recommendationLogId,
+
+            Principal principal
+    ) {
+        String userId = resolveUserId(principal);
+        log.info("추천 이력 삭제 요청: recommendationLogId={}, userId={}", recommendationLogId, userId);
+
+        recommendationHistoryService.deleteRecommendationHistory(recommendationLogId, userId);
+        return ResponseEntity.noContent().build();
     }
 
     // ─────────────────────────────────────────────

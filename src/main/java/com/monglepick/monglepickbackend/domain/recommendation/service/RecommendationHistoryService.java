@@ -23,9 +23,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 추천 이력 서비스 — 사용자별 추천 이력 조회 및 찜/봤어요 토글 비즈니스 로직.
+ * 추천 이력 서비스 — 사용자별 추천 이력 조회/삭제 및 액션 토글 비즈니스 로직.
  *
- * <p>클라이언트 추천 이력 탭에서 호출하는 3개 API의 비즈니스 로직을 담당한다.</p>
+ * <p>클라이언트 추천 이력 탭에서 호출하는 조회/삭제/토글 API의 비즈니스 로직을 담당한다.</p>
  *
  * <h3>찜/봤어요 상태 관리 전략</h3>
  * <p>RecommendationLog 엔티티에 wishlist_yn, watched_yn 컬럼이 없으므로,
@@ -152,6 +152,33 @@ public class RecommendationHistoryService {
     // ─────────────────────────────────────────────
     // 쓰기 (개별 @Transactional 오버라이드)
     // ─────────────────────────────────────────────
+
+    /**
+     * 추천 이력 항목을 삭제한다.
+     *
+     * <p>recommendation_log 는 추천 내역 화면의 원본이므로 삭제 시 해당 행을 hard-delete 한다.
+     * recommendation_impact 는 recommendation_log_id 를 참조하므로 먼저 정리하여
+     * FK 제약 또는 고아 데이터를 방지한다. 리뷰는 현재 reviews 테이블의 영화 단위 데이터이므로
+     * 본 삭제와 독립적으로 유지된다.</p>
+     *
+     * @param recommendationLogId 삭제 대상 추천 로그 ID
+     * @param userId              JWT 에서 추출한 사용자 ID (소유권 검증)
+     * @throws BusinessException REC001 — 해당 추천 로그가 없거나 본인 로그가 아닐 때
+     */
+    @Transactional
+    public void deleteRecommendationHistory(Long recommendationLogId, String userId) {
+
+        log.info("추천 이력 삭제: recommendationLogId={}, userId={}", recommendationLogId, userId);
+
+        RecommendationLog recLog = findOwnedLog(recommendationLogId, userId);
+        int deletedImpactCount =
+                recommendationImpactRepository.deleteByRecommendationLogId(recommendationLogId);
+
+        recommendationLogRepository.delete(recLog);
+
+        log.info("추천 이력 삭제 완료: recommendationLogId={}, userId={}, deletedImpactCount={}",
+                recommendationLogId, userId, deletedImpactCount);
+    }
 
     /**
      * 추천 이력에서 특정 영화의 찜 상태를 토글한다.
