@@ -129,7 +129,7 @@ public interface SupportChatLogRepository extends JpaRepository<SupportChatLog, 
         WHERE (:from IS NULL OR l.createdAt >= :from)
           AND (:to IS NULL OR l.createdAt < :to)
         """)
-    Object[] needsHumanRatio(
+    List<Object[]> needsHumanRatio(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to
     );

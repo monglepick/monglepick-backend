@@ -138,7 +138,7 @@ public interface RecommendationImpactRepository extends JpaRepository<Recommenda
             FROM RecommendationImpact ri
             WHERE ri.createdAt >= :start AND ri.createdAt < :end
             """)
-    Object[] aggregateFunnel(
+    java.util.List<Object[]> aggregateFunnel(
             @Param("start") java.time.LocalDateTime start,
             @Param("end") java.time.LocalDateTime end
     );
