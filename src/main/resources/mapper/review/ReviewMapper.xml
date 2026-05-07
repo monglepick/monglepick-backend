@@ -247,7 +247,8 @@
     <select id="countByCreatedAtBetween" resultType="long">
         SELECT COUNT(*)
         FROM reviews
-        WHERE created_at BETWEEN #{start} AND #{end}
+        WHERE created_at >= #{start}
+          AND created_at &lt; #{end}
     </select>
 
     <select id="findAverageRating" resultType="java.lang.Double">

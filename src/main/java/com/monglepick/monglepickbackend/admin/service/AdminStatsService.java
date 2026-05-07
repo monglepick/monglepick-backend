@@ -174,6 +174,8 @@ public class AdminStatsService {
     /** recommend 관리자 집계 API 호출용 클라이언트. */
     private final RestClient restClient = RestClient.create();
 
+    /** 서비스 통계 KST 시간대 — 기간 필터를 한국 날짜 기준으로 고정한다. */
+    private static final ZoneId SERVICE_STATS_ZONE = ZoneId.of("Asia/Seoul");
     /* ── 날짜 포맷터 ── */
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -184,22 +186,40 @@ public class AdminStatsService {
     /**
      * 서비스 전체 KPI 개요를 반환한다.
      *
-     * @param period 기간 문자열 (예: "7d", "30d", "90d") — 신규 가입 집계 범위
+     * <p>서비스 통계 탭의 기간 선택(7/30/90일)에 맞춰
+     * DAU/MAU/신규 가입 카드를 같은 윈도우로 계산한다.</p>
+     *
+     * <ul>
+     *   <li>DAU: 선택 기간 내 최대 일간 활성 사용자 수</li>
+     *   <li>MAU: 선택 기간 내 활성 사용자 수</li>
+     *   <li>신규 가입: 선택 기간 내 신규 가입자 수</li>
+     * </ul>
+     *
+     * @param period 기간 문자열 (예: "7d", "30d", "90d")
      * @return KPI 카드 6항목 (DAU, MAU, 신규가입, 리뷰수, 평균평점, 게시글수)
      */
     public OverviewResponse getOverview(String period) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDate today = LocalDate.now();
+        ServiceStatsWindow window = resolveServiceStatsWindow(period);
+        List<DailyTrend> trends = buildServiceTrends(window);
 
-        /* DAU: 오늘 로그인한 사용자 수 */
-        long dau = userMapper.countByLastLoginAtAfter(today.atStartOfDay());
+        /* DAU: 선택 기간 내 최대 일간 활성 사용자 수 */
+        long dau = trends.stream()
+                .mapToLong(DailyTrend::dau)
+                .max()
+                .orElse(0L);
 
-        /* MAU: 최근 30일 내 로그인 */
-        long mau = userMapper.countByLastLoginAtAfter(now.minusDays(30));
+        /*
+         * MAU: users.last_login_at 기반으로 추적 가능한 "기간 내 활성 사용자 수".
+         * 각 사용자는 마지막 로그인 시각 1건만 유지하므로 일별 DAU 합계와 동일 기준으로 맞춘다.
+         */
+        long mau = trends.stream()
+                .mapToLong(DailyTrend::dau)
+                .sum();
 
-        /* 신규 가입: period에 해당하는 기간 내 */
-        int days = parsePeriodDays(period);
-        long newUsersWeek = userMapper.countByCreatedAtAfter(now.minusDays(days));
+        /* 신규 가입: 차트와 동일하게 일별 합계를 사용해 카드/차트 기준을 일치시킨다. */
+        long newUsersWeek = trends.stream()
+                .mapToLong(DailyTrend::newUsers)
+                .sum();
 
         /* 전체 리뷰 수 */
         long totalReviews = reviewMapper.count();
@@ -211,7 +231,8 @@ public class AdminStatsService {
         /* 전체 게시글 수 (PUBLISHED) */
         long totalPosts = postMapper.countByStatus(PostStatus.PUBLISHED.name(),null);
 
-        log.debug("[admin-stats] 서비스 개요 조회 — DAU={}, MAU={}, 신규={}({}일)", dau, mau, newUsersWeek, days);
+        log.debug("[admin-stats] 서비스 개요 조회 — period={}, start={}, end={}, DAU={}, MAU={}, 신규={}",
+                period, window.startDate(), window.endDate(), dau, mau, newUsersWeek);
         return new OverviewResponse(dau, mau, newUsersWeek, totalReviews, avgRating, totalPosts);
     }
 
@@ -226,12 +247,25 @@ public class AdminStatsService {
      * @return 날짜별 추이 리스트
      */
     public TrendsResponse getTrends(String period) {
-        int days = parsePeriodDays(period);
-        LocalDate today = LocalDate.now();
-        List<DailyTrend> trends = new ArrayList<>();
+        ServiceStatsWindow window = resolveServiceStatsWindow(period);
+        List<DailyTrend> trends = buildServiceTrends(window);
 
-        for (int i = days - 1; i >= 0; i--) {
-            LocalDate date = today.minusDays(i);
+        log.debug("[admin-stats] 추이 차트 조회 — period={}, start={}, end={}, days={}",
+                period, window.startDate(), window.endDate(), window.days());
+        return new TrendsResponse(trends);
+    }
+
+    /**
+     * 서비스 통계 일별 추이 목록을 생성한다.
+     *
+     * <p>모든 일자 집계는 KST 자정 경계의 반개구간[start, end)으로 처리하여
+     * 자정에 찍힌 레코드가 이틀에 중복 포함되지 않도록 한다.</p>
+     */
+    private List<DailyTrend> buildServiceTrends(ServiceStatsWindow window) {
+        List<DailyTrend> trends = new ArrayList<>(window.days());
+
+        for (int i = 0; i < window.days(); i++) {
+            LocalDate date = window.startDate().plusDays(i);
             LocalDateTime dayStart = date.atStartOfDay();
             LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
 
@@ -243,9 +277,24 @@ public class AdminStatsService {
             trends.add(new DailyTrend(date.format(DATE_FMT), dau, newUsers, reviews, posts));
         }
 
-        log.debug("[admin-stats] 추이 차트 조회 — {}일", days);
-        return new TrendsResponse(trends);
+        return trends;
     }
+
+    /** 서비스 통계용 기간 윈도우를 KST 기준으로 계산한다. */
+    private ServiceStatsWindow resolveServiceStatsWindow(String period) {
+        int days = parsePeriodDays(period);
+        LocalDate endDate = LocalDate.now(SERVICE_STATS_ZONE);
+        LocalDate startDate = endDate.minusDays(days - 1L);
+
+        return new ServiceStatsWindow(days, startDate, endDate);
+    }
+
+    /** 서비스 통계 집계에 사용하는 날짜 윈도우. */
+    private record ServiceStatsWindow(
+            int days,
+            LocalDate startDate,
+            LocalDate endDate
+    ) {}
 
     // ──────────────────────────────────────────────
     // 3. 추천 성능 지표 — recommendation_impact 기반 (실측치)
