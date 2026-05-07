@@ -116,17 +116,13 @@ public class AdminSupportChatLogService {
                 .toList();
 
         // ── needs_human 비율 ──
-        Object[] ratioRow = repository.needsHumanRatio(from, to);
-        // SUM 결과가 NULL 일 수 있으므로 안전 변환
+        java.util.List<Object[]> ratioList = repository.needsHumanRatio(from, to);
+        Object[] ratioRow = ratioList != null && !ratioList.isEmpty() ? ratioList.get(0) : null;
         long needsHumanCount;
         long totalCount;
         if (ratioRow == null || ratioRow.length < 2) {
             needsHumanCount = 0L;
             totalCount = 0L;
-        } else if (ratioRow[0] instanceof Object[] inner) {
-            // JPQL 다중 컬럼 select 가 어떤 환경에서는 Object[][] 1xN 으로 래핑되는 케이스 방어
-            needsHumanCount = inner[0] == null ? 0L : ((Number) inner[0]).longValue();
-            totalCount = inner[1] == null ? 0L : ((Number) inner[1]).longValue();
         } else {
             needsHumanCount = ratioRow[0] == null ? 0L : ((Number) ratioRow[0]).longValue();
             totalCount = ratioRow[1] == null ? 0L : ((Number) ratioRow[1]).longValue();

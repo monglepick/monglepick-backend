@@ -1761,7 +1761,8 @@ public class AdminStatsService {
                 : 0.0;
 
         /* 고객센터 자동화율 — 최근 30일 (1 - needs_human 비율) */
-        Object[] needsHumanRow = supportChatLogRepository.needsHumanRatio(thirtyDaysAgo, tomorrowStart);
+        List<Object[]> needsHumanList = supportChatLogRepository.needsHumanRatio(thirtyDaysAgo, tomorrowStart);
+        Object[] needsHumanRow = needsHumanList != null && !needsHumanList.isEmpty() ? needsHumanList.get(0) : null;
         long supportNeedsHuman = needsHumanRow != null && needsHumanRow.length >= 1 && needsHumanRow[0] != null
                 ? ((Number) needsHumanRow[0]).longValue() : 0L;
         long supportTotal = needsHumanRow != null && needsHumanRow.length >= 2 && needsHumanRow[1] != null
@@ -1847,7 +1848,8 @@ public class AdminStatsService {
 
         /* ── 고객센터 챗봇 KPI ── */
         long supportTotal = supportChatLogRepository.count();
-        Object[] supportRatioRow = supportChatLogRepository.needsHumanRatio(null, null);
+        List<Object[]> supportRatioList = supportChatLogRepository.needsHumanRatio(null, null);
+        Object[] supportRatioRow = supportRatioList != null && !supportRatioList.isEmpty() ? supportRatioList.get(0) : null;
         long supportNeedsHuman = supportRatioRow != null && supportRatioRow.length >= 1 && supportRatioRow[0] != null
                 ? ((Number) supportRatioRow[0]).longValue() : 0L;
         double escalationRate = supportTotal > 0
@@ -2043,7 +2045,8 @@ public class AdminStatsService {
         LocalDateTime start = today.minusDays(days - 1L).atStartOfDay();
         LocalDateTime end = today.plusDays(1).atStartOfDay();
 
-        Object[] row = recommendationImpactRepository.aggregateFunnel(start, end);
+        List<Object[]> funnelList = recommendationImpactRepository.aggregateFunnel(start, end);
+        Object[] row = funnelList != null && !funnelList.isEmpty() ? funnelList.get(0) : null;
         long recommended = row != null && row.length >= 1 && row[0] != null ? ((Number) row[0]).longValue() : 0L;
         long clicked = row != null && row.length >= 2 && row[1] != null ? ((Number) row[1]).longValue() : 0L;
         long viewedDetail = row != null && row.length >= 3 && row[2] != null ? ((Number) row[2]).longValue() : 0L;
@@ -2073,7 +2076,8 @@ public class AdminStatsService {
         LocalDateTime end = today.plusDays(1).atStartOfDay();
 
         /* 기간 합계 */
-        Object[] ratio = supportChatLogRepository.needsHumanRatio(start, end);
+        List<Object[]> ratioList = supportChatLogRepository.needsHumanRatio(start, end);
+        Object[] ratio = ratioList != null && !ratioList.isEmpty() ? ratioList.get(0) : null;
         long escalated = ratio != null && ratio.length >= 1 && ratio[0] != null
                 ? ((Number) ratio[0]).longValue() : 0L;
         long totalLogs = ratio != null && ratio.length >= 2 && ratio[1] != null
