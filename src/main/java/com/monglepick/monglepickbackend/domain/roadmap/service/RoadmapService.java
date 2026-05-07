@@ -25,6 +25,8 @@ import com.monglepick.monglepickbackend.domain.roadmap.repository.CourseVerifica
 import com.monglepick.monglepickbackend.domain.roadmap.repository.RoadmapCourseRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -709,7 +711,7 @@ public class RoadmapService {
      * @return 감상평 + 완주 상태 응답
      */
     @Transactional
-    public FinalReviewResponse submitFinalReview(String userId, String courseId, String reviewText) {
+    public AchievementAwareResponse<FinalReviewResponse> submitFinalReview(String userId, String courseId, String reviewText) {
         // 1. 코스 존재 확인 및 리워드 포인트 조회
         RoadmapCourse course = courseRepo.findByCourseId(courseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ROADMAP_COURSE_NOT_FOUND,
@@ -760,10 +762,13 @@ public class RoadmapService {
         log.info("최종 감상평 저장 완료: userId={}, courseId={}", userId, courseId);
 
         // 5. 코스 완주 처리 + 리워드 지급 + 업적
-        handleCourseComplete(userId, courseId, rewardPoints, progress);
+        List<UnlockedAchievementResponse> unlockedAchievements =
+                handleCourseComplete(userId, courseId, rewardPoints, progress)
+                        .map(List::of)
+                        .orElseGet(List::of);
         progressRepo.save(progress);
 
-        return FinalReviewResponse.from(saved, progress);
+        return AchievementAwareResponse.of(FinalReviewResponse.from(saved, progress), unlockedAchievements);
     }
 
     /**
@@ -798,8 +803,8 @@ public class RoadmapService {
      * @param rewardPoints 코스별 완주 포인트
      * @param progress     완주 처리할 진행 엔티티
      */
-    private void handleCourseComplete(String userId, String courseId,
-                                      int rewardPoints, UserCourseProgress progress) {
+    private Optional<UnlockedAchievementResponse> handleCourseComplete(String userId, String courseId,
+                                                                       int rewardPoints, UserCourseProgress progress) {
         // 완주 상태 전환
         progress.complete(LocalDateTime.now());
         progress.markRewardGranted();
@@ -819,6 +824,6 @@ public class RoadmapService {
         rewardService.grantReward(userId, "COURSE_FIRST", "course_first", 0);
 
         // 업적 달성 확인 — course_complete 코드로 코스별 1회 업적 처리
-        achievementService.checkAndGrant(userId, "course_complete", courseId);
+        return achievementService.checkAndGrant(userId, "course_complete", courseId);
     }
 }

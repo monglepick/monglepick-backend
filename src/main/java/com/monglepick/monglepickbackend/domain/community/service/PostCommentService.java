@@ -8,7 +8,9 @@ import com.monglepick.monglepickbackend.domain.community.entity.PostComment;
 import com.monglepick.monglepickbackend.domain.community.mapper.PostMapper;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -74,8 +76,8 @@ public class PostCommentService {
      * 비용을 들이는 대신 응답 데이터의 완전성을 보장한다.</p>
      */
     @Transactional
-    public PostCommentResponse createComment(String userId, Long postId,
-                                             PostCommentCreateRequest request) {
+    public AchievementAwareResponse<PostCommentResponse> createComment(String userId, Long postId,
+                                                                       PostCommentCreateRequest request) {
         PostComment comment = PostComment.builder()
                 .postId(postId)
                 .userId(userId)
@@ -100,8 +102,9 @@ public class PostCommentService {
         Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
 
         // CSV/관리자 등록 기반 댓글 업적 — comment_count_* 계열
+        List<UnlockedAchievementResponse> unlockedAchievements = List.of();
         try {
-            achievementService.checkCommentAchievements(userId);
+            unlockedAchievements = achievementService.checkCommentAchievements(userId);
         } catch (Exception e) {
             log.warn("댓글 업적 체크 실패 (댓글 작성은 정상 처리): userId={}, error={}", userId, e.getMessage());
         }
@@ -111,7 +114,10 @@ public class PostCommentService {
          * 재조회 실패(이론상 발생 어려움) 시에도 build 객체로 폴백하여 리워드 지급은 유지.
          */
         PostComment fullyLoaded = postMapper.findCommentByIdWithNickname(comment.getPostCommentId());
-        return PostCommentResponse.from(fullyLoaded != null ? fullyLoaded : comment, rewardPoints);
+        return AchievementAwareResponse.of(
+                PostCommentResponse.from(fullyLoaded != null ? fullyLoaded : comment, rewardPoints),
+                unlockedAchievements
+        );
     }
 
     // ─────────────────────────────────────────────

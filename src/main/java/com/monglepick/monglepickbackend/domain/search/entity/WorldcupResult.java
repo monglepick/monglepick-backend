@@ -55,11 +55,11 @@ public class WorldcupResult extends BaseAuditEntity {
 
     /**
      * 월드컵 결과 고유 ID (BIGINT AUTO_INCREMENT PK).
-     * 기존 필드명 'id'에서 'worldcupResultId'로 변경하여 엔티티 식별 명확화.
+     * DB 레거시 컬럼명은 id이며, Java 필드명만 worldcupResultId로 유지한다.
      */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "worldcup_result_id")
+    @Column(name = "id")
     private Long worldcupResultId;
 
     /**

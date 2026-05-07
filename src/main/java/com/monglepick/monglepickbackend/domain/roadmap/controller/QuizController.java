@@ -8,6 +8,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitRequest
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.service.QuizService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -173,7 +174,7 @@ public class QuizController extends BaseController {
             @ApiResponse(responseCode = "404", description = "퀴즈가 존재하지 않거나 출제 중이 아님")
     })
     @PostMapping("/{quizId}/submit")
-    public ResponseEntity<SubmitResponse> submitAnswer(
+    public ResponseEntity<AchievementAwareResponse<SubmitResponse>> submitAnswer(
             @Parameter(description = "정답을 제출할 퀴즈 ID", required = true, example = "1")
             @PathVariable Long quizId,
 
@@ -186,7 +187,7 @@ public class QuizController extends BaseController {
 
         log.info("퀴즈 정답 제출: userId={}, quizId={}", userId, quizId);
 
-        SubmitResponse response = quizService.submitAnswer(userId, quizId, request);
+        AchievementAwareResponse<SubmitResponse> response = quizService.submitAnswerWithAchievements(userId, quizId, request);
         return ResponseEntity.ok(response);
     }
 

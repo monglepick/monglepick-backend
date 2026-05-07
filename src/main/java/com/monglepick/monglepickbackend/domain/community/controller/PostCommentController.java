@@ -3,6 +3,7 @@ package com.monglepick.monglepickbackend.domain.community.controller;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCommentCreateRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostCommentResponse;
 import com.monglepick.monglepickbackend.domain.community.service.PostCommentService;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -107,13 +108,13 @@ public class PostCommentController {
     })
     @SecurityRequirement(name = "BearerAuth")
     @PostMapping
-    public ResponseEntity<PostCommentResponse> createComment(
+    public ResponseEntity<AchievementAwareResponse<PostCommentResponse>> createComment(
             @PathVariable Long postId,
             @Valid @RequestBody PostCommentCreateRequest request,
             @AuthenticationPrincipal String userId) {
 
         log.info("[Comment API] 댓글 작성 요청: postId={}, userId={}", postId, userId);
-        PostCommentResponse response = postCommentService.createComment(userId, postId, request);
+        AchievementAwareResponse<PostCommentResponse> response = postCommentService.createComment(userId, postId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

@@ -487,7 +487,7 @@ public class PlaylistService {
         PostCreateRequest postRequest = new PostCreateRequest(
                 postTitle, postContent, Post.Category.PLAYLIST_SHARE, playlistId, null
         );
-        var postResponse = postService.createPost(postRequest, userId);
+        var postResponse = postService.createPost(postRequest, userId).data();
 
         log.info("플레이리스트 커뮤니티 공유 완료: playlistId={}, postId={}", playlistId, postResponse.id());
         return new PlaylistDto.CommunityShareResponse(

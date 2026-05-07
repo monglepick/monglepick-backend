@@ -477,10 +477,17 @@
         SELECT COUNT(DISTINCT jt.genre)
         FROM reviews r
         JOIN movies m ON r.movie_id = m.movie_id COLLATE utf8mb4_unicode_ci,
-        JSON_TABLE(m.genres, '$[*]' COLUMNS (genre VARCHAR(100) PATH '$')) jt
+        JSON_TABLE(
+          CASE
+            WHEN JSON_VALID(m.genres) THEN m.genres
+            ELSE JSON_ARRAY()
+          END,
+          '$[*]' COLUMNS (genre VARCHAR(100) PATH '$')
+        ) jt
         WHERE r.user_id = #{userId}
           AND r.is_deleted = false
           AND m.genres IS NOT NULL
+          AND JSON_VALID(m.genres)
           AND JSON_LENGTH(m.genres) > 0
     </select>
 

@@ -19,7 +19,9 @@ import com.monglepick.monglepickbackend.domain.reward.repository.PointsHistoryRe
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
 import com.monglepick.monglepickbackend.domain.userwatchhistory.service.UserWatchHistoryService;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -89,7 +92,7 @@ public class ReviewService {
      * 영화 리뷰를 작성한다. 같은 사용자가 같은 영화에 중복 리뷰를 작성할 수 없다.
      */
     @Transactional
-    public ReviewResponse createReview(String movieId, ReviewCreateRequest request, String userId) {
+    public AchievementAwareResponse<ReviewResponse> createReview(String movieId, ReviewCreateRequest request, String userId) {
         // 1. 중복 리뷰 검사
         if (reviewMapper.existsByUserIdAndMovieId(userId, movieId)) {
             log.warn("리뷰 작성 실패 - 중복 리뷰: userId={}, movieId={}", userId, movieId);
@@ -145,9 +148,11 @@ public class ReviewService {
         }
 
         // review_count_10 업적 — 리뷰 10개 이상 달성 시 1회 지급
+        List<UnlockedAchievementResponse> unlockedAchievements = new ArrayList<>();
         if (reviewCount >= 10) {
             try {
-                achievementService.checkAndGrant(userId, "review_count_10", "default");
+                achievementService.checkAndGrant(userId, "review_count_10", "default")
+                        .ifPresent(unlockedAchievements::add);
             } catch (Exception e) {
                 log.warn("review_count_10 업적 체크 실패 (리뷰 작성은 정상 처리): userId={}, error={}", userId, e.getMessage());
             }
@@ -157,7 +162,8 @@ public class ReviewService {
         try {
             long distinctGenreCount = reviewMapper.countDistinctExploredGenres(userId);
             if (distinctGenreCount >= 5) {
-                achievementService.checkAndGrant(userId, "genre_explorer", "default");
+                achievementService.checkAndGrant(userId, "genre_explorer", "default")
+                        .ifPresent(unlockedAchievements::add);
             }
         } catch (Exception e) {
             log.warn("genre_explorer 업적 체크 실패 (리뷰 작성은 정상 처리): userId={}, error={}", userId, e.getMessage());
@@ -175,7 +181,7 @@ public class ReviewService {
 
         // 리워드 지급 포인트를 응답에 포함 (earned=true일 때만 포인트 표시)
         Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
-        return ReviewResponse.from(review, rewardPoints);
+        return AchievementAwareResponse.of(ReviewResponse.from(review, rewardPoints), unlockedAchievements);
     }
 
     /**
@@ -247,7 +253,7 @@ public class ReviewService {
         );
         log.info("추천 카드 리뷰 신규 작성 위임 — userId:{}, movieId:{}, recLogId:{}",
                 userId, movieId, recommendationLogId);
-        return createReview(movieId, createRequest, userId);
+        return createReview(movieId, createRequest, userId).data();
     }
 
     /**

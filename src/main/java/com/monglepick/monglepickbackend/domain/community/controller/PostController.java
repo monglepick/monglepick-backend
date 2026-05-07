@@ -5,6 +5,7 @@ import com.monglepick.monglepickbackend.domain.community.dto.PostReportRequest;
 import com.monglepick.monglepickbackend.domain.community.dto.PostResponse;
 import com.monglepick.monglepickbackend.domain.community.service.PostService;
 import com.monglepick.monglepickbackend.global.constants.AppConstants;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -98,13 +99,13 @@ public class PostController {
     })
     @SecurityRequirement(name = "BearerAuth")
     @PostMapping
-    public ResponseEntity<PostResponse> createPost(
+    public ResponseEntity<AchievementAwareResponse<PostResponse>> createPost(
             @Valid @RequestBody PostCreateRequest request,
             @AuthenticationPrincipal String userId) {
 
         log.info("게시글 작성 요청 — userId: {}, category: {}", userId, request.category());
-        PostResponse post = postService.createPost(request, userId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(post);
+        AchievementAwareResponse<PostResponse> response = postService.createPost(request, userId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**

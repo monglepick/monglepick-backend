@@ -10,6 +10,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.dto.FinalReviewResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.UserCourseProgress;
 import com.monglepick.monglepickbackend.domain.roadmap.service.RoadmapService;
 import com.monglepick.monglepickbackend.global.controller.BaseController;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -287,7 +288,7 @@ public class RoadmapController extends BaseController {
             @ApiResponse(responseCode = "404", description = "존재하지 않는 코스")
     })
     @PostMapping("/{courseId}/final-review")
-    public ResponseEntity<FinalReviewResponse> submitFinalReview(
+    public ResponseEntity<AchievementAwareResponse<FinalReviewResponse>> submitFinalReview(
             @Parameter(description = "코스 슬러그", required = true, example = "nolan-filmography")
             @PathVariable String courseId,
 
@@ -299,7 +300,7 @@ public class RoadmapController extends BaseController {
         String reviewText = body != null ? body.get("reviewText") : null;
         log.info("최종 감상평 제출 요청: userId={}, courseId={}", userId, courseId);
 
-        FinalReviewResponse response = roadmapService.submitFinalReview(userId, courseId, reviewText);
+        AchievementAwareResponse<FinalReviewResponse> response = roadmapService.submitFinalReview(userId, courseId, reviewText);
         return ResponseEntity.ok(response);
     }
 

@@ -1,6 +1,8 @@
 package com.monglepick.monglepickbackend.domain.movie.controller;
 
 import com.monglepick.monglepickbackend.domain.movie.service.OnboardingService;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -124,13 +126,13 @@ public class OnboardingController {
     })
     @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/genres")
-    public ResponseEntity<Void> saveGenres(
+    public ResponseEntity<AchievementAwareResponse<Void>> saveGenres(
             @AuthenticationPrincipal String userId,
             @RequestBody List<Long> genreIds) {
 
         log.info("선호 장르 저장 요청 - userId: {}, 건수: {}", userId, genreIds.size());
-        onboardingService.saveGenres(userId, genreIds);
-        return ResponseEntity.ok().build();
+        List<UnlockedAchievementResponse> unlockedAchievements = onboardingService.saveGenres(userId, genreIds);
+        return ResponseEntity.ok(AchievementAwareResponse.of(null, unlockedAchievements));
     }
 
     /**
@@ -150,13 +152,13 @@ public class OnboardingController {
     })
     @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/movies")
-    public ResponseEntity<Void> saveMovies(
+    public ResponseEntity<AchievementAwareResponse<Void>> saveMovies(
             @AuthenticationPrincipal String userId,
             @RequestBody List<String> movieIds) {
 
         log.info("인생 영화 저장 요청 - userId: {}, 건수: {}", userId, movieIds.size());
-        onboardingService.saveMovies(userId, movieIds);
-        return ResponseEntity.ok().build();
+        List<UnlockedAchievementResponse> unlockedAchievements = onboardingService.saveMovies(userId, movieIds);
+        return ResponseEntity.ok(AchievementAwareResponse.of(null, unlockedAchievements));
     }
 
     /**

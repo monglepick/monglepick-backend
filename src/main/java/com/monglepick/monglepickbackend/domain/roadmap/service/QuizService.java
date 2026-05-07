@@ -18,6 +18,8 @@ import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipationRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
@@ -30,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -244,6 +247,11 @@ public class QuizService {
      */
     @Transactional
     public SubmitResponse submitAnswer(String userId, Long quizId, SubmitRequest request) {
+        return submitAnswerWithAchievements(userId, quizId, request).data();
+    }
+
+    @Transactional
+    public AchievementAwareResponse<SubmitResponse> submitAnswerWithAchievements(String userId, Long quizId, SubmitRequest request) {
         // ① 퀴즈 존재 및 PUBLISHED 상태 확인
         Quiz quiz = quizRepository.findById(quizId)
                 .filter(q -> q.getStatus() == Quiz.QuizStatus.PUBLISHED)
@@ -291,18 +299,22 @@ public class QuizService {
         if (isCorrect && !alreadyCorrect) {
             grantQuizReward(userId, quizId);
             // quiz_perfect 업적 — 최초 퀴즈 정답 달성 시 1회 지급
+            List<UnlockedAchievementResponse> unlockedAchievements = new ArrayList<>();
             try {
-                achievementService.checkAndGrant(userId, "quiz_perfect", "default");
+                achievementService.checkAndGrant(userId, "quiz_perfect", "default")
+                        .ifPresent(unlockedAchievements::add);
             } catch (Exception e) {
                 log.warn("quiz_perfect 업적 체크 실패 (퀴즈 제출은 정상 처리): userId={}, quizId={}, error={}",
                         userId, quizId, e.getMessage());
             }
+            return AchievementAwareResponse.of(
+                    new SubmitResponse(isCorrect, quiz.getExplanation(), quiz.getRewardPoint()),
+                    unlockedAchievements
+            );
         }
 
         // ⑦ 응답 반환 — rewardPoint는 정답 최초 지급인 경우에만 실제 값, 나머지는 0
-        int awardedPoint = (isCorrect && !alreadyCorrect) ? quiz.getRewardPoint() : 0;
-
-        return new SubmitResponse(isCorrect, quiz.getExplanation(), awardedPoint);
+        return AchievementAwareResponse.of(new SubmitResponse(isCorrect, quiz.getExplanation(), 0));
     }
 
     // ────────────────────────────────────────────────────────────────

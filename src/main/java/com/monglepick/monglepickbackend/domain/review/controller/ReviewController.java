@@ -5,6 +5,7 @@ import com.monglepick.monglepickbackend.domain.review.dto.ReviewResponse;
 import com.monglepick.monglepickbackend.domain.review.dto.ReviewUpdateRequest;
 import com.monglepick.monglepickbackend.domain.review.service.ReviewService;
 import com.monglepick.monglepickbackend.global.constants.AppConstants;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -84,14 +85,14 @@ public class ReviewController {
     })
     @SecurityRequirement(name = "BearerAuth")
     @PostMapping
-    public ResponseEntity<ReviewResponse> createReview(
+    public ResponseEntity<AchievementAwareResponse<ReviewResponse>> createReview(
             @PathVariable String movieId,
             @Valid @RequestBody ReviewCreateRequest request,
             @AuthenticationPrincipal String userId) {
 
         log.info("리뷰 작성 요청 - userId: {}, movieId: {}", userId, movieId);
-        ReviewResponse review = reviewService.createReview(movieId, request, userId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(review);
+        AchievementAwareResponse<ReviewResponse> response = reviewService.createReview(movieId, request, userId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**

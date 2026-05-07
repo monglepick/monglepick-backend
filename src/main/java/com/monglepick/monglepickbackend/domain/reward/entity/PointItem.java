@@ -172,4 +172,5 @@ public class PointItem extends BaseAuditEntity {
         }
         return itemType != null ? itemType.getDurationDays() : null;
     }
+
 }

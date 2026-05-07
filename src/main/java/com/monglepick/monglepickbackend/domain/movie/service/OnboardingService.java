@@ -9,6 +9,7 @@ import com.monglepick.monglepickbackend.domain.movie.repository.FavDirectorRepos
 import com.monglepick.monglepickbackend.domain.movie.repository.FavGenreRepository;
 import com.monglepick.monglepickbackend.domain.movie.repository.FavMovieRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -114,7 +115,7 @@ public class OnboardingService {
      * @param genreIds 저장할 장르 ID 목록
      */
     @Transactional
-    public void saveGenres(String userId, List<Long> genreIds) {
+    public List<UnlockedAchievementResponse> saveGenres(String userId, List<Long> genreIds) {
         favGenreRepository.deleteByUserId(userId);
         log.debug("선호 장르 기존 데이터 삭제 완료 - userId: {}", userId);
 
@@ -138,7 +139,7 @@ public class OnboardingService {
 
         favGenreRepository.saveAll(entities);
         log.info("선호 장르 저장 완료 - userId: {}, 저장 건수: {}", userId, entities.size());
-        checkOnboardCompleteSafely(userId, "선호 장르");
+        return checkOnboardCompleteSafely(userId, "선호 장르");
     }
 
     /**
@@ -148,7 +149,7 @@ public class OnboardingService {
      * @param movieIds 저장할 영화 ID 목록
      */
     @Transactional
-    public void saveMovies(String userId, List<String> movieIds) {
+    public List<UnlockedAchievementResponse> saveMovies(String userId, List<String> movieIds) {
         favMovieRepository.deleteByUserId(userId);
         log.debug("인생 영화 기존 데이터 삭제 완료 - userId: {}", userId);
 
@@ -173,7 +174,7 @@ public class OnboardingService {
 
         favMovieRepository.saveAll(entities);
         log.info("인생 영화 저장 완료 - userId: {}, 저장 건수: {}", userId, entities.size());
-        checkOnboardCompleteSafely(userId, "인생 영화");
+        return checkOnboardCompleteSafely(userId, "인생 영화");
     }
 
     /**
@@ -240,12 +241,15 @@ public class OnboardingService {
         );
     }
 
-    private void checkOnboardCompleteSafely(String userId, String source) {
+    private List<UnlockedAchievementResponse> checkOnboardCompleteSafely(String userId, String source) {
         try {
-            achievementService.checkOnboardComplete(userId);
+            return achievementService.checkOnboardComplete(userId)
+                    .map(List::of)
+                    .orElseGet(List::of);
         } catch (Exception e) {
             log.warn("{} 저장 후 온보딩 업적 체크 실패 (저장은 정상 처리): userId={}, error={}",
                     source, userId, e.getMessage());
+            return List.of();
         }
     }
 

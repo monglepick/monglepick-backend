@@ -18,6 +18,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.repository.UserAchievemen
 import com.monglepick.monglepickbackend.domain.roadmap.repository.UserCourseProgressRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.search.repository.WorldcupResultRepository;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.Nullable;
@@ -137,17 +138,17 @@ public class AchievementService {
      * @param achievementKey  업적 식별 키 (단일 달성형이면 "default", 코스별이면 courseId 등)
      */
     @Transactional
-    public void checkAndGrant(String userId, String achievementCode, String achievementKey) {
+    public Optional<UnlockedAchievementResponse> checkAndGrant(String userId, String achievementCode, String achievementKey) {
         // ① AchievementType 마스터 조회 — 없거나 비활성이면 처리 중단
         Optional<AchievementType> typeOpt = achievementTypeRepo.findByAchievementCode(achievementCode);
         if (typeOpt.isEmpty()) {
             log.warn("업적 코드에 해당하는 마스터 없음 (건너뜀): achievementCode={}, userId={}", achievementCode, userId);
-            return;
+            return Optional.empty();
         }
         AchievementType type = typeOpt.get();
         if (Boolean.FALSE.equals(type.getIsActive())) {
             log.debug("비활성 업적 코드 (건너뜀): achievementCode={}, userId={}", achievementCode, userId);
-            return;
+            return Optional.empty();
         }
 
         // ② 중복 달성 여부 확인 — (user_id, achievementType, achievementKey) UNIQUE 제약에 대응
@@ -158,7 +159,7 @@ public class AchievementService {
         if (alreadyAchieved) {
             log.debug("이미 달성한 업적 (건너뜀): userId={}, achievementCode={}, achievementKey={}",
                     userId, achievementCode, achievementKey);
-            return;
+            return Optional.empty();
         }
 
         // ③ UserAchievement INSERT — 달성 기록 저장
@@ -184,6 +185,8 @@ public class AchievementService {
                     type.getRewardPoints()
             );
         }
+
+        return Optional.of(UnlockedAchievementResponse.from(type));
     }
 
     /**
@@ -209,8 +212,8 @@ public class AchievementService {
      * PLAYLIST_SHARE 게시글 작성 시에는 {@code playlist_share_first}도 함께 확인한다.</p>
      */
     @Transactional
-    public void checkPostAchievements(String userId, Post.Category category) {
-        checkEligibleCountAchievements(userId, type -> {
+    public List<UnlockedAchievementResponse> checkPostAchievements(String userId, Post.Category category) {
+        return checkEligibleCountAchievements(userId, type -> {
             String code = normalizeAchievementCode(type.getAchievementCode());
             return code != null && (code.startsWith("post_count_")
                     || (category == Post.Category.PLAYLIST_SHARE && "playlist_share_first".equals(code)));
@@ -224,8 +227,8 @@ public class AchievementService {
      * requiredCount와 사용자의 유효 댓글 수를 비교해 자동 달성 처리한다.</p>
      */
     @Transactional
-    public void checkCommentAchievements(String userId) {
-        checkEligibleCountAchievements(userId, type -> {
+    public List<UnlockedAchievementResponse> checkCommentAchievements(String userId) {
+        return checkEligibleCountAchievements(userId, type -> {
             String code = normalizeAchievementCode(type.getAchievementCode());
             return code != null && code.startsWith("comment_count_");
         });
@@ -238,11 +241,12 @@ public class AchievementService {
      * 인생 영화 선택 3개 체크포인트가 모두 충족되었을 때 최초 1회 달성된다.</p>
      */
     @Transactional
-    public void checkOnboardComplete(String userId) {
+    public Optional<UnlockedAchievementResponse> checkOnboardComplete(String userId) {
         int progress = computeOnboardCompleteProgress(userId, 3);
         if (progress >= 3) {
-            checkAndGrant(userId, "onboard_complete", "default");
+            return checkAndGrant(userId, "onboard_complete", "default");
         }
+        return Optional.empty();
     }
 
     /**
@@ -315,16 +319,15 @@ public class AchievementService {
         List<UserAchievement> userAchievements = userAchievementRepo.findAllByUserId(userId);
         Map<Long, UserAchievement> achievedMap = new LinkedHashMap<>();
         for (UserAchievement ua : userAchievements) {
-            if (ua == null || ua.getAchievementType() == null
-                    || ua.getAchievementType().getAchievementTypeId() == null) {
+            Long achievedTypeId = resolveAchievementTypeIdSafely(userId, ua);
+            if (achievedTypeId == null) {
                 log.warn("업적 달성 이력의 마스터 연결 누락 (조회 제외): userId={}, userAchievementId={}, legacyCode={}",
                         userId,
                         ua != null ? ua.getUserAchievementId() : null,
                         ua != null ? ua.getAchievementTypeCode() : null);
                 continue;
             }
-            Long typeId = ua.getAchievementType().getAchievementTypeId();
-            achievedMap.merge(typeId, ua, (existing, incoming) -> {
+            achievedMap.merge(achievedTypeId, ua, (existing, incoming) -> {
                 if (incoming.getAchievedAt() != null && (existing.getAchievedAt() == null
                         || incoming.getAchievedAt().isAfter(existing.getAchievedAt()))) {
                     return incoming;
@@ -354,7 +357,13 @@ public class AchievementService {
                 }
             } else {
                 // ③ 실시간 진행률 계산 (achievementCode별 도메인 데이터 조회)
-                progress = computeRealProgress(userId, type.getAchievementCode(), maxProgress);
+                try {
+                    progress = computeRealProgress(userId, type.getAchievementCode(), maxProgress);
+                } catch (Exception e) {
+                    log.error("업적 진행률 계산 실패 (해당 업적은 0으로 응답): userId={}, code={}, error={}",
+                            userId, type.getAchievementCode(), e.getMessage(), e);
+                    progress = 0;
+                }
 
                 // ④ 기존 데이터로 이미 달성 조건 충족 → 소급 달성 처리
                 if (progress >= maxProgress) {
@@ -388,6 +397,20 @@ public class AchievementService {
         }
 
         return result;
+    }
+
+    private Long resolveAchievementTypeIdSafely(String userId, UserAchievement ua) {
+        if (ua == null) {
+            return null;
+        }
+        try {
+            AchievementType type = ua.getAchievementType();
+            return type != null ? type.getAchievementTypeId() : null;
+        } catch (RuntimeException e) {
+            log.warn("업적 달성 이력의 마스터 조회 실패 (조회 제외): userId={}, userAchievementId={}, legacyCode={}, error={}",
+                    userId, ua.getUserAchievementId(), ua.getAchievementTypeCode(), e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -473,18 +496,30 @@ public class AchievementService {
         );
     }
 
-    private void checkEligibleCountAchievements(String userId, java.util.function.Predicate<AchievementType> filter) {
+    private List<UnlockedAchievementResponse> checkEligibleCountAchievements(
+            String userId,
+            java.util.function.Predicate<AchievementType> filter
+    ) {
+        List<UnlockedAchievementResponse> unlockedAchievements = new ArrayList<>();
         List<AchievementType> types = achievementTypeRepo.findByIsActiveTrue();
         for (AchievementType type : types) {
             if (!filter.test(type)) {
                 continue;
             }
             int maxProgress = resolveMaxProgress(type);
-            int progress = computeRealProgress(userId, type.getAchievementCode(), maxProgress);
+            int progress;
+            try {
+                progress = computeRealProgress(userId, type.getAchievementCode(), maxProgress);
+            } catch (Exception e) {
+                log.error("업적 진행률 계산 실패 (달성 체크 건너뜀): userId={}, code={}, error={}",
+                        userId, type.getAchievementCode(), e.getMessage(), e);
+                continue;
+            }
             if (progress >= maxProgress) {
-                autoGrantIfEligible(userId, type);
+                grantIfEligible(userId, type, "default").ifPresent(unlockedAchievements::add);
             }
         }
+        return unlockedAchievements;
     }
 
     private int resolveMaxProgress(AchievementType type) {
@@ -558,11 +593,17 @@ public class AchievementService {
     }
 
     private LocalDateTime autoGrantIfEligible(String userId, AchievementType type) {
+        return grantIfEligible(userId, type, "default")
+                .map(ignored -> LocalDateTime.now())
+                .orElseGet(LocalDateTime::now);
+    }
+
+    private Optional<UnlockedAchievementResponse> grantIfEligible(String userId, AchievementType type, String achievementKey) {
         boolean alreadyAchieved = userAchievementRepo
-                .findByUserIdAndAchievementTypeAndAchievementKey(userId, type, "default")
+                .findByUserIdAndAchievementTypeAndAchievementKey(userId, type, achievementKey)
                 .isPresent();
         if (alreadyAchieved) {
-            return LocalDateTime.now();
+            return Optional.empty();
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -570,7 +611,7 @@ public class AchievementService {
                 .userId(userId)
                 .achievementTypeCode(type.getAchievementCode())
                 .achievementType(type)
-                .achievementKey("default")
+                .achievementKey(achievementKey)
                 .achievedAt(now)
                 .build();
         userAchievementRepo.save(achievement);
@@ -589,6 +630,6 @@ public class AchievementService {
                         userId, type.getAchievementCode(), e.getMessage());
             }
         }
-        return now;
+        return Optional.of(UnlockedAchievementResponse.from(type));
     }
 }

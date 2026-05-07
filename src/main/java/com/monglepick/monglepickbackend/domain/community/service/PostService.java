@@ -16,7 +16,9 @@ import com.monglepick.monglepickbackend.domain.reward.entity.UserItem;
 import com.monglepick.monglepickbackend.domain.reward.repository.UserItemRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
 import com.monglepick.monglepickbackend.domain.roadmap.service.AchievementService;
+import com.monglepick.monglepickbackend.global.dto.AchievementAwareResponse;
 import com.monglepick.monglepickbackend.global.dto.LikeToggleResponse;
+import com.monglepick.monglepickbackend.global.dto.UnlockedAchievementResponse;
 import com.monglepick.monglepickbackend.global.exception.BusinessException;
 import com.monglepick.monglepickbackend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -156,7 +158,7 @@ public class PostService {
      * </ul>
      */
     @Transactional
-    public PostResponse createPost(PostCreateRequest request, String userId) {
+    public AchievementAwareResponse<PostResponse> createPost(PostCreateRequest request, String userId) {
         // 사용자 존재 검증은 JWT 인증 단계에서 이미 처리됨 (§15.4)
         Post.Category category = request.category();
 
@@ -170,7 +172,7 @@ public class PostService {
             Post existing = postMapper.findByPlaylistId(playlistId);
             if (existing != null) {
                 log.info("PLAYLIST_SHARE 중복 공유 방지 — 기존 postId={} 반환", existing.getPostId());
-                return PostResponse.from(existing, null);
+                return AchievementAwareResponse.of(PostResponse.from(existing, null));
             }
 
             // 공유 시점 플레이리스트 정보 조회 — 스냅샷 캡처용
@@ -226,15 +228,16 @@ public class PostService {
         }
 
         // CSV/관리자 등록 기반 커뮤니티 업적 — 게시글 수, 플레이리스트 첫 공유 등
+        List<UnlockedAchievementResponse> unlockedAchievements = List.of();
         try {
-            achievementService.checkPostAchievements(userId, category);
+            unlockedAchievements = achievementService.checkPostAchievements(userId, category);
         } catch (Exception e) {
             log.warn("게시글 업적 체크 실패 (게시글 작성은 정상 처리): userId={}, category={}, error={}",
                     userId, category, e.getMessage());
         }
 
         Integer rewardPoints = rewardResult.earned() ? rewardResult.points() : null;
-        return PostResponse.from(post, rewardPoints);
+        return AchievementAwareResponse.of(PostResponse.from(post, rewardPoints), unlockedAchievements);
     }
 
     /**
