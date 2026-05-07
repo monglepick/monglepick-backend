@@ -51,16 +51,20 @@ public class QuizDto {
     public record QuizResponse(
             Long quizId,
             String movieId,
+            String movieTitle,
+            String posterPath,
             String question,
             List<String> options,
             int rewardPoint,
             Boolean solved
     ) {
         /** 비로그인 상태용 — solved=null */
-        public static QuizResponse from(Quiz quiz, List<String> options) {
+        public static QuizResponse from(Quiz quiz, List<String> options, String movieTitle, String posterPath) {
             return new QuizResponse(
                     quiz.getQuizId(),
                     quiz.getMovieId(),
+                    movieTitle,
+                    posterPath,
                     quiz.getQuestion(),
                     options,
                     quiz.getRewardPoint(),
@@ -69,10 +73,12 @@ public class QuizDto {
         }
 
         /** 로그인 상태용 — solved=true/false */
-        public static QuizResponse from(Quiz quiz, List<String> options, boolean solved) {
+        public static QuizResponse from(Quiz quiz, List<String> options, String movieTitle, String posterPath, boolean solved) {
             return new QuizResponse(
                     quiz.getQuizId(),
                     quiz.getMovieId(),
+                    movieTitle,
+                    posterPath,
                     quiz.getQuestion(),
                     options,
                     quiz.getRewardPoint(),

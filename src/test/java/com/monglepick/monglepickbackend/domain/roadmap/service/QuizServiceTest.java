@@ -7,6 +7,7 @@ import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitRequest
 import com.monglepick.monglepickbackend.domain.roadmap.dto.QuizDto.SubmitResponse;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.Quiz;
 import com.monglepick.monglepickbackend.domain.roadmap.entity.QuizParticipation;
+import com.monglepick.monglepickbackend.domain.movie.repository.MovieRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizParticipationRepository;
 import com.monglepick.monglepickbackend.domain.roadmap.repository.QuizRepository;
 import com.monglepick.monglepickbackend.domain.reward.service.RewardService;
@@ -64,6 +65,7 @@ class QuizServiceTest {
     @Mock private QuizParticipationRepository participationRepository;
     @Mock private RewardService rewardService;
     @Mock private AchievementService achievementService;
+    @Mock private MovieRepository movieRepository;
 
     @InjectMocks private QuizService quizService;
 
